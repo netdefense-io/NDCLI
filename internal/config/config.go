@@ -348,14 +348,25 @@ func createDefaultConfigFile() error {
 	return nil
 }
 
-// CreateDefaultConfig creates a default configuration file
+// CreateDefaultConfig resets the configuration file to defaults, overwriting any
+// existing values. Save() deliberately preserves manual settings, so reset must
+// bypass it and write a fresh defaults file.
 func CreateDefaultConfig() error {
-	// Ensure configFilePath is set
 	if configFilePath == "" {
 		configFilePath = filepath.Join(xdg.ConfigHome, "ndcli", "config.yaml")
 	}
-	setDefaults()
-	return Save()
+	if err := createDefaultConfigFile(); err != nil {
+		return err
+	}
+	// Re-read the fresh file so in-memory viper and cfg reflect defaults.
+	if err := viper.ReadInConfig(); err != nil {
+		return fmt.Errorf("error reading reset config: %w", err)
+	}
+	cfg = &Config{}
+	if err := viper.Unmarshal(cfg); err != nil {
+		return fmt.Errorf("error parsing reset config: %w", err)
+	}
+	return nil
 }
 
 // ConfigExists checks if the config file exists

@@ -6,15 +6,17 @@ bin/
 *.so
 *.dylib
 
-# Test
+# Test binary
 *.test
+
+# Output of go coverage
 *.out
 
 # Go workspace
 go.work
 go.work.sum
 
-# Vendor
+# Dependency directories
 vendor/
 
 # IDE
@@ -24,10 +26,15 @@ vendor/
 *.swo
 *~
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
 # Debug
 debug
 __debug_bin*
+
+# Local environment
+.env
+.env.local
+local-only/
