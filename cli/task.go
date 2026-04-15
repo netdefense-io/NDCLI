@@ -47,10 +47,10 @@ var taskCreateCmd = &cobra.Command{
 	Long: `Create a task for a device.
 
 Available task types:
-  PING      Check device connectivity
+  PING      Ping a target IP or host from the device (requires --target)
   SHUTDOWN  Shutdown the device
   REBOOT    Reboot the device
-  RESTART   Restart the device service`,
+  RESTART   Restart the NDAgent service on the device`,
 	Args: cobra.ExactArgs(2),
 	RunE: runTaskCreate,
 }
@@ -71,6 +71,10 @@ func init() {
 	taskListCmd.Flags().String("sort-by", "created_at:desc", "Sort field and direction")
 	taskListCmd.Flags().Int("page", 1, "Page number")
 	taskListCmd.Flags().Int("per-page", 30, "Items per page (max 100)")
+
+	// Create flags
+	taskCreateCmd.Flags().String("target", "", "Target IP or hostname (required for PING)")
+	taskCreateCmd.Flags().Int("count", 4, "Number of ping packets (PING only)")
 }
 
 func runTaskList(cmd *cobra.Command, args []string) error {
@@ -198,13 +202,28 @@ func runTaskCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid task type: %s. Valid types: PING, SHUTDOWN, REBOOT, RESTART", args[1])
 	}
 
+	// Build task-specific payload
+	var body interface{}
+	if taskType == "PING" {
+		target, _ := cmd.Flags().GetString("target")
+		if target == "" {
+			return fmt.Errorf("PING requires --target <ip_or_host>")
+		}
+		payload := map[string]interface{}{"target": target}
+		if cmd.Flags().Changed("count") {
+			count, _ := cmd.Flags().GetInt("count")
+			payload["count"] = count
+		}
+		body = map[string]interface{}{"payload": payload}
+	}
+
 	// Build query parameters
 	params := url.Values{}
 	params.Set("task_type", taskType)
 
 	ctx := context.Background()
 	endpoint := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/task?%s", org, deviceName, params.Encode())
-	resp, err := apiClient.Post(ctx, endpoint, nil)
+	resp, err := apiClient.Post(ctx, endpoint, body)
 	if err != nil {
 		return err
 	}
