@@ -714,8 +714,13 @@ func (f *TableFormatter) FormatSyncApply(result *models.SyncApplyResponse) error
 			for _, c := range e.Conflicts {
 				fmt.Printf("      %s\n", c.Message)
 			}
-			// Show undefined variables
-			if len(e.UndefinedVariables) > 0 {
+			// Show undefined variables, grouped by snippet when the server tells us which
+			// snippet each variable came from (newer NDManager); fall back to a flat list.
+			if len(e.UndefinedVariablesBySnippet) > 0 {
+				for _, snippetName := range sortedSnippetNames(e.UndefinedVariablesBySnippet) {
+					fmt.Printf("      Snippet %q: %s\n", snippetName, formatVarList(e.UndefinedVariablesBySnippet[snippetName]))
+				}
+			} else if len(e.UndefinedVariables) > 0 {
 				fmt.Printf("      Undefined: %s\n", formatVarList(e.UndefinedVariables))
 			}
 		}

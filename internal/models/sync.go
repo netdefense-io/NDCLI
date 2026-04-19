@@ -52,11 +52,12 @@ type SyncErrorConflict struct {
 
 // SyncError represents a detailed error for a device sync operation
 type SyncError struct {
-	DeviceName         string              `json:"device_name"`
-	Error              string              `json:"error"`
-	Code               string              `json:"code,omitempty"`
-	Conflicts          []SyncErrorConflict `json:"conflicts,omitempty"`
-	UndefinedVariables []string            `json:"undefined_variables,omitempty"`
+	DeviceName                  string              `json:"device_name"`
+	Error                       string              `json:"error"`
+	Code                        string              `json:"code,omitempty"`
+	Conflicts                   []SyncErrorConflict `json:"conflicts,omitempty"`
+	UndefinedVariables          []string            `json:"undefined_variables,omitempty"`
+	UndefinedVariablesBySnippet map[string][]string `json:"undefined_variables_by_snippet,omitempty"`
 }
 
 // SyncApplyResponse represents the response from POST /api/v1/sync

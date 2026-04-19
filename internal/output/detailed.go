@@ -724,7 +724,11 @@ func (f *DetailedFormatter) FormatSyncApply(result *models.SyncApplyResponse) er
 			for _, c := range e.Conflicts {
 				fmt.Fprintf(f.Writer, "      %s\n", c.Message)
 			}
-			if len(e.UndefinedVariables) > 0 {
+			if len(e.UndefinedVariablesBySnippet) > 0 {
+				for _, snippetName := range sortedSnippetNames(e.UndefinedVariablesBySnippet) {
+					fmt.Fprintf(f.Writer, "      Snippet %q: %s\n", snippetName, formatVarListDetailed(e.UndefinedVariablesBySnippet[snippetName]))
+				}
+			} else if len(e.UndefinedVariables) > 0 {
 				fmt.Fprintf(f.Writer, "      Undefined: %s\n", formatVarListDetailed(e.UndefinedVariables))
 			}
 		}

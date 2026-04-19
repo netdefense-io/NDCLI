@@ -4,9 +4,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
+
+// sortedSnippetNames returns the snippet-name keys of an undefined-variables-by-snippet
+// map in deterministic order, for consistent rendering across table/simple/detailed.
+func sortedSnippetNames(m map[string][]string) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 // Format represents the output format type
 type Format string
