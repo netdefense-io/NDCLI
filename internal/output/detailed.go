@@ -180,20 +180,15 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Completed", FormatTimestamp(task.CompletedAt.Time))
 	}
 
-	// Message
+	// Message — wrap long lines so the full text is readable inside the box.
+	// ContentLine reserves 5 chars of framing (│ + 2 spaces + 1 space + │), so
+	// the usable content width is width-5.
 	if task.Message != "" {
 		fmt.Fprintln(f.Writer)
 		sectionBox := NewSharpBox(width)
 		fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Message"))
-		// Split message into lines and display each
-		lines := strings.Split(task.Message, "\n")
-		for _, line := range lines {
-			if len(line) > width-4 {
-				// Truncate long lines
-				fmt.Fprintln(f.Writer, sectionBox.ContentLine(line[:width-7]+"..."))
-			} else {
-				fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
-			}
+		for _, line := range wrapToWidth(task.Message, width-5) {
+			fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
 		}
 		fmt.Fprintln(f.Writer, sectionBox.BottomLine())
 	}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
@@ -18,6 +19,51 @@ func sortedSnippetNames(m map[string][]string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// wrapToWidth splits s into lines no longer than width chars, preferring
+// space boundaries. Embedded newlines are preserved; tokens longer than
+// width are hard-split. Used to display multi-line messages inside fixed-width
+// boxes without truncating (see detailed.FormatTask — NDCLI-go#53).
+func wrapToWidth(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		cur := ""
+		for _, w := range strings.Fields(line) {
+			if len(w) > width {
+				if cur != "" {
+					out = append(out, cur)
+					cur = ""
+				}
+				for len(w) > width {
+					out = append(out, w[:width])
+					w = w[width:]
+				}
+				cur = w
+				continue
+			}
+			switch {
+			case cur == "":
+				cur = w
+			case len(cur)+1+len(w) <= width:
+				cur = cur + " " + w
+			default:
+				out = append(out, cur)
+				cur = w
+			}
+		}
+		if cur != "" {
+			out = append(out, cur)
+		}
+	}
+	return out
 }
 
 // Format represents the output format type
