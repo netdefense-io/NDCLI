@@ -1044,9 +1044,14 @@ func (f *DetailedFormatter) FormatVpnNetworks(networks []models.VpnNetwork, tota
 		if n.AutoConnectHubs {
 			autoHubs = "Yes"
 		}
+		autoFW := "No"
+		if n.AutoFirewallRules {
+			autoFW = "Yes"
+		}
 		ColorHeader.Fprintf(f.Writer, "--- %s ---\n", n.Name)
 		f.printLabelValue("CIDR", n.OverlayCIDRv4)
 		f.printLabelValue("Auto-Hubs", autoHubs)
+		f.printLabelValue("Auto-FW Rules", autoFW)
 		f.printLabelValue("Listen Port", fmt.Sprintf("%d", n.ListenPortDefault))
 		f.printLabelValue("Members", fmt.Sprintf("%d", n.MemberCount))
 		f.printLabelValue("Overrides", fmt.Sprintf("%d", n.LinkCount))
@@ -1117,9 +1122,14 @@ func (f *DetailedFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 	if network.AutoConnectHubs {
 		autoHubs = "Yes"
 	}
+	autoFW := "No"
+	if network.AutoFirewallRules {
+		autoFW = "Yes"
+	}
 	fmt.Fprintf(f.Writer, "  %-14s %s", "Auto-Hubs", autoHubs)
 	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(autoHubs)))
 	fmt.Fprintf(f.Writer, "%-14s %d\n", "Listen Port", network.ListenPortDefault)
+	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Auto-FW Rules", autoFW)
 
 	mtu := "-"
 	if network.MTUDefault != nil {

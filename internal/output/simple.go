@@ -547,7 +547,11 @@ func (f *SimpleFormatter) FormatVpnNetworks(networks []models.VpnNetwork, total 
 		if n.AutoConnectHubs {
 			autoHubs = " [auto-hubs]"
 		}
-		fmt.Fprintf(f.Writer, "• %s (%s) - %d members, %d overrides%s\n", n.Name, n.OverlayCIDRv4, n.MemberCount, n.LinkCount, autoHubs)
+		autoFW := ""
+		if n.AutoFirewallRules {
+			autoFW = " [auto-fw]"
+		}
+		fmt.Fprintf(f.Writer, "• %s (%s) - %d members, %d overrides%s%s\n", n.Name, n.OverlayCIDRv4, n.MemberCount, n.LinkCount, autoHubs, autoFW)
 	}
 	if quota != nil {
 		fmt.Fprintf(f.Writer, "\n%s\n", formatQuotaFooterSimple("VPN networks", quota))
@@ -598,7 +602,12 @@ func (f *SimpleFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 	if network.AutoConnectHubs {
 		autoHubs = "Yes"
 	}
+	autoFW := "No"
+	if network.AutoFirewallRules {
+		autoFW = "Yes"
+	}
 	fmt.Fprintf(f.Writer, "  Auto-Hubs: %s\n", autoHubs)
+	fmt.Fprintf(f.Writer, "  Auto-FW Rules: %s\n", autoFW)
 	fmt.Fprintf(f.Writer, "  Listen Port: %d\n", network.ListenPortDefault)
 	if network.MTUDefault != nil {
 		fmt.Fprintf(f.Writer, "  MTU: %d\n", *network.MTUDefault)

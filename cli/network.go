@@ -99,6 +99,7 @@ func init() {
 	networkCreateCmd.Flags().String("cidr", "", "Overlay CIDR v4 (required, e.g. 10.100.0.0/24)")
 	networkCreateCmd.MarkFlagRequired("cidr")
 	networkCreateCmd.Flags().Bool("auto-connect-hubs", false, "Auto-create links between HUB members")
+	networkCreateCmd.Flags().Bool("auto-firewall-rules", false, "Auto-generate OPNsense pass rules on the wireguard interface group so peers can reach each other's published subnets")
 	networkCreateCmd.Flags().Int("listen-port", 0, "Default WireGuard listen port (default: 51820)")
 	networkCreateCmd.Flags().Int("mtu", 0, "Default MTU (1280-9000)")
 	networkCreateCmd.Flags().Int("keepalive", 0, "Default keepalive interval (1-65535)")
@@ -106,6 +107,7 @@ func init() {
 	// Update flags
 	networkUpdateCmd.Flags().String("name", "", "New network name")
 	networkUpdateCmd.Flags().Bool("auto-connect-hubs", false, "Auto-create links between HUB members")
+	networkUpdateCmd.Flags().Bool("auto-firewall-rules", false, "Toggle auto-generated pass rules on the wireguard interface group")
 	networkUpdateCmd.Flags().Int("listen-port", 0, "Default WireGuard listen port")
 	networkUpdateCmd.Flags().Int("mtu", 0, "Default MTU (0 to clear)")
 	networkUpdateCmd.Flags().Int("keepalive", 0, "Default keepalive interval (0 to clear)")
@@ -161,6 +163,10 @@ func runNetworkCreate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("auto-connect-hubs") {
 		v, _ := cmd.Flags().GetBool("auto-connect-hubs")
 		payload["auto_connect_hubs"] = v
+	}
+	if cmd.Flags().Changed("auto-firewall-rules") {
+		v, _ := cmd.Flags().GetBool("auto-firewall-rules")
+		payload["auto_firewall_rules"] = v
 	}
 	if cmd.Flags().Changed("listen-port") {
 		v, _ := cmd.Flags().GetInt("listen-port")
@@ -224,6 +230,10 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("auto-connect-hubs") {
 		v, _ := cmd.Flags().GetBool("auto-connect-hubs")
 		payload["auto_connect_hubs"] = v
+	}
+	if cmd.Flags().Changed("auto-firewall-rules") {
+		v, _ := cmd.Flags().GetBool("auto-firewall-rules")
+		payload["auto_firewall_rules"] = v
 	}
 	if cmd.Flags().Changed("listen-port") {
 		v, _ := cmd.Flags().GetInt("listen-port")

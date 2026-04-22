@@ -5,6 +5,7 @@ type VpnNetwork struct {
 	Name              string       `json:"name"`
 	OverlayCIDRv4     string       `json:"overlay_cidr_v4"`
 	AutoConnectHubs   bool         `json:"auto_connect_hubs"`
+	AutoFirewallRules bool         `json:"auto_firewall_rules"`
 	ListenPortDefault int          `json:"listen_port_default"`
 	MTUDefault        *int         `json:"mtu_default"`
 	KeepaliveDefault  *int         `json:"keepalive_default"`

@@ -1028,10 +1028,15 @@ func (f *TableFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 	if network.AutoConnectHubs {
 		autoHubs = "Yes"
 	}
+	autoFW := "No"
+	if network.AutoFirewallRules {
+		autoFW = "Yes"
+	}
 
 	fmt.Printf("Name:           %s\n", network.Name)
 	fmt.Printf("Overlay CIDR:   %s\n", network.OverlayCIDRv4)
 	fmt.Printf("Auto-Hubs:      %s\n", autoHubs)
+	fmt.Printf("Auto-FW Rules:  %s\n", autoFW)
 	fmt.Printf("Listen Port:    %d\n", network.ListenPortDefault)
 	if network.MTUDefault != nil {
 		fmt.Printf("MTU:            %d\n", *network.MTUDefault)
