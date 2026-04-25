@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,29 +252,41 @@ func IsKeyringAvailable() bool {
 // GetStorage returns the appropriate storage backend based on config and availability
 func GetStorage() Storage {
 	cfg := config.Get()
+	return pickStorage(cfg.Auth.Storage, cfg.Auth.Path, IsKeyringAvailable(), os.Stderr)
+}
 
-	// Check if user explicitly configured storage type
-	storageType := cfg.Auth.Storage
+// pickStorage selects a storage backend and emits any operator-facing
+// warnings on warn. Pulled out of GetStorage so the decision logic is
+// testable without touching the real keyring or process stderr.
+//
+// Cases:
+//   - "" (unset)         -> treated as "keyring"
+//   - "keyring", avail   -> keyring (no warning)
+//   - "keyring", !avail  -> file, with warning (refresh tokens land on disk)
+//   - "file"             -> file (user opted in; no warning)
+//   - anything else      -> file, with warning (unknown type, treated as "file")
+func pickStorage(storageType, path string, keyringAvailable bool, warn io.Writer) Storage {
 	if storageType == "" {
-		storageType = "keyring" // Default to keyring
+		storageType = "keyring"
 	}
 
 	switch storageType {
 	case "file":
-		// User explicitly wants file storage
-		return NewFileStorage(cfg.Auth.Path)
+		// User explicitly opted into file storage; no warning.
+		return NewFileStorage(path)
 	case "keyring":
-		// Try keyring, fall back to file if unavailable
-		if IsKeyringAvailable() {
+		if keyringAvailable {
 			return NewKeyringStorage()
 		}
-		// Keyring not available, fall back to file with warning
-		fmt.Fprintf(os.Stderr, "Warning: system keyring is not available; credentials will be stored in a plaintext file.\n")
-		fmt.Fprintf(os.Stderr, "  Set 'auth.storage: file' in config to suppress this warning.\n")
-		return NewFileStorage(cfg.Auth.Path)
+		fmt.Fprintln(warn, "Warning: system keyring is not available; credentials will be stored in a plaintext file.")
+		fmt.Fprintln(warn, "  This is risky on headless servers and CI runners. Either:")
+		fmt.Fprintln(warn, "    - install/unlock the system keyring (libsecret on Linux, Keychain on macOS), or")
+		fmt.Fprintln(warn, "    - set 'auth.storage: file' in config to acknowledge plaintext storage and suppress this warning.")
+		return NewFileStorage(path)
 	default:
-		// Unknown type, default to file
-		return NewFileStorage(cfg.Auth.Path)
+		fmt.Fprintf(warn, "Warning: unknown auth.storage value %q; falling back to plaintext file storage.\n", storageType)
+		fmt.Fprintln(warn, "  Set 'auth.storage' to 'keyring' or 'file' to silence this warning.")
+		return NewFileStorage(path)
 	}
 }
 
