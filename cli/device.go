@@ -74,6 +74,33 @@ var deviceConnectCmd = &cobra.Command{
 	RunE:              runDeviceConnect,
 }
 
+var deviceRebindTokenCmd = &cobra.Command{
+	Use:               "rebind-token [device]",
+	Short:             "Issue a one-time re-bind token for the device's signing key",
+	Long: `Issue a one-time Re-bind Token authorising a fresh signing-key binding for a device.
+
+Use this when:
+  • A device's signing privkey is suspected leaked (key rotation).
+  • The device hardware was replaced and the new install needs to bind a fresh keypair.
+  • The agent's persistent state was lost and the per-device replay counter must reset.
+  • You're cutting over an existing v=1 device to v=2.
+
+The command atomically clears the device's bound pubkey, resets its response sequence
+counter, flips status to UNREGISTERED, and stores a SHA-256 hash of the issued token
+(default 24h validity, capped at 7d). The raw token is printed once — there is no way
+to recover it later.
+
+Operator workflow:
+  1. Run this command to receive the raw token.
+  2. Paste it into the device's OPNsense plugin under "Re-bind Token" (Show Advanced).
+  3. The agent automatically rotates its keypair and re-registers with the new pubkey.
+  4. Re-approve the device with 'ndcli device approve <name>'.
+  5. Operator clears the GUI Re-bind Token field after the device shows ENABLED.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeDevices,
+	RunE:              runDeviceRebindToken,
+}
+
 func init() {
 	deviceCmd.AddCommand(deviceListCmd)
 	deviceCmd.AddCommand(deviceApproveCmd)
@@ -82,11 +109,15 @@ func init() {
 	deviceCmd.AddCommand(deviceDescribeCmd)
 	deviceCmd.AddCommand(deviceApproveAllCmd)
 	deviceCmd.AddCommand(deviceConnectCmd)
+	deviceCmd.AddCommand(deviceRebindTokenCmd)
 
 	// Connect flags
 	deviceConnectCmd.Flags().Duration("timeout", 5*time.Minute, "Connection timeout")
 	deviceConnectCmd.Flags().Int("webadmin-port", 0, "Local port for webadmin tunnel (default: auto-assign)")
 	deviceConnectCmd.Flags().Bool("no-webadmin", false, "Disable webadmin tunnel")
+
+	// Rebind-token flags
+	deviceRebindTokenCmd.Flags().Duration("ttl", 24*time.Hour, "Token validity window (max 7d)")
 
 	// List flags
 	deviceListCmd.Flags().String("status", "", "Filter by status (PENDING, ENABLED, DISABLED)")
@@ -452,4 +483,64 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 
 		time.Sleep(pollInterval)
 	}
+}
+
+// rebindTokenResponse mirrors the JSON returned by NDManager's
+// /devices/{name}/issue-rebind-token endpoint.
+type rebindTokenResponse struct {
+	BootstrapToken string `json:"bootstrap_token"`
+	ExpiresAt      string `json:"expires_at"`
+	Message        string `json:"message"`
+}
+
+func runDeviceRebindToken(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	deviceName := args[0]
+	ttl, _ := cmd.Flags().GetDuration("ttl")
+	if ttl <= 0 {
+		return fmt.Errorf("--ttl must be positive")
+	}
+
+	body := map[string]int{"ttl_seconds": int(ttl.Seconds())}
+
+	ctx := context.Background()
+	resp, err := apiClient.Post(
+		ctx,
+		fmt.Sprintf("/api/v1/organizations/%s/devices/%s/issue-rebind-token", org, deviceName),
+		body,
+	)
+	if err != nil {
+		return err
+	}
+
+	var parsed rebindTokenResponse
+	if err := api.ParseResponse(resp, &parsed); err != nil {
+		return err
+	}
+
+	// JSON output: just the parsed body, machine-friendly.
+	if outputFmt == "json" {
+		out, _ := json.MarshalIndent(parsed, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+
+	color.Green("✓ Re-bind token issued for device: %s", deviceName)
+	fmt.Println()
+	color.Yellow("Token (single-use, store securely — printed only once):")
+	fmt.Printf("  %s\n", parsed.BootstrapToken)
+	fmt.Println()
+	color.Cyan("Expires:  %s", parsed.ExpiresAt)
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Printf("  1. On the device, open the OPNsense plugin's NetDefense settings page.\n")
+	fmt.Printf("  2. Toggle 'Show advanced fields'.\n")
+	fmt.Printf("  3. Paste the token into the 'Re-bind Token' field and Save.\n")
+	fmt.Printf("  4. The agent will rotate its keypair and re-register automatically.\n")
+	fmt.Printf("  5. Approve with: ndcli device approve %s\n", deviceName)
+	fmt.Printf("  6. Clear the OPNsense Re-bind Token GUI field once the device shows ENABLED.\n")
+
+	return nil
 }
