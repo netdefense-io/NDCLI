@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,6 +173,28 @@ func TestClearNonExistentFileSucceeds(t *testing.T) {
 
 	if err := fs.Clear(); err != nil {
 		t.Errorf("Clear of nonexistent file should succeed, got: %v", err)
+	}
+}
+
+func TestIsCredentialBlobTooBig(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"go-keyring pre-check", errors.New("data passed to Set was too big"), true},
+		{"go-keyring pre-check capitalised", errors.New("Data Passed To Set Was Too Big"), true},
+		{"wincred raw", errors.New("The stub received bad data."), true},
+		{"unrelated", errors.New("keyring is locked"), false},
+		{"empty", errors.New(""), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCredentialBlobTooBig(tc.err); got != tc.want {
+				t.Errorf("isCredentialBlobTooBig(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 

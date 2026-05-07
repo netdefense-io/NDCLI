@@ -37,7 +37,7 @@ func (tm *TokenManager) SaveTokens(tokens *models.TokenResponse, userInfo *model
 		CreatedAt:    time.Now(),
 	}
 
-	data, err := json.MarshalIndent(stored, "", "  ")
+	data, err := json.Marshal(stored)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tokens: %w", err)
 	}
@@ -164,7 +164,7 @@ func (tm *TokenManager) UpdateAccessToken(tokens *models.TokenResponse) error {
 		existing.IDToken = tokens.IDToken
 	}
 
-	data, err := json.MarshalIndent(existing, "", "  ")
+	data, err := json.Marshal(existing)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tokens: %w", err)
 	}
