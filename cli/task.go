@@ -47,10 +47,14 @@ var taskCreateCmd = &cobra.Command{
 	Long: `Create a task for a device.
 
 Available task types:
-  PING      Ping a target IP or host from the device (requires --target)
-  SHUTDOWN  Shutdown the device
-  REBOOT    Reboot the device
-  RESTART   Restart the NDAgent service on the device`,
+  PING            Ping a target IP or host from the device (requires --target)
+  SHUTDOWN        Shutdown the device
+  REBOOT          Reboot the device
+  RESTART         Restart the NDAgent service on the device
+  PLUGIN_INSTALL  (Re)install the NDAgent OPNsense plugin pkg on the device,
+                  optionally pinned to a specific semver via --version. The
+                  task closes COMPLETED when the agent reconnects with the
+                  expected version, or FAILED on mismatch / 15-min timeout.`,
 	Args: cobra.ExactArgs(2),
 	RunE: runTaskCreate,
 }
@@ -63,7 +67,7 @@ func init() {
 
 	// List flags
 	taskListCmd.Flags().String("status", "", "Filter by status: PENDING, SCHEDULED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED, EXPIRED")
-	taskListCmd.Flags().String("type", "", "Filter by task type: BACKUP, PING, PULL, REBOOT, RESTART, SHUTDOWN, SYNC")
+	taskListCmd.Flags().String("type", "", "Filter by task type: BACKUP, PING, PLUGIN_INSTALL, PULL, REBOOT, RESTART, SHUTDOWN, SYNC")
 	taskListCmd.Flags().String("device", "", "Filter by device name (regex)")
 	taskListCmd.Flags().Bool("expired", false, "Filter by expired status (true=expired only, false=not expired)")
 	taskListCmd.Flags().String("created-after", "", "Filter tasks created after (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
@@ -75,6 +79,7 @@ func init() {
 	// Create flags
 	taskCreateCmd.Flags().String("target", "", "Target IP or hostname (required for PING)")
 	taskCreateCmd.Flags().Int("count", 4, "Number of ping packets (PING only)")
+	taskCreateCmd.Flags().String("version", "", "Semver to pin the install to (PLUGIN_INSTALL only; empty = upgrade to latest in the device's installed channel)")
 }
 
 func runTaskList(cmd *cobra.Command, args []string) error {
@@ -193,13 +198,14 @@ func runTaskCreate(cmd *cobra.Command, args []string) error {
 
 	// Validate task type
 	validTypes := map[string]bool{
-		"PING":     true,
-		"SHUTDOWN": true,
-		"REBOOT":   true,
-		"RESTART":  true,
+		"PING":           true,
+		"SHUTDOWN":       true,
+		"REBOOT":         true,
+		"RESTART":        true,
+		"PLUGIN_INSTALL": true,
 	}
 	if !validTypes[taskType] {
-		return fmt.Errorf("invalid task type: %s. Valid types: PING, SHUTDOWN, REBOOT, RESTART", args[1])
+		return fmt.Errorf("invalid task type: %s. Valid types: PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL", args[1])
 	}
 
 	// Build task-specific payload
@@ -213,6 +219,13 @@ func runTaskCreate(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("count") {
 			count, _ := cmd.Flags().GetInt("count")
 			payload["count"] = count
+		}
+		body = map[string]interface{}{"payload": payload}
+	}
+	if taskType == "PLUGIN_INSTALL" {
+		payload := map[string]interface{}{}
+		if version, _ := cmd.Flags().GetString("version"); version != "" {
+			payload["target_version"] = version
 		}
 		body = map[string]interface{}{"payload": payload}
 	}
