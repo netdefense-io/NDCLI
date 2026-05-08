@@ -61,9 +61,8 @@ func TestWrapToWidth_HardSplitsLongWordsWithoutSpaces(t *testing.T) {
 	}
 }
 
-// Regression test for NDCLI-go#53: the exact truncation the issue reported
-// must not happen. The detailed formatter should render the full message
-// wrapped across multiple lines, not "… co..." hard-truncated.
+// The detailed formatter should render long messages wrapped across multiple
+// lines, not hard-truncated.
 func TestDetailedFormatTask_LongMessageIsNotTruncated(t *testing.T) {
 	longMsg := "Invalid JSON payload: Expecting value: line 1 column 1 (char 0)"
 	task := &models.Task{

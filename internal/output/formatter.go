@@ -24,7 +24,7 @@ func sortedSnippetNames(m map[string][]string) []string {
 // wrapToWidth splits s into lines no longer than width chars, preferring
 // space boundaries. Embedded newlines are preserved; tokens longer than
 // width are hard-split. Used to display multi-line messages inside fixed-width
-// boxes without truncating (see detailed.FormatTask — NDCLI-go#53).
+// boxes without truncating (see detailed.FormatTask).
 func wrapToWidth(s string, width int) []string {
 	if width < 1 {
 		width = 1

@@ -26,7 +26,7 @@ func captureStdout(fn func()) string {
 // Note: the fatih/color package writes to its own captured stdout at init,
 // so color.Cyan output doesn't go through os.Stdout redirect. We assert only
 // on the numbered-step headers (printed via fmt.Println), which is enough to
-// verify the ordering — regression guard for NDCLI-go#12.
+// verify the ordering.
 
 func TestShowFinalInstructions_NoOrgNoToken_CreateOrgBeforeSettings(t *testing.T) {
 	out := captureStdout(func() { ShowFinalInstructions("", "") })

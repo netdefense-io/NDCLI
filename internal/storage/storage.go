@@ -189,7 +189,7 @@ func NewFileStorage(path string) *FileStorage {
 }
 
 // getHostScopedPath returns the auth file path scoped by host
-// Example: auth.json -> auth-control.netdefense.io.json
+// Example: auth.json -> auth-<host>.json
 func (f *FileStorage) getHostScopedPath() string {
 	host := config.GetCurrentHost()
 	if host == "" {
@@ -204,7 +204,7 @@ func (f *FileStorage) getHostScopedPath() string {
 	ext := filepath.Ext(f.basePath)
 	base := strings.TrimSuffix(filepath.Base(f.basePath), ext)
 
-	// auth.json -> auth-control.netdefense.io.json
+	// auth.json -> auth-<host>.json
 	return filepath.Join(dir, fmt.Sprintf("%s-%s%s", base, safeHost, ext))
 }
 

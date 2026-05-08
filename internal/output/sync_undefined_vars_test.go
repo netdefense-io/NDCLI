@@ -8,9 +8,9 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
-// Covers NDCLI-go#27: the sync-apply error output names each snippet when the
-// server returned undefined variables grouped by snippet, and falls back to
-// a flat list when it didn't.
+// The sync-apply error output names each snippet when the server returned
+// undefined variables grouped by snippet, and falls back to a flat list
+// when it didn't.
 
 func makeSyncResponse(err models.SyncError) *models.SyncApplyResponse {
 	return &models.SyncApplyResponse{

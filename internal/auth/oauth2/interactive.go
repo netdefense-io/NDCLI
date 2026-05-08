@@ -381,9 +381,3 @@ func copyToClipboard(text string) error {
 	return cmd.Run()
 }
 
-// getOAuth2Domain returns the OAuth2 domain from config
-func getOAuth2Domain() string {
-	// This is a helper to get the domain for display
-	// In production, this would come from config
-	return "auth-dev.netdefense.io"
-}
