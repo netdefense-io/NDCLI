@@ -3,18 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
-	"github.com/netdefense-io/NDCLI/internal/vpn"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var networkCmd = &cobra.Command{
@@ -117,6 +113,12 @@ func init() {
 	networkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
+// boolPtr / intPtr / stringPtr helpers — local to cli/ for building service
+// option structs from cobra flags.
+func boolPtr(v bool) *bool       { return &v }
+func intPtr(v int) *int          { return &v }
+func stringPtr(v string) *string { return &v }
+
 func runNetworkList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
@@ -124,27 +126,14 @@ func runNetworkList(cmd *cobra.Command, args []string) error {
 	page, _ := cmd.Flags().GetInt("page")
 	perPage, _ := cmd.Flags().GetInt("per-page")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks", url.PathEscape(org)), params)
+	result, err := svc.NetworkList(context.Background(), org, page, perPage)
 	if err != nil {
 		return err
 	}
-
-	var result models.VpnNetworkListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatVpnNetworks(result.Networks, result.Total, result.Quota); err != nil {
 		return err
 	}
-
-	if err := formatter.FormatVpnNetworks(result.Items, result.Total, result.Quota); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
@@ -155,43 +144,31 @@ func runNetworkCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	cidr, _ := cmd.Flags().GetString("cidr")
 
-	payload := map[string]interface{}{
-		"name":            name,
-		"overlay_cidr_v4": cidr,
-	}
-
+	opts := service.NetworkCreateOpts{Name: name, OverlayCIDRv4: cidr}
 	if cmd.Flags().Changed("auto-connect-hubs") {
 		v, _ := cmd.Flags().GetBool("auto-connect-hubs")
-		payload["auto_connect_hubs"] = v
+		opts.AutoConnectHubs = &v
 	}
 	if cmd.Flags().Changed("auto-firewall-rules") {
 		v, _ := cmd.Flags().GetBool("auto-firewall-rules")
-		payload["auto_firewall_rules"] = v
+		opts.AutoFirewallRules = &v
 	}
 	if cmd.Flags().Changed("listen-port") {
 		v, _ := cmd.Flags().GetInt("listen-port")
-		payload["listen_port_default"] = v
+		opts.ListenPortDefault = &v
 	}
 	if cmd.Flags().Changed("mtu") {
 		v, _ := cmd.Flags().GetInt("mtu")
-		payload["mtu_default"] = v
+		opts.MTUDefault = &v
 	}
 	if cmd.Flags().Changed("keepalive") {
 		v, _ := cmd.Flags().GetInt("keepalive")
-		payload["keepalive_default"] = v
+		opts.KeepaliveDefault = &v
 	}
 
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks", url.PathEscape(org)), payload)
-	if err != nil {
+	if _, err := svc.NetworkCreate(context.Background(), org, opts); err != nil {
 		return err
 	}
-
-	var network models.VpnNetwork
-	if err := api.ParseResponse(resp, &network); err != nil {
-		return err
-	}
-
 	color.Green("✓ VPN network created: %s", name)
 	return nil
 }
@@ -200,20 +177,11 @@ func runNetworkDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	vpnName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s", url.PathEscape(org), url.PathEscape(vpnName)), nil)
+	n, err := svc.NetworkGet(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var network models.VpnNetwork
-	if err := api.ParseResponse(resp, &network); err != nil {
-		return err
-	}
-
-	return formatter.FormatVpnNetwork(&network)
+	return formatter.FormatVpnNetwork(n)
 }
 
 func runNetworkUpdate(cmd *cobra.Command, args []string) error {
@@ -221,75 +189,61 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	vpnName := args[0]
-	payload := make(map[string]interface{})
+	opts := service.NetworkUpdateOpts{}
 
 	if cmd.Flags().Changed("name") {
 		v, _ := cmd.Flags().GetString("name")
-		payload["name"] = v
+		opts.Name = &v
 	}
 	if cmd.Flags().Changed("auto-connect-hubs") {
 		v, _ := cmd.Flags().GetBool("auto-connect-hubs")
-		payload["auto_connect_hubs"] = v
+		opts.AutoConnectHubs = &v
 	}
 	if cmd.Flags().Changed("auto-firewall-rules") {
 		v, _ := cmd.Flags().GetBool("auto-firewall-rules")
-		payload["auto_firewall_rules"] = v
+		opts.AutoFirewallRules = &v
 	}
 	if cmd.Flags().Changed("listen-port") {
 		v, _ := cmd.Flags().GetInt("listen-port")
-		payload["listen_port_default"] = v
+		opts.ListenPortDefault = &v
 	}
 	if cmd.Flags().Changed("mtu") {
 		v, _ := cmd.Flags().GetInt("mtu")
-		if v == 0 {
-			payload["mtu_default"] = nil
-		} else {
-			payload["mtu_default"] = v
-		}
+		opts.MTUDefault = &v
 	}
 	if cmd.Flags().Changed("keepalive") {
 		v, _ := cmd.Flags().GetInt("keepalive")
-		if v == 0 {
-			payload["keepalive_default"] = nil
-		} else {
-			payload["keepalive_default"] = v
-		}
+		opts.KeepaliveDefault = &v
 	}
 
-	if len(payload) == 0 {
+	if opts == (service.NetworkUpdateOpts{}) {
 		return fmt.Errorf("no update flags specified")
 	}
 
 	ctx := context.Background()
 
-	// Confirm auto-connect-hubs toggle if it's being changed
-	if cmd.Flags().Changed("auto-connect-hubs") {
+	// Confirm auto-connect-hubs toggle if it actually changes the state.
+	if opts.AutoConnectHubs != nil {
 		skipConfirm, _ := cmd.Flags().GetBool("yes")
 		if !skipConfirm {
-			newValue, _ := cmd.Flags().GetBool("auto-connect-hubs")
-
-			// Fetch current network to compare
-			currentNetwork, err := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
+			current, err := svc.NetworkGet(ctx, org, vpnName)
 			if err != nil {
 				return err
 			}
-
-			if newValue != currentNetwork.AutoConnectHubs {
-				// Count hubs
-				members, err := vpn.FetchAllMembers(ctx, apiClient, org, vpnName)
+			if *opts.AutoConnectHubs != current.AutoConnectHubs {
+				members, err := svc.NetworkMemberList(ctx, org, vpnName, 1, 500)
 				if err != nil {
 					return err
 				}
 				hubCount := 0
-				for _, m := range members {
+				for _, m := range members.Members {
 					if strings.EqualFold(m.Role, "HUB") {
 						hubCount++
 					}
 				}
-
 				if hubCount > 1 {
 					var prompt string
-					if newValue {
+					if *opts.AutoConnectHubs {
 						prompt = fmt.Sprintf("Enable auto-connect-hubs? All %d hub(s) will be automatically connected.", hubCount)
 					} else {
 						prompt = "Disable auto-connect-hubs? Hub-to-hub connections without manual links will be lost."
@@ -303,17 +257,11 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	resp, err := apiClient.Patch(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s", url.PathEscape(org), url.PathEscape(vpnName)), payload)
+	n, err := svc.NetworkUpdate(ctx, org, vpnName, opts)
 	if err != nil {
 		return err
 	}
-
-	var network models.VpnNetwork
-	if err := api.ParseResponse(resp, &network); err != nil {
-		return err
-	}
-
-	color.Green("✓ VPN network updated: %s", network.Name)
+	color.Green("✓ VPN network updated: %s", n.Name)
 	return nil
 }
 
@@ -322,7 +270,6 @@ func runNetworkDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	vpnName := args[0]
-
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
 		if !helpers.Confirm(fmt.Sprintf("Delete VPN network '%s'?", vpnName)) {
@@ -330,18 +277,9 @@ func runNetworkDelete(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s", url.PathEscape(org), url.PathEscape(vpnName)))
-	if err != nil {
+	if err := svc.NetworkDelete(context.Background(), org, vpnName); err != nil {
 		return err
 	}
-
-	var result models.VpnDeleteResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	color.Green("✓ VPN network deleted: %s", vpnName)
 	return nil
 }

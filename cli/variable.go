@@ -2,9 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -12,58 +11,26 @@ import (
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// variableScope defines scope-specific configuration for variable commands
-type variableScope struct {
-	name           string
+// variableScopeMeta tells the cobra builders how each scope is named on the
+// CLI surface. The actual URL/parameter logic lives in service.
+type variableScopeMeta struct {
+	scope          service.VariableScope
 	displayName    string
-	requiresEntity bool
 	entityName     string
-	buildURL       func(org, entity string) string
+	requiresEntity bool
 }
 
-var variableScopes = map[string]variableScope{
-	"org": {
-		name:           "org",
-		displayName:    "organization",
-		requiresEntity: false,
-		buildURL: func(org, _ string) string {
-			return fmt.Sprintf("/api/v1/organizations/%s/variables", url.PathEscape(org))
-		},
-	},
-	"ou": {
-		name:           "ou",
-		displayName:    "OU",
-		requiresEntity: true,
-		entityName:     "OU",
-		buildURL: func(org, ou string) string {
-			return fmt.Sprintf("/api/v1/organizations/%s/ous/%s/variables", url.PathEscape(org), url.PathEscape(ou))
-		},
-	},
-	"template": {
-		name:           "template",
-		displayName:    "template",
-		requiresEntity: true,
-		entityName:     "template",
-		buildURL: func(org, template string) string {
-			return fmt.Sprintf("/api/v1/organizations/%s/templates/%s/variables", url.PathEscape(org), url.PathEscape(template))
-		},
-	},
-	"device": {
-		name:           "device",
-		displayName:    "device",
-		requiresEntity: true,
-		entityName:     "device",
-		buildURL: func(org, device string) string {
-			return fmt.Sprintf("/api/v1/organizations/%s/devices/%s/variables", url.PathEscape(org), url.PathEscape(device))
-		},
-	},
+var variableScopeMetas = map[string]variableScopeMeta{
+	"org":      {scope: service.VarScopeOrg, displayName: "organization", requiresEntity: false},
+	"ou":       {scope: service.VarScopeOU, displayName: "OU", requiresEntity: true, entityName: "OU"},
+	"template": {scope: service.VarScopeTemplate, displayName: "template", requiresEntity: true, entityName: "template"},
+	"device":   {scope: service.VarScopeDevice, displayName: "device", requiresEntity: true, entityName: "device"},
 }
 
-// Root variable command
 var variableCmd = &cobra.Command{
 	Use:     "variable",
 	Aliases: []string{"var"},
@@ -71,26 +38,10 @@ var variableCmd = &cobra.Command{
 	Long:    "Manage configuration variables at different scopes (organization, OU, template, device)",
 }
 
-// Scope subcommands
-var varOrgCmd = &cobra.Command{
-	Use:   "org",
-	Short: "Manage organization-level variables",
-}
-
-var varOUCmd = &cobra.Command{
-	Use:   "ou",
-	Short: "Manage OU-level variables",
-}
-
-var varTemplateCmd = &cobra.Command{
-	Use:   "template",
-	Short: "Manage template-level variables",
-}
-
-var varDeviceCmd = &cobra.Command{
-	Use:   "device",
-	Short: "Manage device-level variables",
-}
+var varOrgCmd = &cobra.Command{Use: "org", Short: "Manage organization-level variables"}
+var varOUCmd = &cobra.Command{Use: "ou", Short: "Manage OU-level variables"}
+var varTemplateCmd = &cobra.Command{Use: "template", Short: "Manage template-level variables"}
+var varDeviceCmd = &cobra.Command{Use: "device", Short: "Manage device-level variables"}
 
 var varOverviewCmd = &cobra.Command{
 	Use:   "overview",
@@ -99,26 +50,23 @@ var varOverviewCmd = &cobra.Command{
 }
 
 func init() {
-	// Add scope subcommands to variable
 	variableCmd.AddCommand(varOrgCmd)
 	variableCmd.AddCommand(varOUCmd)
 	variableCmd.AddCommand(varTemplateCmd)
 	variableCmd.AddCommand(varDeviceCmd)
 	variableCmd.AddCommand(varOverviewCmd)
 
-	// Overview command flags
 	varOverviewCmd.Flags().String("name", "", "Filter by name pattern (regex)")
 	varOverviewCmd.Flags().Int("page", 1, "Page number")
 	varOverviewCmd.Flags().Int("per-page", 50, "Items per page")
 
-	// Build and add CRUD commands for each scope
-	for scopeName, scope := range variableScopes {
+	for scopeName, meta := range variableScopeMetas {
 		scopeCmd := getVariableScopeCmd(scopeName)
-		scopeCmd.AddCommand(makeVarListCommand(scope))
-		scopeCmd.AddCommand(makeVarDescribeCommand(scope))
-		scopeCmd.AddCommand(makeVarCreateCommand(scope))
-		scopeCmd.AddCommand(makeVarSetCommand(scope))
-		scopeCmd.AddCommand(makeVarDeleteCommand(scope))
+		scopeCmd.AddCommand(makeVarListCommand(meta))
+		scopeCmd.AddCommand(makeVarDescribeCommand(meta))
+		scopeCmd.AddCommand(makeVarCreateCommand(meta))
+		scopeCmd.AddCommand(makeVarSetCommand(meta))
+		scopeCmd.AddCommand(makeVarDeleteCommand(meta))
 	}
 }
 
@@ -137,415 +85,288 @@ func getVariableScopeCmd(name string) *cobra.Command {
 }
 
 // makeVarListCommand creates a list command for a scope
-func makeVarListCommand(scope variableScope) *cobra.Command {
-	var use, short string
-	var args cobra.PositionalArgs
-
-	if scope.requiresEntity {
-		use = fmt.Sprintf("list [%s]", scope.entityName)
-		short = fmt.Sprintf("List variables for a %s", scope.displayName)
-		args = cobra.ExactArgs(1)
-	} else {
-		use = "list"
-		short = fmt.Sprintf("List %s-level variables", scope.displayName)
-		args = cobra.NoArgs
-	}
-
+func makeVarListCommand(meta variableScopeMeta) *cobra.Command {
+	use, short, args := varListUseShortArgs(meta)
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
 		Args:  args,
-		RunE:  makeVarListHandler(scope),
+		RunE:  makeVarListHandler(meta),
 	}
-
 	cmd.Flags().Int("page", 1, "Page number")
 	cmd.Flags().Int("per-page", 50, "Items per page")
 	cmd.Flags().String("name", "", "Filter by name pattern (regex)")
-
-	// Set up completions
-	if scope.requiresEntity {
-		cmd.ValidArgsFunction = getEntityCompleter(scope.name)
+	if meta.requiresEntity {
+		cmd.ValidArgsFunction = getEntityCompleter(string(meta.scope))
 	}
-
 	return cmd
 }
 
-func makeVarListHandler(scope variableScope) func(*cobra.Command, []string) error {
+func varListUseShortArgs(meta variableScopeMeta) (string, string, cobra.PositionalArgs) {
+	if meta.requiresEntity {
+		return fmt.Sprintf("list [%s]", meta.entityName),
+			fmt.Sprintf("List variables for a %s", meta.displayName),
+			cobra.ExactArgs(1)
+	}
+	return "list",
+		fmt.Sprintf("List %s-level variables", meta.displayName),
+		cobra.NoArgs
+}
+
+func makeVarListHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		requireAuth()
 		org := requireOrganization()
-
 		entity := ""
-		if scope.requiresEntity {
+		if meta.requiresEntity {
 			entity = args[0]
 		}
+		opts := service.VariableListOpts{}
+		opts.NameFilter, _ = cmd.Flags().GetString("name")
+		opts.Page, _ = cmd.Flags().GetInt("page")
+		opts.PerPage, _ = cmd.Flags().GetInt("per-page")
 
-		page, _ := cmd.Flags().GetInt("page")
-		perPage, _ := cmd.Flags().GetInt("per-page")
-		nameFilter, _ := cmd.Flags().GetString("name")
-
-		params := map[string]string{
-			"page":     strconv.Itoa(page),
-			"per_page": strconv.Itoa(perPage),
-		}
-		if nameFilter != "" {
-			params["name_filter"] = nameFilter
-		}
-
-		ctx := context.Background()
-		resp, err := apiClient.Get(ctx, scope.buildURL(org, entity), params)
+		result, err := svc.VariableList(context.Background(), meta.scope, org, entity, opts)
 		if err != nil {
 			return err
 		}
-
-		var result models.VariableListResponse
-		if err := api.ParseResponse(resp, &result); err != nil {
+		if err := formatter.FormatVariables(result.Variables, result.Total); err != nil {
 			return err
 		}
-
-		if err := formatter.FormatVariables(result.Items, result.Total); err != nil {
-			return err
-		}
-
-		output.PrintPagination(page, result.Total, perPage)
+		output.PrintPagination(result.Page, result.Total, result.PerPage)
 		return nil
 	}
 }
 
 // makeVarDescribeCommand creates a describe command for a scope
-func makeVarDescribeCommand(scope variableScope) *cobra.Command {
+func makeVarDescribeCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
-
-	if scope.requiresEntity {
-		use = fmt.Sprintf("describe [%s] [variable]", scope.entityName)
-		short = fmt.Sprintf("Show details of a %s variable", scope.displayName)
+	if meta.requiresEntity {
+		use = fmt.Sprintf("describe [%s] [variable]", meta.entityName)
+		short = fmt.Sprintf("Show details of a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
 		use = "describe [variable]"
-		short = fmt.Sprintf("Show details of an %s-level variable", scope.displayName)
+		short = fmt.Sprintf("Show details of an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}
-
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		Args:  args,
-		RunE:  makeVarDescribeHandler(scope),
-	}
-
-	// Set up completions
-	if scope.requiresEntity {
-		cmd.ValidArgsFunction = getEntityThenVariableCompleter(scope.name)
+	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarDescribeHandler(meta)}
+	if meta.requiresEntity {
+		cmd.ValidArgsFunction = getEntityThenVariableCompleter(string(meta.scope))
 	} else {
 		cmd.ValidArgsFunction = completeOrgVariables
 	}
-
 	return cmd
 }
 
-func makeVarDescribeHandler(scope variableScope) func(*cobra.Command, []string) error {
+func makeVarDescribeHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		requireAuth()
 		org := requireOrganization()
-
 		var entity, varName string
-		if scope.requiresEntity {
-			entity = args[0]
-			varName = args[1]
+		if meta.requiresEntity {
+			entity, varName = args[0], args[1]
 		} else {
 			varName = args[0]
 		}
-
-		ctx := context.Background()
-		urlPath := scope.buildURL(org, entity) + "/" + url.PathEscape(varName)
-		resp, err := apiClient.Get(ctx, urlPath, nil)
+		variable, err := svc.VariableGet(context.Background(), meta.scope, org, entity, varName)
 		if err != nil {
 			return err
 		}
-
-		var variable models.Variable
-		if err := api.ParseResponse(resp, &variable); err != nil {
-			return err
-		}
-
-		return formatter.FormatVariable(&variable)
+		return formatter.FormatVariable(variable)
 	}
 }
 
 // makeVarCreateCommand creates a create command for a scope
-func makeVarCreateCommand(scope variableScope) *cobra.Command {
+func makeVarCreateCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
-
-	if scope.requiresEntity {
-		use = fmt.Sprintf("create [%s] [name] [value]", scope.entityName)
-		short = fmt.Sprintf("Create a %s variable", scope.displayName)
+	if meta.requiresEntity {
+		use = fmt.Sprintf("create [%s] [name] [value]", meta.entityName)
+		short = fmt.Sprintf("Create a %s variable", meta.displayName)
 		args = cobra.ExactArgs(3)
 	} else {
 		use = "create [name] [value]"
-		short = fmt.Sprintf("Create an %s-level variable", scope.displayName)
+		short = fmt.Sprintf("Create an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	}
-
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		Args:  args,
-		RunE:  makeVarCreateHandler(scope),
-	}
-
+	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarCreateHandler(meta)}
 	cmd.Flags().String("description", "", "Variable description")
-
-	// Add --secret flag only for org scope (secret is only valid at org level)
-	if scope.name == "org" {
+	if meta.scope == service.VarScopeOrg {
 		cmd.Flags().Bool("secret", false, "Mark variable as secret (value will be redacted in API responses)")
 	}
-
-	// Set up completions for entity only (variable name is new)
-	if scope.requiresEntity {
-		cmd.ValidArgsFunction = getEntityCompleter(scope.name)
+	if meta.requiresEntity {
+		cmd.ValidArgsFunction = getEntityCompleter(string(meta.scope))
 	}
-
 	return cmd
 }
 
-func makeVarCreateHandler(scope variableScope) func(*cobra.Command, []string) error {
+func makeVarCreateHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		requireAuth()
 		org := requireOrganization()
 
 		var entity, varName, value string
-		if scope.requiresEntity {
-			entity = args[0]
-			varName = args[1]
-			value = args[2]
+		if meta.requiresEntity {
+			entity, varName, value = args[0], args[1], args[2]
 		} else {
-			varName = args[0]
-			value = args[1]
+			varName, value = args[0], args[1]
 		}
-
 		description, _ := cmd.Flags().GetString("description")
-
-		payload := map[string]interface{}{
-			"name":  varName,
-			"value": value,
-		}
-		if description != "" {
-			payload["description"] = description
+		secret := false
+		if meta.scope == service.VarScopeOrg {
+			secret, _ = cmd.Flags().GetBool("secret")
 		}
 
-		// Add secret flag for org scope only
-		if scope.name == "org" {
-			secret, _ := cmd.Flags().GetBool("secret")
-			if secret {
-				payload["secret"] = true
-			}
-		}
-
-		ctx := context.Background()
-		resp, err := apiClient.Post(ctx, scope.buildURL(org, entity), payload)
+		variable, err := svc.VariableCreate(context.Background(), meta.scope, org, entity, service.VariableCreateOpts{
+			Name:        varName,
+			Value:       value,
+			Description: description,
+			Secret:      secret,
+		})
 		if err != nil {
-			return err
-		}
-
-		var variable models.Variable
-		if err := api.ParseResponse(resp, &variable); err != nil {
-			// Enhance INVALID_PARAM error for missing org-scope parent
-			if apiErr, ok := err.(*api.APIError); ok && apiErr.Code == "INVALID_PARAM" {
-				if strings.Contains(apiErr.Message, "must exist before creating overrides") {
-					return fmt.Errorf("%s\n\nTip: Create the org-scope variable first:\n  ndcli variable org create %s <default-value>", apiErr.Message, varName)
-				}
+			// Hint when an override fails because the org-scope parent doesn't exist.
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) && apiErr.Code == "INVALID_PARAM" && strings.Contains(apiErr.Message, "must exist before creating overrides") {
+				return fmt.Errorf("%s\n\nTip: Create the org-scope variable first:\n  ndcli variable org create %s <default-value>", apiErr.Message, varName)
 			}
 			return err
 		}
 
-		if scope.requiresEntity {
-			color.Green("Variable created: %s (at %s '%s')", varName, scope.displayName, entity)
+		if meta.requiresEntity {
+			color.Green("Variable created: %s (at %s '%s')", varName, meta.displayName, entity)
 		} else {
 			secretIndicator := ""
 			if variable.Secret {
 				secretIndicator = " [SECRET]"
 			}
-			color.Green("Variable created: %s (at %s level)%s", varName, scope.displayName, secretIndicator)
+			color.Green("Variable created: %s (at %s level)%s", varName, meta.displayName, secretIndicator)
 		}
 		return nil
 	}
 }
 
 // makeVarSetCommand creates a set (update) command for a scope
-func makeVarSetCommand(scope variableScope) *cobra.Command {
+func makeVarSetCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
-
-	if scope.requiresEntity {
-		use = fmt.Sprintf("set [%s] [variable]", scope.entityName)
-		short = fmt.Sprintf("Update a %s variable", scope.displayName)
+	if meta.requiresEntity {
+		use = fmt.Sprintf("set [%s] [variable]", meta.entityName)
+		short = fmt.Sprintf("Update a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
 		use = "set [variable]"
-		short = fmt.Sprintf("Update an %s-level variable", scope.displayName)
+		short = fmt.Sprintf("Update an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}
-
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		Args:  args,
-		RunE:  makeVarSetHandler(scope),
-	}
-
+	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarSetHandler(meta)}
 	cmd.Flags().String("value", "", "New value for the variable")
 	cmd.Flags().String("description", "", "New description for the variable")
-
-	// Set up completions
-	if scope.requiresEntity {
-		cmd.ValidArgsFunction = getEntityThenVariableCompleter(scope.name)
+	if meta.requiresEntity {
+		cmd.ValidArgsFunction = getEntityThenVariableCompleter(string(meta.scope))
 	} else {
 		cmd.ValidArgsFunction = completeOrgVariables
 	}
-
 	return cmd
 }
 
-func makeVarSetHandler(scope variableScope) func(*cobra.Command, []string) error {
+func makeVarSetHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		requireAuth()
 		org := requireOrganization()
 
 		var entity, varName string
-		if scope.requiresEntity {
-			entity = args[0]
-			varName = args[1]
+		if meta.requiresEntity {
+			entity, varName = args[0], args[1]
 		} else {
 			varName = args[0]
 		}
 
-		value, valueSet := cmd.Flags().GetString("value")
-		description, descSet := cmd.Flags().GetString("description")
-
-		// Check if at least one flag is provided
-		if !cmd.Flags().Changed("value") && !cmd.Flags().Changed("description") {
-			return fmt.Errorf("at least one of --value or --description must be provided")
-		}
-
-		payload := make(map[string]interface{})
+		opts := service.VariableSetOpts{}
 		if cmd.Flags().Changed("value") {
-			payload["value"] = value
+			v, _ := cmd.Flags().GetString("value")
+			opts.Value = &v
 		}
 		if cmd.Flags().Changed("description") {
-			payload["description"] = description
+			v, _ := cmd.Flags().GetString("description")
+			opts.Description = &v
 		}
-
-		// Avoid unused variable warnings
-		_ = valueSet
-		_ = descSet
-
-		ctx := context.Background()
-		urlPath := scope.buildURL(org, entity) + "/" + url.PathEscape(varName)
-		resp, err := apiClient.Patch(ctx, urlPath, payload)
-		if err != nil {
+		if opts.Value == nil && opts.Description == nil {
+			return fmt.Errorf("at least one of --value or --description must be provided")
+		}
+		if _, err := svc.VariableSet(context.Background(), meta.scope, org, entity, varName, opts); err != nil {
 			return err
 		}
-
-		var variable models.Variable
-		if err := api.ParseResponse(resp, &variable); err != nil {
-			return err
-		}
-
 		color.Green("Variable updated: %s", varName)
 		return nil
 	}
 }
 
 // makeVarDeleteCommand creates a delete command for a scope
-func makeVarDeleteCommand(scope variableScope) *cobra.Command {
+func makeVarDeleteCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
-
-	if scope.requiresEntity {
-		use = fmt.Sprintf("delete [%s] [variable]", scope.entityName)
-		short = fmt.Sprintf("Delete a %s variable", scope.displayName)
+	if meta.requiresEntity {
+		use = fmt.Sprintf("delete [%s] [variable]", meta.entityName)
+		short = fmt.Sprintf("Delete a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
 		use = "delete [variable]"
-		short = fmt.Sprintf("Delete an %s-level variable", scope.displayName)
+		short = fmt.Sprintf("Delete an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}
-
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		Args:  args,
-		RunE:  makeVarDeleteHandler(scope),
-	}
-
+	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarDeleteHandler(meta)}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-
-	// Set up completions
-	if scope.requiresEntity {
-		cmd.ValidArgsFunction = getEntityThenVariableCompleter(scope.name)
+	if meta.requiresEntity {
+		cmd.ValidArgsFunction = getEntityThenVariableCompleter(string(meta.scope))
 	} else {
 		cmd.ValidArgsFunction = completeOrgVariables
 	}
-
 	return cmd
 }
 
-func makeVarDeleteHandler(scope variableScope) func(*cobra.Command, []string) error {
+func makeVarDeleteHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		requireAuth()
 		org := requireOrganization()
 
 		var entity, varName string
-		if scope.requiresEntity {
-			entity = args[0]
-			varName = args[1]
+		if meta.requiresEntity {
+			entity, varName = args[0], args[1]
 		} else {
 			varName = args[0]
 		}
 
+		ctx := context.Background()
 		skipConfirm, _ := cmd.Flags().GetBool("yes")
 
-		// For org-scope deletes, check for overrides that will be cascade-deleted
-		overrideCount := 0
-		if scope.name == "org" {
-			overrideCount = countVariableOverrides(org, varName)
-			if overrideCount > 0 {
+		// Org-scope deletes cascade to other-scope overrides — warn first.
+		if meta.scope == service.VarScopeOrg {
+			if overrideCount := svc.VariableCountNonOrgDefinitions(ctx, org, varName); overrideCount > 0 {
 				color.Yellow("WARNING: This will also delete %d override(s) at other scopes (OU, template, device)", overrideCount)
 			}
 		}
 
 		if !skipConfirm {
 			msg := fmt.Sprintf("Delete variable '%s'", varName)
-			if scope.requiresEntity {
-				msg += fmt.Sprintf(" from %s '%s'", scope.entityName, entity)
+			if meta.requiresEntity {
+				msg += fmt.Sprintf(" from %s '%s'", meta.entityName, entity)
 			}
 			msg += "?"
-
 			if !helpers.Confirm(msg) {
 				fmt.Println("Cancelled")
 				return nil
 			}
 		}
 
-		ctx := context.Background()
-		urlPath := scope.buildURL(org, entity) + "/" + url.PathEscape(varName)
-		resp, err := apiClient.Delete(ctx, urlPath)
-		if err != nil {
+		if err := svc.VariableDelete(ctx, meta.scope, org, entity, varName); err != nil {
 			return err
 		}
-
-		if err := api.ParseResponse(resp, nil); err != nil {
-			return err
-		}
-
 		color.Green("Variable deleted: %s", varName)
 		return nil
 	}
 }
-
-// Helper functions for completions
 
 func getEntityCompleter(scopeName string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	switch scopeName {
@@ -571,75 +392,22 @@ func getEntityThenVariableCompleter(scopeName string) func(*cobra.Command, []str
 	return nil
 }
 
-// countVariableOverrides counts non-org-scope definitions for a variable
-// Returns the count of overrides (OU, template, device scopes)
-func countVariableOverrides(org, varName string) int {
-	ctx := context.Background()
-	urlPath := fmt.Sprintf("/api/v1/organizations/%s/variables", url.PathEscape(org))
-	params := map[string]string{
-		"scope": "all",
-		"name":  fmt.Sprintf("^%s$", varName), // Exact match regex
-	}
-
-	resp, err := apiClient.Get(ctx, urlPath, params)
-	if err != nil {
-		return 0 // Can't count, proceed without warning
-	}
-
-	var result models.VariableOverviewResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return 0
-	}
-
-	// Find the variable and count non-org definitions
-	for _, item := range result.Items {
-		if item.Name == varName {
-			count := 0
-			for _, def := range item.Definitions {
-				if def.Scope != "organization" {
-					count++
-				}
-			}
-			return count
-		}
-	}
-	return 0
-}
-
-// runVarOverview handles the variable overview command
 func runVarOverview(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-	nameFilter, _ := cmd.Flags().GetString("name")
+	opts := service.VariableOverviewOpts{}
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
+	opts.NameFilter, _ = cmd.Flags().GetString("name")
 
-	params := map[string]string{
-		"scope":    "all", // Request overview across all scopes
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-	if nameFilter != "" {
-		params["name"] = nameFilter
-	}
-
-	ctx := context.Background()
-	urlPath := fmt.Sprintf("/api/v1/organizations/%s/variables", url.PathEscape(org))
-	resp, err := apiClient.Get(ctx, urlPath, params)
+	result, err := svc.VariableOverview(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
-
-	var result models.VariableOverviewResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatVariableOverview(result.Variables, result.Total); err != nil {
 		return err
 	}
-
-	if err := formatter.FormatVariableOverview(result.Items, result.Total); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }

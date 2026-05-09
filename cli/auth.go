@@ -15,6 +15,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/auth/oauth2"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/storage"
 )
 
@@ -244,32 +245,22 @@ func runAuthShow(cmd *cobra.Command, args []string) error {
 
 func runAuthMe(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/auth/me", nil)
+	authMe, err := svc.AuthMe(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get user info: %w", err)
 	}
-
-	var authMe models.AuthMe
-	if err := api.ParseResponse(resp, &authMe); err != nil {
-		return err
-	}
-
-	return formatter.FormatAuthMe(&authMe)
+	return formatter.FormatAuthMe(authMe)
 }
 
 func runAuthRefresh(cmd *cobra.Command, args []string) error {
-	if !authManager.IsAuthenticated() {
+	if !svc.AuthIsAuthenticated() {
 		color.Red("✗ Not authenticated")
 		fmt.Println("Run 'ndcli auth login' to authenticate")
 		return nil
 	}
-
-	if err := authManager.ForceRefresh(); err != nil {
-		return fmt.Errorf("token refresh failed: %w", err)
+	if err := svc.AuthRefresh(); err != nil {
+		return err
 	}
-
 	color.Green("✓ Token refreshed successfully")
 	return nil
 }
@@ -358,13 +349,11 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
-	// Get user info for display
-	userInfo, err := authManager.GetUserInfo()
+	userInfo, err := svc.AuthLocalUser()
 	if err != nil || userInfo == nil {
 		return fmt.Errorf("failed to get user info: %w", err)
 	}
 
-	// Confirm deletion unless --yes flag is provided
 	if !skipConfirm {
 		color.Red("WARNING: This will permanently delete your account!")
 		fmt.Printf("  Email: %s\n", userInfo.Email)
@@ -381,41 +370,22 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Call DELETE /api/v1/auth/me
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, "/api/v1/auth/me")
+	result, err := svc.AuthDelete(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to delete account: %w", err)
-	}
-
-	// Check for conflict error (sole superuser)
-	if resp.StatusCode == 409 {
-		apiErr := api.ParseError(resp)
-		color.Red("✗ Cannot delete account")
-		fmt.Println()
-		fmt.Println(apiErr.Message)
-		if len(apiErr.BlockingResources) > 0 {
+		// Sole-superuser conflict: surface the blocking orgs nicely.
+		if blocking := service.AuthDeleteBlockingOrgs(err); blocking != nil {
+			color.Red("✗ Cannot delete account")
+			fmt.Println()
+			fmt.Println(err.Error())
 			fmt.Println()
 			fmt.Println("Organizations where you are the only superuser:")
-			for _, org := range apiErr.BlockingResources {
+			for _, org := range blocking {
 				fmt.Printf("  • %s\n", org)
 			}
+			return nil
 		}
-		return nil
+		return fmt.Errorf("failed to delete account: %w", err)
 	}
-
-	// Parse success response
-	var result struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Email   string `json:"email"`
-	}
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	// Log out locally after successful deletion
-	_ = authManager.Logout()
 
 	color.Green("✓ %s", result.Message)
 	fmt.Printf("  Email: %s\n", result.Email)

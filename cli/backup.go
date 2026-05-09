@@ -2,9 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
 	"syscall"
 
 	"github.com/fatih/color"
@@ -13,8 +12,8 @@ import (
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var backupCmd = &cobra.Command{
@@ -28,48 +27,15 @@ var backupConfigCmd = &cobra.Command{
 	Short: "Organization backup configuration",
 }
 
-var backupConfigShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Show backup configuration",
-	RunE:  runBackupConfigShow,
-}
-
-var backupConfigSetCmd = &cobra.Command{
-	Use:   "set",
-	Short: "Create or update backup configuration",
-	RunE:  runBackupConfigSet,
-}
-
-var backupConfigDeleteCmd = &cobra.Command{
-	Use:   "delete",
-	Short: "Delete backup configuration",
-	RunE:  runBackupConfigDelete,
-}
-
-var backupConfigEnableCmd = &cobra.Command{
-	Use:   "enable",
-	Short: "Enable backup configuration",
-	RunE:  runBackupConfigEnable,
-}
-
-var backupConfigDisableCmd = &cobra.Command{
-	Use:   "disable",
-	Short: "Disable backup configuration",
-	RunE:  runBackupConfigDisable,
-}
-
-var backupConfigTestCmd = &cobra.Command{
-	Use:   "test",
-	Short: "Test S3 connection",
-	RunE:  runBackupConfigTest,
-}
+var backupConfigShowCmd = &cobra.Command{Use: "show", Short: "Show backup configuration", RunE: runBackupConfigShow}
+var backupConfigSetCmd = &cobra.Command{Use: "set", Short: "Create or update backup configuration", RunE: runBackupConfigSet}
+var backupConfigDeleteCmd = &cobra.Command{Use: "delete", Short: "Delete backup configuration", RunE: runBackupConfigDelete}
+var backupConfigEnableCmd = &cobra.Command{Use: "enable", Short: "Enable backup configuration", RunE: runBackupConfigEnable}
+var backupConfigDisableCmd = &cobra.Command{Use: "disable", Short: "Disable backup configuration", RunE: runBackupConfigDisable}
+var backupConfigTestCmd = &cobra.Command{Use: "test", Short: "Test S3 connection", RunE: runBackupConfigTest}
 
 // Device backup commands
-var backupStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "List all device backup statuses",
-	RunE:  runBackupStatus,
-}
+var backupStatusCmd = &cobra.Command{Use: "status", Short: "List all device backup statuses", RunE: runBackupStatus}
 
 var backupShowCmd = &cobra.Command{
 	Use:               "show [device]",
@@ -96,10 +62,7 @@ var backupDisableCmd = &cobra.Command{
 }
 
 // Encryption key commands
-var backupEncryptionKeyCmd = &cobra.Command{
-	Use:   "encryption-key",
-	Short: "Device backup encryption key management",
-}
+var backupEncryptionKeyCmd = &cobra.Command{Use: "encryption-key", Short: "Device backup encryption key management"}
 
 var backupEncryptionKeySetCmd = &cobra.Command{
 	Use:               "set [device]",
@@ -118,7 +81,6 @@ var backupEncryptionKeyRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	// Register config subcommands
 	backupConfigCmd.AddCommand(backupConfigShowCmd)
 	backupConfigCmd.AddCommand(backupConfigSetCmd)
 	backupConfigCmd.AddCommand(backupConfigDeleteCmd)
@@ -126,11 +88,9 @@ func init() {
 	backupConfigCmd.AddCommand(backupConfigDisableCmd)
 	backupConfigCmd.AddCommand(backupConfigTestCmd)
 
-	// Register encryption-key subcommands
 	backupEncryptionKeyCmd.AddCommand(backupEncryptionKeySetCmd)
 	backupEncryptionKeyCmd.AddCommand(backupEncryptionKeyRemoveCmd)
 
-	// Register main backup subcommands
 	backupCmd.AddCommand(backupConfigCmd)
 	backupCmd.AddCommand(backupStatusCmd)
 	backupCmd.AddCommand(backupShowCmd)
@@ -138,7 +98,6 @@ func init() {
 	backupCmd.AddCommand(backupDisableCmd)
 	backupCmd.AddCommand(backupEncryptionKeyCmd)
 
-	// Flags for backup config set
 	backupConfigSetCmd.Flags().String("s3-endpoint", "", "S3 endpoint URL")
 	backupConfigSetCmd.Flags().String("s3-bucket", "", "S3 bucket name")
 	backupConfigSetCmd.Flags().String("s3-key-id", "", "S3 access key ID")
@@ -147,31 +106,31 @@ func init() {
 	backupConfigSetCmd.Flags().String("schedule", "", "Cron schedule expression")
 	backupConfigSetCmd.Flags().String("encryption-key", "", "Encryption key (prompts if not provided)")
 
-	// Flags for backup status
 	backupStatusCmd.Flags().Bool("enabled-only", false, "Show only devices with backup enabled")
 	backupStatusCmd.Flags().String("status", "", "Filter by backup status (SUCCESS, FAILED, IN_PROGRESS)")
 	backupStatusCmd.Flags().Int("page", 1, "Page number")
 	backupStatusCmd.Flags().Int("per-page", 30, "Items per page (1-100)")
 }
 
-// Config commands
+// promptSecret reads a single line of secret input from the terminal.
+func promptSecret(prompt string) (string, error) {
+	fmt.Print(prompt)
+	bytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
 
 func runBackupConfigShow(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config", org), nil)
+	cfg, err := svc.BackupConfigGet(context.Background(), org)
 	if err != nil {
 		return err
 	}
-
-	var config models.BackupConfig
-	if err := api.ParseResponse(resp, &config); err != nil {
-		return err
-	}
-
-	return formatter.FormatBackupConfig(&config)
+	return formatter.FormatBackupConfig(cfg)
 }
 
 func runBackupConfigSet(cmd *cobra.Command, args []string) error {
@@ -188,135 +147,90 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Check if config already exists to determine create vs update
-	checkResp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config", org), nil)
-	isCreate := err != nil || checkResp.StatusCode == http.StatusNotFound
-	if checkResp != nil {
-		checkResp.Body.Close()
+	// Decide create vs update by trying to fetch the existing config.
+	_, err := svc.BackupConfigGet(ctx, org)
+	isCreate := false
+	if err != nil {
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+			isCreate = true
+		} else {
+			// Treat other errors as "config doesn't exist yet" too — matches
+			// previous CLI behaviour where any GET failure pushed the create
+			// path.
+			isCreate = true
+		}
 	}
 
-	// Build payload with only provided fields
-	payload := make(map[string]string)
-
 	if isCreate {
-		// For create, require all fields
 		if s3Endpoint == "" || s3Bucket == "" || s3KeyID == "" || schedule == "" {
 			return fmt.Errorf("for new configuration, all fields are required: --s3-endpoint, --s3-bucket, --s3-key-id, --schedule")
 		}
-		payload["s3_endpoint"] = s3Endpoint
-		payload["s3_bucket"] = s3Bucket
-		payload["s3_key_id"] = s3KeyID
-		payload["schedule"] = schedule
-		if s3Folder != "" {
-			payload["s3_prefix"] = s3Folder
-		}
-
-		// Prompt for access key if not provided
 		if s3AccessKey == "" {
-			fmt.Print("S3 Access Key: ")
-			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-			fmt.Println()
+			pw, err := promptSecret("S3 Access Key: ")
 			if err != nil {
 				return fmt.Errorf("failed to read access key: %w", err)
 			}
-			s3AccessKey = string(bytePassword)
+			s3AccessKey = pw
 		}
-		payload["s3_access_key"] = s3AccessKey
-
-		// Prompt for encryption key if not provided (required to enable backup)
 		if encryptionKey == "" {
-			fmt.Print("Encryption Key: ")
-			byteKey, err := term.ReadPassword(int(syscall.Stdin))
-			fmt.Println()
+			k, err := promptSecret("Encryption Key: ")
 			if err != nil {
 				return fmt.Errorf("failed to read encryption key: %w", err)
 			}
-			encryptionKey = string(byteKey)
+			encryptionKey = k
 		}
-		payload["encryption_key"] = encryptionKey
-	} else {
-		// For update, only include provided fields
-		if s3Endpoint != "" {
-			payload["s3_endpoint"] = s3Endpoint
+		if _, err := svc.BackupConfigCreate(ctx, org, service.BackupConfigCreateOpts{
+			S3Endpoint:    s3Endpoint,
+			S3Bucket:      s3Bucket,
+			S3KeyID:       s3KeyID,
+			S3AccessKey:   s3AccessKey,
+			S3Folder:      s3Folder,
+			Schedule:      schedule,
+			EncryptionKey: encryptionKey,
+		}); err != nil {
+			return err
 		}
-		if s3Bucket != "" {
-			payload["s3_bucket"] = s3Bucket
-		}
-		if s3KeyID != "" {
-			payload["s3_key_id"] = s3KeyID
-		}
-		if s3Folder != "" {
-			payload["s3_prefix"] = s3Folder
-		}
-		if schedule != "" {
-			payload["schedule"] = schedule
-		}
-		// For update, prompt for access key only if key ID is being changed
-		if s3AccessKey == "" && s3KeyID != "" {
-			fmt.Print("S3 Access Key: ")
-			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-			fmt.Println()
-			if err != nil {
-				return fmt.Errorf("failed to read access key: %w", err)
-			}
-			s3AccessKey = string(bytePassword)
-		}
-		if s3AccessKey != "" {
-			payload["s3_access_key"] = s3AccessKey
-		}
-
-		// Include encryption key if provided
-		if encryptionKey != "" {
-			payload["encryption_key"] = encryptionKey
-		}
-
-		if len(payload) == 0 {
-			return fmt.Errorf("no fields provided to update")
-		}
-	}
-
-	var resp *http.Response
-	if isCreate {
-		resp, err = apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config", org), payload)
-	} else {
-		resp, err = apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config", org), payload)
-	}
-	if err != nil {
-		return err
-	}
-
-	var config models.BackupConfig
-	if err := api.ParseResponse(resp, &config); err != nil {
-		return err
-	}
-
-	if isCreate {
 		color.Green("Backup configuration created")
-	} else {
-		color.Green("Backup configuration updated")
+		return nil
 	}
+
+	// Update path
+	opts := service.BackupConfigUpdateOpts{
+		S3Endpoint:    s3Endpoint,
+		S3Bucket:      s3Bucket,
+		S3KeyID:       s3KeyID,
+		S3AccessKey:   s3AccessKey,
+		S3Folder:      s3Folder,
+		Schedule:      schedule,
+		EncryptionKey: encryptionKey,
+	}
+	// Prompt for access key only if key ID is being changed and the key
+	// itself wasn't supplied.
+	if opts.S3AccessKey == "" && opts.S3KeyID != "" {
+		pw, err := promptSecret("S3 Access Key: ")
+		if err != nil {
+			return fmt.Errorf("failed to read access key: %w", err)
+		}
+		opts.S3AccessKey = pw
+	}
+	if _, err := svc.BackupConfigUpdate(ctx, org, opts); err != nil {
+		return err
+	}
+	color.Green("Backup configuration updated")
 	return nil
 }
 
 func runBackupConfigDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
 	if !helpers.Confirm("Delete backup configuration? This will also disable backup for all devices.") {
 		fmt.Println("Cancelled")
 		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config", org))
-	if err != nil {
+	if err := svc.BackupConfigDelete(context.Background(), org); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("Backup configuration deleted")
 	return nil
 }
@@ -324,19 +238,9 @@ func runBackupConfigDelete(cmd *cobra.Command, args []string) error {
 func runBackupConfigEnable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	payload := map[string]string{"status": "ENABLED"}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config/status", org), payload)
-	if err != nil {
+	if err := svc.BackupConfigSetStatus(context.Background(), org, true); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("Backup configuration enabled")
 	return nil
 }
@@ -344,19 +248,9 @@ func runBackupConfigEnable(cmd *cobra.Command, args []string) error {
 func runBackupConfigDisable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	payload := map[string]string{"status": "DISABLED"}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config/status", org), payload)
-	if err != nil {
+	if err := svc.BackupConfigSetStatus(context.Background(), org, false); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("Backup configuration disabled")
 	return nil
 }
@@ -364,159 +258,76 @@ func runBackupConfigDisable(cmd *cobra.Command, args []string) error {
 func runBackupConfigTest(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/backup-config/test", org), nil)
+	result, err := svc.BackupConfigTest(context.Background(), org)
 	if err != nil {
 		return err
 	}
-
-	var result models.BackupConfigTestResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	return formatter.FormatBackupConfigTest(&result)
+	return formatter.FormatBackupConfigTest(result)
 }
-
-// Device backup commands
 
 func runBackupStatus(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	enabledOnly, _ := cmd.Flags().GetBool("enabled-only")
-	status, _ := cmd.Flags().GetString("status")
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
+	opts := service.BackupStatusOpts{}
+	opts.EnabledOnly, _ = cmd.Flags().GetBool("enabled-only")
+	opts.Status, _ = cmd.Flags().GetString("status")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-	if enabledOnly {
-		params["enabled"] = "true"
-	}
-	if status != "" {
-		params["status"] = status
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/backups", org), params)
+	result, err := svc.BackupStatusList(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
-
-	var result models.DeviceBackupListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	if err := formatter.FormatDeviceBackupStatuses(result.Items, result.Total, result.EnabledCount); err != nil {
 		return err
 	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
 func runBackupShow(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	deviceName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/backup", org, deviceName), nil)
+	st, err := svc.BackupStatusGet(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var status models.DeviceBackupStatus
-	if err := api.ParseResponse(resp, &status); err != nil {
-		return err
-	}
-
-	return formatter.FormatDeviceBackupStatus(&status)
+	return formatter.FormatDeviceBackupStatus(st)
 }
 
 func runBackupEnable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	deviceName := args[0]
-
-	payload := map[string]bool{"enabled": true}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/backup", org, deviceName), payload)
-	if err != nil {
+	if err := svc.BackupSetEnabled(context.Background(), org, args[0], true); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
-	color.Green("Backup enabled for device: %s", deviceName)
+	color.Green("Backup enabled for device: %s", args[0])
 	return nil
 }
 
 func runBackupDisable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	deviceName := args[0]
-
-	payload := map[string]bool{"enabled": false}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/backup", org, deviceName), payload)
-	if err != nil {
+	if err := svc.BackupSetEnabled(context.Background(), org, args[0], false); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
-	color.Green("Backup disabled for device: %s", deviceName)
+	color.Green("Backup disabled for device: %s", args[0])
 	return nil
 }
-
-// Encryption key commands
 
 func runBackupEncryptionKeySet(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	deviceName := args[0]
 
-	// Prompt for encryption key (secure input)
-	fmt.Print("Encryption Key: ")
-	byteKey, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println()
+	key, err := promptSecret("Encryption Key: ")
 	if err != nil {
 		return fmt.Errorf("failed to read encryption key: %w", err)
 	}
-
-	if len(byteKey) == 0 {
-		return fmt.Errorf("encryption key cannot be empty")
-	}
-
-	payload := map[string]string{"encryption_key": string(byteKey)}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx,
-		fmt.Sprintf("/api/v1/organizations/%s/devices/%s/backup/encryption-key", org, deviceName),
-		payload)
-	if err != nil {
+	if err := svc.BackupEncryptionKeySet(context.Background(), org, deviceName, key); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("Encryption key set for device: %s", deviceName)
 	return nil
 }
@@ -525,18 +336,9 @@ func runBackupEncryptionKeyRemove(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	deviceName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx,
-		fmt.Sprintf("/api/v1/organizations/%s/devices/%s/backup/encryption-key", org, deviceName))
-	if err != nil {
+	if err := svc.BackupEncryptionKeyRemove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("Encryption key override removed for device: %s (will use organization default)", deviceName)
 	return nil
 }

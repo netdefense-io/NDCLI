@@ -10,6 +10,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/update"
 )
 
@@ -23,6 +24,7 @@ var (
 var (
 	authManager *auth.Manager
 	apiClient   *api.Client
+	svc         *service.Service
 	formatter   output.Formatter
 )
 
@@ -59,6 +61,9 @@ It provides commands for managing devices, organizations, templates, and more.`,
 
 		// Initialize API client
 		apiClient = api.NewClientFromConfig(authManager)
+
+		// Initialize service layer (shared with MCP server)
+		svc = service.New(apiClient, authManager, config.Get())
 
 		// Initialize timezone from config
 		timezone := config.Get().Output.Timezone

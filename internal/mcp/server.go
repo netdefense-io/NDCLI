@@ -11,6 +11,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 // Server is the MCP server for NDCLI
@@ -18,6 +19,7 @@ type Server struct {
 	mcpServer   *mcp.Server
 	authManager *auth.Manager
 	apiClient   *api.Client
+	svc         *service.Service
 	config      *config.Config
 	logger      *log.Logger
 }
@@ -47,11 +49,13 @@ func NewServer() (*Server, error) {
 		nil, // ServerOptions
 	)
 
+	cfg := config.Get()
 	s := &Server{
 		mcpServer:   mcpServer,
 		authManager: authMgr,
 		apiClient:   apiClient,
-		config:      config.Get(),
+		svc:         service.New(apiClient, authMgr, cfg),
+		config:      cfg,
 		logger:      logger,
 	}
 
@@ -64,6 +68,9 @@ func NewServer() (*Server, error) {
 	s.registerAuthTools()
 	s.registerSnippetTools()
 	s.registerTemplateTools()
+	s.registerNetworkTools()
+	s.registerVariableTools()
+	s.registerBackupTools()
 
 	// Register all resources
 	s.registerResources()
@@ -168,7 +175,9 @@ func (s *Server) successResultWithPagination(data interface{}, page, perPage, to
 	return s.jsonResult(response, false)
 }
 
-// errorResult creates an error tool result
+// errorResult creates an error tool result. Recognises both the legacy
+// *ToolError (from pre-service handlers) and the unified *service.Error so
+// the wire-level error code stays stable across the migration.
 func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 	response := ToolResponse{
 		Success: false,
@@ -177,9 +186,11 @@ func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 		},
 	}
 
-	// Add error code if available
-	if toolErr, ok := err.(*ToolError); ok {
-		response.Error.Code = toolErr.Code
+	switch e := err.(type) {
+	case *ToolError:
+		response.Error.Code = e.Code
+	case *service.Error:
+		response.Error.Code = e.Code
 	}
 
 	return s.jsonResult(response, true)

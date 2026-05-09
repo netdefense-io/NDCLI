@@ -3,15 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var templateCmd = &cobra.Command{
@@ -81,7 +79,6 @@ func init() {
 	templateCmd.AddCommand(templateAddSnippetCmd)
 	templateCmd.AddCommand(templateRemoveSnippetCmd)
 
-	// List flags
 	templateListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction")
 	templateListCmd.Flags().Int("page", 1, "Page number")
 	templateListCmd.Flags().Int("per-page", 30, "Items per page")
@@ -90,11 +87,9 @@ func init() {
 	templateListCmd.Flags().String("updated-after", "", "Filter by updated date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 	templateListCmd.Flags().String("updated-before", "", "Filter by updated date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 
-	// Create flags
 	templateCreateCmd.Flags().String("description", "", "Template description")
 	templateCreateCmd.Flags().String("position", "", "Snippet position: PREPEND (default) or APPEND")
 
-	// Update flags
 	templateUpdateCmd.Flags().String("description", "", "New description")
 	templateUpdateCmd.Flags().String("name", "", "New name")
 	templateUpdateCmd.Flags().String("position", "", "New position: PREPEND or APPEND")
@@ -104,66 +99,23 @@ func runTemplateList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	sortBy, _ := cmd.Flags().GetString("sort-by")
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-	createdAfter, _ := cmd.Flags().GetString("created-after")
-	createdBefore, _ := cmd.Flags().GetString("created-before")
-	updatedAfter, _ := cmd.Flags().GetString("updated-after")
-	updatedBefore, _ := cmd.Flags().GetString("updated-before")
+	opts := service.TemplateListOpts{}
+	opts.SortBy, _ = cmd.Flags().GetString("sort-by")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
+	opts.CreatedAfter, _ = cmd.Flags().GetString("created-after")
+	opts.CreatedBefore, _ = cmd.Flags().GetString("created-before")
+	opts.UpdatedAfter, _ = cmd.Flags().GetString("updated-after")
+	opts.UpdatedBefore, _ = cmd.Flags().GetString("updated-before")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-	if sortBy != "" {
-		params["sort_by"] = sortBy
-	}
-	if createdAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(createdAfter)
-		if err != nil {
-			return fmt.Errorf("invalid created-after value: %w", err)
-		}
-		params["created_after"] = parsed
-	}
-	if createdBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(createdBefore)
-		if err != nil {
-			return fmt.Errorf("invalid created-before value: %w", err)
-		}
-		params["created_before"] = parsed
-	}
-	if updatedAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(updatedAfter)
-		if err != nil {
-			return fmt.Errorf("invalid updated-after value: %w", err)
-		}
-		params["updated_after"] = parsed
-	}
-	if updatedBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(updatedBefore)
-		if err != nil {
-			return fmt.Errorf("invalid updated-before value: %w", err)
-		}
-		params["updated_before"] = parsed
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates", org), params)
+	result, err := svc.TemplateList(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
-
-	var result models.TemplateListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatTemplates(result.Templates); err != nil {
 		return err
 	}
-
-	if err := formatter.FormatTemplates(result.Items); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
@@ -175,27 +127,13 @@ func runTemplateCreate(cmd *cobra.Command, args []string) error {
 	description, _ := cmd.Flags().GetString("description")
 	position, _ := cmd.Flags().GetString("position")
 
-	payload := map[string]string{
-		"name": name,
-	}
-	if description != "" {
-		payload["description"] = description
-	}
-	if position != "" {
-		payload["position"] = position
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates", org), payload)
-	if err != nil {
+	if _, err := svc.TemplateCreate(context.Background(), org, service.TemplateCreateOpts{
+		Name:        name,
+		Description: description,
+		Position:    position,
+	}); err != nil {
 		return err
 	}
-
-	var template models.Template
-	if err := api.ParseResponse(resp, &template); err != nil {
-		return err
-	}
-
 	color.Green("✓ Template created: %s", name)
 	return nil
 }
@@ -204,20 +142,11 @@ func runTemplateDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	name := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s", org, name), nil)
+	tmpl, err := svc.TemplateGet(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var template models.Template
-	if err := api.ParseResponse(resp, &template); err != nil {
-		return err
-	}
-
-	return formatter.FormatTemplate(&template)
+	return formatter.FormatTemplate(tmpl)
 }
 
 func runTemplateUpdate(cmd *cobra.Command, args []string) error {
@@ -225,56 +154,30 @@ func runTemplateUpdate(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	newDescription, _ := cmd.Flags().GetString("description")
-	newName, _ := cmd.Flags().GetString("name")
-	newPosition, _ := cmd.Flags().GetString("position")
+	opts := service.TemplateUpdateOpts{}
+	opts.Description, _ = cmd.Flags().GetString("description")
+	opts.NewName, _ = cmd.Flags().GetString("name")
+	opts.Position, _ = cmd.Flags().GetString("position")
 
-	if newDescription == "" && newName == "" && newPosition == "" {
+	if opts.NewName == "" && opts.Description == "" && opts.Position == "" {
 		return fmt.Errorf("no updates specified. Use --description, --name, or --position")
 	}
 
-	ctx := context.Background()
-
-	// Handle rename if --name is provided
-	if newName != "" {
-		payload := map[string]string{"new_name": newName}
-		resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s/rename", org, name), payload)
-		if err != nil {
-			return err
-		}
-		if err := api.ParseResponse(resp, nil); err != nil {
-			return err
-		}
-		color.Green("✓ Template renamed: %s -> %s", name, newName)
-		// Update name for subsequent updates
-		name = newName
+	finalName, err := svc.TemplateUpdate(context.Background(), org, name, opts)
+	if err != nil {
+		return err
 	}
 
-	// Handle description/position update via PATCH
-	if newDescription != "" || newPosition != "" {
-		payload := map[string]string{}
-		if newDescription != "" {
-			payload["description"] = newDescription
-		}
-		if newPosition != "" {
-			payload["position"] = newPosition
-		}
-		resp, err := apiClient.Patch(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s", org, name), payload)
-		if err != nil {
-			return err
-		}
-		if err := api.ParseResponse(resp, nil); err != nil {
-			return err
-		}
-		if newDescription != "" && newPosition != "" {
-			color.Green("✓ Template updated: %s", name)
-		} else if newDescription != "" {
-			color.Green("✓ Template description updated: %s", name)
-		} else {
-			color.Green("✓ Template position updated: %s", name)
-		}
+	if opts.NewName != "" {
+		color.Green("✓ Template renamed: %s -> %s", name, opts.NewName)
 	}
-
+	if opts.Description != "" && opts.Position != "" {
+		color.Green("✓ Template updated: %s", finalName)
+	} else if opts.Description != "" {
+		color.Green("✓ Template description updated: %s", finalName)
+	} else if opts.Position != "" {
+		color.Green("✓ Template position updated: %s", finalName)
+	}
 	return nil
 }
 
@@ -283,22 +186,13 @@ func runTemplateDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-
 	if !helpers.Confirm(fmt.Sprintf("Delete template '%s'?", name)) {
 		fmt.Println("Cancelled")
 		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s", org, name))
-	if err != nil {
+	if err := svc.TemplateDelete(context.Background(), org, name); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Template deleted: %s", name)
 	return nil
 }
@@ -307,21 +201,10 @@ func runTemplateAddSnippet(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	templateName := args[0]
-	snippetName := args[1]
-
-	payload := map[string]string{"snippet_name": snippetName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s/snippets", org, templateName), payload)
-	if err != nil {
+	templateName, snippetName := args[0], args[1]
+	if err := svc.TemplateAddSnippet(context.Background(), org, templateName, snippetName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Snippet added to %s: %s", templateName, snippetName)
 	return nil
 }
@@ -330,20 +213,10 @@ func runTemplateRemoveSnippet(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	templateName := args[0]
-	snippetName := args[1]
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s/snippets/%s", org, templateName, snippetName))
-	if err != nil {
+	templateName, snippetName := args[0], args[1]
+	if err := svc.TemplateRemoveSnippet(context.Background(), org, templateName, snippetName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Snippet removed from %s: %s", templateName, snippetName)
 	return nil
 }
-

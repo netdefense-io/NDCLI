@@ -3,17 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var taskCmd = &cobra.Command{
@@ -86,105 +82,47 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	status, _ := cmd.Flags().GetString("status")
-	taskType, _ := cmd.Flags().GetString("type")
-	device, _ := cmd.Flags().GetString("device")
-	expired, _ := cmd.Flags().GetBool("expired")
-	createdAfter, _ := cmd.Flags().GetString("created-after")
-	createdBefore, _ := cmd.Flags().GetString("created-before")
-	sortBy, _ := cmd.Flags().GetString("sort-by")
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-
-	params := map[string]string{
-		"organization": org,
-		"page":         strconv.Itoa(page),
-		"per_page":     strconv.Itoa(perPage),
-	}
-
-	if status != "" {
-		params["status"] = status
-	}
-	if taskType != "" {
-		params["type"] = taskType
-	}
-	if device != "" {
-		params["device_name"] = device
-	}
+	opts := service.TaskListOpts{}
+	opts.Status, _ = cmd.Flags().GetString("status")
+	opts.Type, _ = cmd.Flags().GetString("type")
+	opts.Device, _ = cmd.Flags().GetString("device")
 	if cmd.Flags().Changed("expired") {
-		params["expired"] = strconv.FormatBool(expired)
+		opts.Expired, _ = cmd.Flags().GetBool("expired")
+		opts.ExpiredSet = true
 	}
-	if createdAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(createdAfter)
-		if err != nil {
-			return fmt.Errorf("invalid created-after value: %w", err)
-		}
-		params["created_after"] = parsed
-	}
-	if createdBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(createdBefore)
-		if err != nil {
-			return fmt.Errorf("invalid created-before value: %w", err)
-		}
-		params["created_before"] = parsed
-	}
-	if sortBy != "" {
-		params["sort_by"] = sortBy
-	}
+	opts.CreatedAfter, _ = cmd.Flags().GetString("created-after")
+	opts.CreatedBefore, _ = cmd.Flags().GetString("created-before")
+	opts.SortBy, _ = cmd.Flags().GetString("sort-by")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
 
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/tasks", params)
+	result, err := svc.TaskList(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
 
-	var result models.TaskListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatTasks(result.Tasks, result.Total); err != nil {
 		return err
 	}
-
-	if err := formatter.FormatTasks(result.Items, result.Total); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
 func runTaskDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
-	taskID := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/tasks/%s", taskID), nil)
+	task, err := svc.TaskGet(context.Background(), args[0])
 	if err != nil {
 		return err
 	}
-
-	var task models.Task
-	if err := api.ParseResponse(resp, &task); err != nil {
-		return err
-	}
-
-	return formatter.FormatTask(&task)
+	return formatter.FormatTask(task)
 }
 
 func runTaskCancel(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
 	taskID := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/tasks/%s/cancel", taskID), nil)
-	if err != nil {
+	if err := svc.TaskCancel(context.Background(), taskID); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Task cancelled: %s", taskID)
 	return nil
 }
@@ -196,53 +134,19 @@ func runTaskCreate(cmd *cobra.Command, args []string) error {
 	deviceName := args[0]
 	taskType := strings.ToUpper(args[1])
 
-	// Validate task type
-	validTypes := map[string]bool{
-		"PING":           true,
-		"SHUTDOWN":       true,
-		"REBOOT":         true,
-		"RESTART":        true,
-		"PLUGIN_INSTALL": true,
-	}
-	if !validTypes[taskType] {
-		return fmt.Errorf("invalid task type: %s. Valid types: PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL", args[1])
-	}
-
-	// Build task-specific payload
-	var body interface{}
+	opts := service.TaskCreateOpts{Type: taskType}
 	if taskType == "PING" {
-		target, _ := cmd.Flags().GetString("target")
-		if target == "" {
-			return fmt.Errorf("PING requires --target <ip_or_host>")
-		}
-		payload := map[string]interface{}{"target": target}
+		opts.PingTarget, _ = cmd.Flags().GetString("target")
 		if cmd.Flags().Changed("count") {
-			count, _ := cmd.Flags().GetInt("count")
-			payload["count"] = count
+			opts.PingCount, _ = cmd.Flags().GetInt("count")
 		}
-		body = map[string]interface{}{"payload": payload}
 	}
 	if taskType == "PLUGIN_INSTALL" {
-		payload := map[string]interface{}{}
-		if version, _ := cmd.Flags().GetString("version"); version != "" {
-			payload["target_version"] = version
-		}
-		body = map[string]interface{}{"payload": payload}
+		opts.InstallVersion, _ = cmd.Flags().GetString("version")
 	}
 
-	// Build query parameters
-	params := url.Values{}
-	params.Set("task_type", taskType)
-
-	ctx := context.Background()
-	endpoint := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/task?%s", org, deviceName, params.Encode())
-	resp, err := apiClient.Post(ctx, endpoint, body)
+	task, err := svc.TaskCreate(context.Background(), org, deviceName, opts)
 	if err != nil {
-		return err
-	}
-
-	var task models.Task
-	if err := api.ParseResponse(resp, &task); err != nil {
 		return err
 	}
 

@@ -2,8 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -12,8 +12,8 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var orgCmd = &cobra.Command{
@@ -58,7 +58,6 @@ var orgSetDefaultOUCmd = &cobra.Command{
 	RunE:              runOrgSetDefaultOU,
 }
 
-// Invite subcommands
 var orgInviteCmd = &cobra.Command{
 	Use:   "invite",
 	Short: "Manage organization invitations",
@@ -108,7 +107,6 @@ var orgQuotaCmd = &cobra.Command{
 	RunE:              runOrgQuota,
 }
 
-// Account subcommands
 var orgAccountCmd = &cobra.Command{
 	Use:   "account",
 	Short: "Manage organization accounts",
@@ -147,7 +145,6 @@ Valid roles:
 	RunE: runOrgAccountRole,
 }
 
-
 func init() {
 	orgCmd.AddCommand(orgListCmd)
 	orgCmd.AddCommand(orgCreateCmd)
@@ -158,23 +155,19 @@ func init() {
 	orgCmd.AddCommand(orgInviteCmd)
 	orgCmd.AddCommand(orgAccountCmd)
 
-	// Invite subcommands
 	orgInviteCmd.AddCommand(orgInviteSendCmd)
 	orgInviteCmd.AddCommand(orgInviteListCmd)
 	orgInviteCmd.AddCommand(orgInviteAcceptCmd)
 	orgInviteCmd.AddCommand(orgInviteDeclineCmd)
 	orgInviteCmd.AddCommand(orgInviteRevokeCmd)
 
-	// Account subcommands
 	orgAccountCmd.AddCommand(orgAccountListCmd)
 	orgAccountCmd.AddCommand(orgAccountDisableCmd)
 	orgAccountCmd.AddCommand(orgAccountEnableCmd)
 	orgAccountCmd.AddCommand(orgAccountRoleCmd)
 
-	// Disable flags
 	orgAccountDisableCmd.Flags().Bool("remove", false, "Permanently remove the account from the organization (cannot be re-enabled)")
 
-	// List flags
 	orgListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction")
 	orgListCmd.Flags().Int("page", 1, "Page number")
 	orgListCmd.Flags().Int("per-page", 30, "Items per page")
@@ -182,58 +175,31 @@ func init() {
 	orgListCmd.Flags().String("role", "", "Filter by role (RO, RW, SU)")
 	orgListCmd.Flags().String("status", "", "Filter by status (ENABLED, DISABLED, INVITED, DECLINED)")
 
-	// Create flags
 	orgCreateCmd.Flags().String("display-name", "", "Display name for the organization")
 	orgCreateCmd.Flags().String("description", "", "Organization description")
 
-	// Invite send flags
 	orgInviteSendCmd.Flags().String("role", "RO", "Role for the invitee (SU, RW, RO)")
 }
 
 func runOrgList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 
-	sortBy, _ := cmd.Flags().GetString("sort-by")
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-	name, _ := cmd.Flags().GetString("name")
-	role, _ := cmd.Flags().GetString("role")
-	status, _ := cmd.Flags().GetString("status")
+	opts := service.OrgListOpts{}
+	opts.SortBy, _ = cmd.Flags().GetString("sort-by")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
+	opts.Name, _ = cmd.Flags().GetString("name")
+	opts.Role, _ = cmd.Flags().GetString("role")
+	opts.Status, _ = cmd.Flags().GetString("status")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-	if sortBy != "" {
-		params["sort_by"] = sortBy
-	}
-	if name != "" {
-		params["name"] = name
-	}
-	if role != "" {
-		params["role"] = strings.ToUpper(role)
-	}
-	if status != "" {
-		params["status"] = strings.ToUpper(status)
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/organizations", params)
+	result, err := svc.OrgList(context.Background(), opts)
 	if err != nil {
 		return err
 	}
-
-	var result models.OrganizationListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatOrganizations(result.Orgs); err != nil {
 		return err
 	}
-
-	items := result.GetItems()
-	if err := formatter.FormatOrganizations(items); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.GetTotal(), perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
@@ -246,39 +212,19 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Check if we should auto-set this org as default after creation
-	// Conditions: no default org set AND user has no existing orgs
+	// If config has no default org and the user has no orgs yet, auto-set
+	// the new org as default after a successful create.
 	currentDefault := config.Get().Organization.Name
 	shouldAutoSetDefault := false
-
 	if currentDefault == "" {
-		// Check if user has any existing organizations
-		listResp, err := apiClient.Get(ctx, "/api/v1/organizations", nil)
+		listing, err := svc.OrgList(ctx, service.OrgListOpts{PerPage: 1})
 		if err == nil {
-			var listResult models.OrganizationListResponse
-			if err := api.ParseResponse(listResp, &listResult); err == nil {
-				shouldAutoSetDefault = len(listResult.GetItems()) == 0
-			}
+			shouldAutoSetDefault = len(listing.Orgs) == 0
 		}
 	}
 
-	payload := map[string]string{
-		"name": name,
-	}
-	if displayName != "" {
-		payload["display_name"] = displayName
-	}
-	if description != "" {
-		payload["description"] = description
-	}
-
-	resp, err := apiClient.Post(ctx, "/api/v1/organizations", payload)
+	org, err := svc.OrgCreate(ctx, name, displayName, description)
 	if err != nil {
-		return err
-	}
-
-	var org models.Organization
-	if err := api.ParseResponse(resp, &org); err != nil {
 		if api.IsRegistrationRestrictedError(err) {
 			color.Red("✗ Registration restricted")
 			fmt.Println()
@@ -289,10 +235,8 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Auto-set as default if this is the user's first organization
 	if shouldAutoSetDefault {
 		if err := config.UpdateValue("organization.name", name); err != nil {
-			// Log warning but don't fail the command
 			color.Yellow("⚠ Could not set as default organization: %v\n", err)
 		} else {
 			color.Green("✓ Organization created and set as default: %s\n", name)
@@ -316,82 +260,42 @@ func runOrgDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 
 	name := args[0]
-
 	if !helpers.Confirm(fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)) {
 		fmt.Println("Cancelled")
 		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s", name))
-	if err != nil {
+	if err := svc.OrgDelete(context.Background(), name); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Organization deleted: %s", name)
 	return nil
 }
 
 func runOrgDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
-	name := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s", name), nil)
+	org, err := svc.OrgGet(context.Background(), args[0])
 	if err != nil {
 		return err
 	}
-
-	var org models.Organization
-	if err := api.ParseResponse(resp, &org); err != nil {
-		return err
-	}
-
-	return formatter.FormatOrganization(&org)
+	return formatter.FormatOrganization(org)
 }
 
 func runOrgQuota(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
-	name := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/quota", name), nil)
+	q, err := svc.OrgQuota(context.Background(), args[0])
 	if err != nil {
 		return err
 	}
-
-	var result models.OrgQuota
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	return formatter.FormatOrgQuota(&result)
+	return formatter.FormatOrgQuota(q)
 }
 
 func runOrgSetDefaultOU(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
 	ouName := args[0]
-
-	payload := map[string]string{"ou_name": ouName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/default-ou", org), payload)
-	if err != nil {
+	if err := svc.OrgSetDefaultOU(context.Background(), org, ouName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Default OU set to: %s", ouName)
 	return nil
 }
@@ -399,84 +303,40 @@ func runOrgSetDefaultOU(cmd *cobra.Command, args []string) error {
 func runOrgInviteSend(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
 	email := args[0]
 	role, _ := cmd.Flags().GetString("role")
-
-	payload := map[string]string{
-		"email": email,
-		"role":  role,
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/invites", org), payload)
-	if err != nil {
+	if err := svc.OrgInviteSend(context.Background(), org, email, role); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Invitation sent to: %s", email)
 	return nil
 }
 
 func runOrgInviteList(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
-	params := map[string]string{
-		"direction": "all",
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/invites", params)
+	result, err := svc.OrgInviteList(context.Background())
 	if err != nil {
 		return err
 	}
-
-	var result models.InvitesResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	return formatter.FormatInvites(&result)
+	return formatter.FormatInvites(result)
 }
 
 func runOrgInviteAccept(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
 	orgName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/invites/accept", orgName), nil)
-	if err != nil {
+	if err := svc.OrgInviteAccept(context.Background(), orgName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Invitation to %s accepted", orgName)
 	return nil
 }
 
 func runOrgInviteDecline(cmd *cobra.Command, args []string) error {
 	requireAuth()
-
 	orgName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/invites/decline", orgName), nil)
-	if err != nil {
+	if err := svc.OrgInviteDecline(context.Background(), orgName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Invitation to %s declined", orgName)
 	return nil
 }
@@ -484,19 +344,10 @@ func runOrgInviteDecline(cmd *cobra.Command, args []string) error {
 func runOrgInviteRevoke(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
 	email := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/invites/%s", org, email))
-	if err != nil {
+	if err := svc.OrgInviteRevoke(context.Background(), org, email); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Invitation revoked for: %s", email)
 	return nil
 }
@@ -504,18 +355,10 @@ func runOrgInviteRevoke(cmd *cobra.Command, args []string) error {
 func runOrgAccountList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/accounts", org), nil)
+	result, err := svc.OrgAccountList(context.Background(), org)
 	if err != nil {
 		return err
 	}
-
-	var result models.AccountListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	return formatter.FormatAccounts(result.Accounts, result.Quota)
 }
 
@@ -526,42 +369,29 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 	email := args[0]
 	remove, _ := cmd.Flags().GetBool("remove")
 
-	// Different confirmation message based on remove flag
 	var confirmMsg string
 	if remove {
 		confirmMsg = fmt.Sprintf("Permanently remove account '%s' from organization '%s'? This cannot be undone.", email, org)
 	} else {
 		confirmMsg = fmt.Sprintf("Disable account '%s'?", email)
 	}
-
 	if !helpers.Confirm(confirmMsg) {
 		fmt.Println("Cancelled")
 		return nil
 	}
 
-	// Build endpoint with optional remove parameter
-	endpoint := fmt.Sprintf("/api/v1/organizations/%s/accounts/%s/disable", org, email)
-	if remove {
-		endpoint += "?remove=true"
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, endpoint, nil)
-	if err != nil {
-		return err
-	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		// Make error more user-friendly
-		if api.IsNotFoundError(err) {
-			return fmt.Errorf("account '%s' not found in organization '%s'", email, org)
-		}
-		if strings.Contains(err.Error(), "not ENABLED") {
-			return fmt.Errorf("account '%s' is already disabled", email)
+	if err := svc.OrgAccountDisable(context.Background(), org, email, remove); err != nil {
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) {
+			if api.IsNotFoundError(apiErr) {
+				return fmt.Errorf("account '%s' not found in organization '%s'", email, org)
+			}
+			if strings.Contains(apiErr.Error(), "not ENABLED") {
+				return fmt.Errorf("account '%s' is already disabled", email)
+			}
 		}
 		return err
 	}
-
 	if remove {
 		color.Green("✓ Account removed from organization: %s", email)
 	} else {
@@ -573,26 +403,19 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 func runOrgAccountEnable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-
 	email := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/accounts/%s/enable", org, email), nil)
-	if err != nil {
-		return err
-	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		// Make error more user-friendly
-		if api.IsNotFoundError(err) {
-			return fmt.Errorf("account '%s' not found in organization '%s'", email, org)
-		}
-		if strings.Contains(err.Error(), "not DISABLED") {
-			return fmt.Errorf("account '%s' is already enabled", email)
+	if err := svc.OrgAccountEnable(context.Background(), org, email); err != nil {
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) {
+			if api.IsNotFoundError(apiErr) {
+				return fmt.Errorf("account '%s' not found in organization '%s'", email, org)
+			}
+			if strings.Contains(apiErr.Error(), "not DISABLED") {
+				return fmt.Errorf("account '%s' is already enabled", email)
+			}
 		}
 		return err
 	}
-
 	color.Green("✓ Account enabled: %s", email)
 	return nil
 }
@@ -602,33 +425,11 @@ func runOrgAccountRole(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	email := args[0]
-	roleInput := strings.ToLower(args[1])
-
-	// Normalize role to short form
-	var role string
-	switch roleInput {
-	case "su", "superuser":
-		role = "SU"
-	case "rw", "readwrite":
-		role = "RW"
-	case "ro", "readonly":
-		role = "RO"
-	default:
-		return fmt.Errorf("invalid role: %s. Valid roles: SU/superuser, RW/readwrite, RO/readonly", args[1])
-	}
-
-	payload := map[string]string{"role": role}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/accounts/%s/role", org, email), payload)
-	if err != nil {
+	if err := svc.OrgAccountSetRole(context.Background(), org, email, args[1]); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
-	color.Green("✓ Role set to %s for: %s", role, email)
+	// Echo the canonical form (service has already normalised it).
+	canonical, _ := service.NormalizeRole(args[1])
+	color.Green("✓ Role set to %s for: %s", canonical, email)
 	return nil
 }

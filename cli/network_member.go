@@ -3,18 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
-	"github.com/netdefense-io/NDCLI/internal/vpn"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var networkMemberCmd = &cobra.Command{
@@ -63,11 +60,9 @@ var networkMemberRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	// List flags
 	networkMemberListCmd.Flags().Int("page", 1, "Page number")
 	networkMemberListCmd.Flags().Int("per-page", 30, "Items per page")
 
-	// Add flags
 	networkMemberAddCmd.Flags().String("role", "SPOKE", "Member role: HUB or SPOKE")
 	networkMemberAddCmd.Flags().Bool("enabled", true, "Enable the member")
 	networkMemberAddCmd.Flags().String("overlay-ip", "", "Overlay IPv4 address (auto-allocated if empty)")
@@ -78,7 +73,6 @@ func init() {
 	networkMemberAddCmd.Flags().Int("keepalive", 0, "Keepalive interval override")
 	networkMemberAddCmd.Flags().String("transit-via-hub", "", "Device name of HUB to route through")
 
-	// Update flags
 	networkMemberUpdateCmd.Flags().String("role", "", "Member role: HUB or SPOKE")
 	networkMemberUpdateCmd.Flags().Bool("enabled", true, "Enable/disable the member")
 	networkMemberUpdateCmd.Flags().String("endpoint-host", "", "Public hostname/IP (\"none\" to clear)")
@@ -89,7 +83,6 @@ func init() {
 	networkMemberUpdateCmd.Flags().String("transit-via-hub", "", "Device name of HUB to route through (\"none\" to clear)")
 	networkMemberUpdateCmd.Flags().Bool("regenerate-keys", false, "Regenerate WireGuard keypair")
 
-	// Remove flags
 	networkMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
@@ -101,28 +94,14 @@ func runNetworkMemberList(cmd *cobra.Command, args []string) error {
 	page, _ := cmd.Flags().GetInt("page")
 	perPage, _ := cmd.Flags().GetInt("per-page")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members",
-		url.PathEscape(org), url.PathEscape(vpnName)), params)
+	result, err := svc.NetworkMemberList(context.Background(), org, vpnName, page, perPage)
 	if err != nil {
 		return err
 	}
-
-	var result models.VpnMemberListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatVpnMembers(result.Members, result.Total); err != nil {
 		return err
 	}
-
-	if err := formatter.FormatVpnMembers(result.Items, result.Total); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
@@ -133,80 +112,49 @@ func runNetworkMemberAdd(cmd *cobra.Command, args []string) error {
 	vpnName := args[0]
 	deviceName := args[1]
 
-	payload := map[string]interface{}{
-		"device_name": deviceName,
-	}
-
+	opts := service.NetworkMemberAddOpts{}
 	if cmd.Flags().Changed("role") {
-		v, _ := cmd.Flags().GetString("role")
-		payload["role"] = v
+		opts.Role, _ = cmd.Flags().GetString("role")
 	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
-		payload["enabled"] = v
+		opts.Enabled = &v
 	}
 	if cmd.Flags().Changed("overlay-ip") {
-		v, _ := cmd.Flags().GetString("overlay-ip")
-		if v != "" {
-			payload["overlay_ip_v4"] = v
-		}
+		opts.OverlayIPv4, _ = cmd.Flags().GetString("overlay-ip")
 	}
 	if cmd.Flags().Changed("endpoint-host") {
-		v, _ := cmd.Flags().GetString("endpoint-host")
-		if v != "" {
-			payload["endpoint_host"] = v
-		}
+		opts.EndpointHost, _ = cmd.Flags().GetString("endpoint-host")
 	}
 	if cmd.Flags().Changed("endpoint-port") {
-		v, _ := cmd.Flags().GetInt("endpoint-port")
-		if v > 0 {
-			payload["endpoint_port"] = v
-		}
+		opts.EndpointPort, _ = cmd.Flags().GetInt("endpoint-port")
 	}
 	if cmd.Flags().Changed("listen-port") {
-		v, _ := cmd.Flags().GetInt("listen-port")
-		if v > 0 {
-			payload["listen_port"] = v
-		}
+		opts.ListenPort, _ = cmd.Flags().GetInt("listen-port")
 	}
 	if cmd.Flags().Changed("mtu") {
-		v, _ := cmd.Flags().GetInt("mtu")
-		if v > 0 {
-			payload["mtu"] = v
-		}
+		opts.MTU, _ = cmd.Flags().GetInt("mtu")
 	}
 	if cmd.Flags().Changed("keepalive") {
-		v, _ := cmd.Flags().GetInt("keepalive")
-		if v > 0 {
-			payload["keepalive"] = v
-		}
+		opts.Keepalive, _ = cmd.Flags().GetInt("keepalive")
 	}
 	if cmd.Flags().Changed("transit-via-hub") {
-		v, _ := cmd.Flags().GetString("transit-via-hub")
-		if v != "" {
-			payload["transit_via_hub"] = v
-		}
+		opts.TransitViaHub, _ = cmd.Flags().GetString("transit-via-hub")
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members",
-		url.PathEscape(org), url.PathEscape(vpnName)), payload)
+	member, err := svc.NetworkMemberAdd(ctx, org, vpnName, deviceName, opts)
 	if err != nil {
-		return err
-	}
-
-	var member models.VpnMember
-	if err := api.ParseResponse(resp, &member); err != nil {
 		return err
 	}
 
 	color.Green("✓ Member added to %s: %s (%s, %s)", vpnName, deviceName, member.Role, member.OverlayIPv4)
 
-	// Show connectivity info
-	network, errN := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
-	members, errM := vpn.FetchAllMembers(ctx, apiClient, org, vpnName)
+	// Show connectivity info — requires a follow-up fetch.
+	network, errN := svc.NetworkGet(ctx, org, vpnName)
+	memberList, errM := svc.NetworkMemberList(ctx, org, vpnName, 1, 500)
 	if errN == nil && errM == nil {
-		hubCount, spokeCount := countMemberRoles(members)
+		hubCount, spokeCount := countMemberRoles(memberList.Members)
 		role := strings.ToUpper(member.Role)
 		if role == "SPOKE" {
 			fmt.Printf("  Auto-connected to %d hub(s)\n", hubCount)
@@ -222,7 +170,6 @@ func runNetworkMemberAdd(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -232,20 +179,11 @@ func runNetworkMemberDescribe(cmd *cobra.Command, args []string) error {
 
 	vpnName := args[0]
 	deviceName := args[1]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceName)), nil)
+	member, err := svc.NetworkMemberGet(context.Background(), org, vpnName, deviceName)
 	if err != nil {
 		return err
 	}
-
-	var member models.VpnMember
-	if err := api.ParseResponse(resp, &member); err != nil {
-		return err
-	}
-
-	return formatter.FormatVpnMember(&member)
+	return formatter.FormatVpnMember(member)
 }
 
 func runNetworkMemberUpdate(cmd *cobra.Command, args []string) error {
@@ -254,85 +192,55 @@ func runNetworkMemberUpdate(cmd *cobra.Command, args []string) error {
 
 	vpnName := args[0]
 	deviceName := args[1]
-	payload := make(map[string]interface{})
+	opts := service.NetworkMemberUpdateOpts{}
 
 	if cmd.Flags().Changed("role") {
 		v, _ := cmd.Flags().GetString("role")
-		payload["role"] = v
+		opts.Role = &v
 	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
-		payload["enabled"] = v
+		opts.Enabled = &v
 	}
 	if cmd.Flags().Changed("endpoint-host") {
 		v, _ := cmd.Flags().GetString("endpoint-host")
-		if v == "none" || v == "" {
-			payload["endpoint_host"] = nil
-		} else {
-			payload["endpoint_host"] = v
+		// CLI sentinel "none" → empty string → service interprets as clear.
+		if v == "none" {
+			v = ""
 		}
+		opts.EndpointHost = &v
 	}
 	if cmd.Flags().Changed("endpoint-port") {
 		v, _ := cmd.Flags().GetInt("endpoint-port")
-		if v == 0 {
-			payload["endpoint_port"] = nil
-		} else {
-			payload["endpoint_port"] = v
-		}
+		opts.EndpointPort = &v
 	}
 	if cmd.Flags().Changed("listen-port") {
 		v, _ := cmd.Flags().GetInt("listen-port")
-		if v == 0 {
-			payload["listen_port"] = nil
-		} else {
-			payload["listen_port"] = v
-		}
+		opts.ListenPort = &v
 	}
 	if cmd.Flags().Changed("mtu") {
 		v, _ := cmd.Flags().GetInt("mtu")
-		if v == 0 {
-			payload["mtu"] = nil
-		} else {
-			payload["mtu"] = v
-		}
+		opts.MTU = &v
 	}
 	if cmd.Flags().Changed("keepalive") {
 		v, _ := cmd.Flags().GetInt("keepalive")
-		if v == 0 {
-			payload["keepalive"] = nil
-		} else {
-			payload["keepalive"] = v
-		}
+		opts.Keepalive = &v
 	}
 	if cmd.Flags().Changed("transit-via-hub") {
 		v, _ := cmd.Flags().GetString("transit-via-hub")
-		if v == "none" || v == "" {
-			payload["transit_via_hub"] = nil
-		} else {
-			payload["transit_via_hub"] = v
+		if v == "none" {
+			v = ""
 		}
+		opts.TransitViaHub = &v
 	}
 	if cmd.Flags().Changed("regenerate-keys") {
 		v, _ := cmd.Flags().GetBool("regenerate-keys")
-		payload["regenerate_keys"] = v
+		opts.RegenerateKeys = &v
 	}
 
-	if len(payload) == 0 {
-		return fmt.Errorf("no update flags specified")
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Patch(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceName)), payload)
-	if err != nil {
+	if _, err := svc.NetworkMemberUpdate(context.Background(), org, vpnName, deviceName, opts); err != nil {
 		return err
 	}
-
-	var member models.VpnMember
-	if err := api.ParseResponse(resp, &member); err != nil {
-		return err
-	}
-
 	color.Green("✓ Member updated: %s in %s", deviceName, vpnName)
 	return nil
 }
@@ -345,15 +253,14 @@ func runNetworkMemberRemove(cmd *cobra.Command, args []string) error {
 	deviceName := args[1]
 
 	ctx := context.Background()
-
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
-		// Fetch member to get role for impact warning
-		member, errM := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceName)
+		// Hub removal warns about disconnected spokes.
+		member, errM := svc.NetworkMemberGet(ctx, org, vpnName, deviceName)
 		if errM == nil && strings.EqualFold(member.Role, "HUB") {
-			members, errAll := vpn.FetchAllMembers(ctx, apiClient, org, vpnName)
+			members, errAll := svc.NetworkMemberList(ctx, org, vpnName, 1, 500)
 			if errAll == nil {
-				_, spokeCount := countMemberRoles(members)
+				_, spokeCount := countMemberRoles(members.Members)
 				if spokeCount > 0 {
 					prompt := fmt.Sprintf("Remove hub '%s' from VPN '%s'?\n  %d spoke(s) will lose their connection to this hub.",
 						deviceName, vpnName, spokeCount)
@@ -361,37 +268,23 @@ func runNetworkMemberRemove(cmd *cobra.Command, args []string) error {
 						fmt.Println("Cancelled")
 						return nil
 					}
-				} else {
-					if !helpers.Confirm(fmt.Sprintf("Remove hub '%s' from VPN '%s'?", deviceName, vpnName)) {
-						fmt.Println("Cancelled")
-						return nil
-					}
-				}
-			} else {
-				if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
+				} else if !helpers.Confirm(fmt.Sprintf("Remove hub '%s' from VPN '%s'?", deviceName, vpnName)) {
 					fmt.Println("Cancelled")
 					return nil
 				}
-			}
-		} else {
-			if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
+			} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
 				fmt.Println("Cancelled")
 				return nil
 			}
+		} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
+			fmt.Println("Cancelled")
+			return nil
 		}
 	}
 
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceName)))
-	if err != nil {
+	if err := svc.NetworkMemberRemove(ctx, org, vpnName, deviceName); err != nil {
 		return err
 	}
-
-	var result models.VpnDeleteResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	color.Green("✓ Member removed from %s: %s", vpnName, deviceName)
 	return nil
 }

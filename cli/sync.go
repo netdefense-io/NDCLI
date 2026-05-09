@@ -2,15 +2,13 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var syncCmd = &cobra.Command{
@@ -51,33 +49,13 @@ func runSyncStatus(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	device, _ := cmd.Flags().GetString("device")
-	ou, _ := cmd.Flags().GetString("ou")
-	orgFilter, _ := cmd.Flags().GetString("org")
+	filter := service.SyncFilter{}
+	filter.Device, _ = cmd.Flags().GetString("device")
+	filter.OU, _ = cmd.Flags().GetString("ou")
+	filter.Organization, _ = cmd.Flags().GetString("org")
 
-	// Build query params
-	params := map[string]string{}
-	if device != "" {
-		params["device"] = device
-	}
-	if ou != "" {
-		params["ou"] = ou
-	}
-	// Use org filter or default to current org
-	if orgFilter != "" {
-		params["organization"] = orgFilter
-	} else {
-		params["organization"] = org
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/sync/status", params)
+	result, err := svc.SyncStatus(context.Background(), org, filter)
 	if err != nil {
-		return err
-	}
-
-	var result models.SyncStatusResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
 		return err
 	}
 
@@ -85,7 +63,6 @@ func runSyncStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("No devices found")
 		return nil
 	}
-
 	return formatter.FormatSyncStatus(result.Items, result.Total)
 }
 
@@ -93,47 +70,25 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	device, _ := cmd.Flags().GetString("device")
-	ou, _ := cmd.Flags().GetString("ou")
-	orgFilter, _ := cmd.Flags().GetString("org")
+	filter := service.SyncFilter{}
+	filter.Device, _ = cmd.Flags().GetString("device")
+	filter.OU, _ = cmd.Flags().GetString("ou")
+	filter.Organization, _ = cmd.Flags().GetString("org")
 	force, _ := cmd.Flags().GetBool("force")
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
-	// Build query params
-	params := map[string]string{}
-	if device != "" {
-		params["device"] = device
-	}
-	if ou != "" {
-		params["ou"] = ou
-	}
-	// Use org filter or default to current org
-	if orgFilter != "" {
-		params["organization"] = orgFilter
-	} else {
-		params["organization"] = org
-	}
-
 	ctx := context.Background()
 
-	// First, fetch matching devices to show user what will be affected
 	if !skipConfirm {
-		resp, err := apiClient.Get(ctx, "/api/v1/sync/status", params)
+		status, err := svc.SyncStatus(ctx, org, filter)
 		if err != nil {
 			return err
 		}
-
-		var status models.SyncStatusResponse
-		if err := api.ParseResponse(resp, &status); err != nil {
-			return err
-		}
-
 		if len(status.Items) == 0 {
 			fmt.Println("No devices match the specified filters")
 			return nil
 		}
 
-		// Show devices that will be affected
 		fmt.Printf("Devices to sync (%d):\n", len(status.Items))
 		table := output.NewStyledTable([]string{"Device", "OUs", "Last Sync"})
 		for _, item := range status.Items {
@@ -156,33 +111,16 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Add force flag for actual sync
-	if force {
-		params["force"] = "true"
-	}
-
-	resp, err := apiClient.PostWithParams(ctx, "/api/v1/sync", params, nil)
+	applied, err := svc.SyncApply(ctx, org, filter, force)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	// Parse response body - works for 200, 207 (mixed), and 400 (all fail)
-	// All three return the same SyncApplyResponse structure
-	var result models.SyncApplyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Display the result (includes errors for 207 and 400)
-	if err := formatter.FormatSyncApply(&result); err != nil {
+	if err := formatter.FormatSyncApply(applied.Response); err != nil {
 		return err
 	}
-
-	// Return error for 400 status (all devices failed) to set non-zero exit code
-	if resp.StatusCode == 400 && len(result.Errors) > 0 {
+	if applied.StatusCode == 400 && len(applied.Response.Errors) > 0 {
 		return fmt.Errorf("sync failed for all devices")
 	}
-
 	return nil
 }

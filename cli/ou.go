@@ -2,16 +2,16 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
-	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var ouCmd = &cobra.Command{
@@ -80,7 +80,6 @@ var ouRemoveDeviceCmd = &cobra.Command{
 	RunE:              runOURemoveDevice,
 }
 
-// Template subcommands for OU
 var ouTemplateCmd = &cobra.Command{
 	Use:   "template",
 	Short: "Manage OU templates",
@@ -143,56 +142,24 @@ func runOUList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	status, _ := cmd.Flags().GetString("status")
-	name, _ := cmd.Flags().GetString("name")
-	sortBy, _ := cmd.Flags().GetString("sort-by")
-	sortOrder, _ := cmd.Flags().GetString("sort-order")
-	page, _ := cmd.Flags().GetInt("page")
-	pageSize, _ := cmd.Flags().GetInt("per-page")
-	createdAfter, _ := cmd.Flags().GetString("created-after")
-	createdBefore, _ := cmd.Flags().GetString("created-before")
+	opts := service.OUListOpts{}
+	opts.Status, _ = cmd.Flags().GetString("status")
+	opts.Name, _ = cmd.Flags().GetString("name")
+	opts.SortBy, _ = cmd.Flags().GetString("sort-by")
+	opts.SortOrder, _ = cmd.Flags().GetString("sort-order")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PageSize, _ = cmd.Flags().GetInt("per-page")
+	opts.CreatedAfter, _ = cmd.Flags().GetString("created-after")
+	opts.CreatedBefore, _ = cmd.Flags().GetString("created-before")
 
-	params := map[string]string{
-		"status":     status,
-		"sort_by":    sortBy,
-		"sort_order": sortOrder,
-		"page":       strconv.Itoa(page),
-		"page_size":  strconv.Itoa(pageSize),
-	}
-	if name != "" {
-		params["name"] = name
-	}
-	if createdAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(createdAfter)
-		if err != nil {
-			return fmt.Errorf("invalid created-after value: %w", err)
-		}
-		params["created_after"] = parsed
-	}
-	if createdBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(createdBefore)
-		if err != nil {
-			return fmt.Errorf("invalid created-before value: %w", err)
-		}
-		params["created_before"] = parsed
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous", org), params)
+	result, err := svc.OUList(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
-
-	var result models.OUListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	if err := formatter.FormatOUs(result.OUs); err != nil {
 		return err
 	}
-
-	output.PrintPagination(page, result.Total, pageSize)
+	output.PrintPagination(result.Page, result.Total, result.PageSize)
 	return nil
 }
 
@@ -200,20 +167,11 @@ func runOUDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s", org, ouName), nil)
+	ou, err := svc.OUGet(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var ou models.OrganizationalUnit
-	if err := api.ParseResponse(resp, &ou); err != nil {
-		return err
-	}
-
-	return formatter.FormatOU(&ou)
+	return formatter.FormatOU(ou)
 }
 
 func runOUCreate(cmd *cobra.Command, args []string) error {
@@ -222,25 +180,9 @@ func runOUCreate(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	description, _ := cmd.Flags().GetString("description")
-
-	payload := map[string]string{
-		"name": name,
-	}
-	if description != "" {
-		payload["description"] = description
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous", org), payload)
-	if err != nil {
+	if _, err := svc.OUCreate(context.Background(), org, name, description); err != nil {
 		return err
 	}
-
-	var ou models.OrganizationalUnit
-	if err := api.ParseResponse(resp, &ou); err != nil {
-		return err
-	}
-
 	color.Green("✓ OU created: %s", name)
 	return nil
 }
@@ -250,21 +192,13 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-
 	if !helpers.Confirm(fmt.Sprintf("Delete OU '%s'?", name)) {
 		fmt.Println("Cancelled")
 		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s", org, name))
-	if err != nil {
-		return err
-	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		// Check for conflict with blocking devices
-		if apiErr, ok := err.(*api.APIError); ok && len(apiErr.BlockingResources) > 0 {
+	if err := svc.OUDelete(context.Background(), org, name); err != nil {
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && len(apiErr.BlockingResources) > 0 {
 			color.Red("Cannot delete OU '%s' - %d active device(s) must be removed first:", name, len(apiErr.BlockingResources))
 			for _, device := range apiErr.BlockingResources {
 				fmt.Printf("  • %s\n", device)
@@ -273,7 +207,6 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-
 	color.Green("✓ OU deleted: %s", name)
 	return nil
 }
@@ -282,22 +215,10 @@ func runOURename(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	oldName := args[0]
-	newName := args[1]
-
-	payload := map[string]string{"name": newName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s", org, oldName), payload)
-	if err != nil {
+	oldName, newName := args[0], args[1]
+	if _, err := svc.OURename(context.Background(), org, oldName, newName); err != nil {
 		return err
 	}
-
-	var ou models.OrganizationalUnit
-	if err := api.ParseResponse(resp, &ou); err != nil {
-		return err
-	}
-
 	color.Green("✓ OU renamed: %s → %s", oldName, newName)
 	return nil
 }
@@ -306,45 +227,21 @@ func runOUDeviceList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-
-	params := map[string]string{
-		"ou": ouName,
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices", org), params)
+	result, err := svc.OUDeviceList(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var result models.DeviceListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	return formatter.FormatDevices(result.GetItems(), result.Total, result.Quota)
+	return formatter.FormatDevices(result.Devices, result.Total, result.Quota)
 }
 
 func runOUAddDevice(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-	deviceName := args[1]
-
-	payload := map[string]string{"device_name": deviceName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s/devices", org, ouName), payload)
-	if err != nil {
+	ouName, deviceName := args[0], args[1]
+	if err := svc.OUAddDevice(context.Background(), org, ouName, deviceName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Device added to %s: %s", ouName, deviceName)
 	return nil
 }
@@ -353,19 +250,10 @@ func runOURemoveDevice(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-	deviceName := args[1]
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s/devices/%s", org, ouName, deviceName))
-	if err != nil {
+	ouName, deviceName := args[0], args[1]
+	if err := svc.OURemoveDevice(context.Background(), org, ouName, deviceName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Device removed from %s: %s", ouName, deviceName)
 	return nil
 }
@@ -374,21 +262,10 @@ func runOUTemplateAdd(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-	templateName := args[1]
-
-	payload := map[string]string{"template": templateName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s/templates", org, ouName), payload)
-	if err != nil {
+	ouName, templateName := args[0], args[1]
+	if err := svc.OUTemplateAdd(context.Background(), org, ouName, templateName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Template added to %s: %s", ouName, templateName)
 	return nil
 }
@@ -397,19 +274,10 @@ func runOUTemplateRemove(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-	templateName := args[1]
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s/templates/%s", org, ouName, templateName))
-	if err != nil {
+	ouName, templateName := args[0], args[1]
+	if err := svc.OUTemplateRemove(context.Background(), org, ouName, templateName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Template removed from %s: %s", ouName, templateName)
 	return nil
 }
@@ -418,21 +286,9 @@ func runOUTemplateList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	ouName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/ous/%s/templates", org, ouName), nil)
+	result, err := svc.OUTemplateList(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var result struct {
-		Items []models.Template `json:"items"`
-		Total int               `json:"total"`
-	}
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	return formatter.FormatTemplates(result.Items)
 }

@@ -2,9 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -14,6 +13,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
+	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/vpn"
 )
 
@@ -71,22 +71,18 @@ var networkLinkDeleteCmd = &cobra.Command{
 }
 
 func init() {
-	// List flags — effective connections mode (default)
 	networkLinkListCmd.Flags().Bool("raw", false, "Show raw VPN link database rows instead of effective connections")
 	networkLinkListCmd.Flags().String("device", "", "Filter connections to those involving this device")
 	networkLinkListCmd.Flags().Int("page", 1, "Page number (only with --raw)")
 	networkLinkListCmd.Flags().Int("per-page", 30, "Items per page (only with --raw)")
 	networkLinkListCmd.RegisterFlagCompletionFunc("device", completeVpnMemberDevices)
 
-	// Create flags
 	networkLinkCreateCmd.Flags().Bool("enabled", true, "Enable the link")
 	networkLinkCreateCmd.Flags().Bool("generate-psk", false, "Generate a WireGuard pre-shared key")
 
-	// Update flags
 	networkLinkUpdateCmd.Flags().Bool("enabled", true, "Enable/disable the link")
 	networkLinkUpdateCmd.Flags().Bool("regenerate-psk", false, "Regenerate the pre-shared key")
 
-	// Delete flags
 	networkLinkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
@@ -98,63 +94,23 @@ func runNetworkLinkList(cmd *cobra.Command, args []string) error {
 	raw, _ := cmd.Flags().GetBool("raw")
 
 	if raw {
-		return runNetworkLinkListOverrides(cmd, org, vpnName)
+		page, _ := cmd.Flags().GetInt("page")
+		perPage, _ := cmd.Flags().GetInt("per-page")
+		result, err := svc.NetworkLinkListRaw(context.Background(), org, vpnName, page, perPage)
+		if err != nil {
+			return err
+		}
+		if err := formatter.FormatVpnLinks(result.Links, result.Total); err != nil {
+			return err
+		}
+		output.PrintPagination(result.Page, result.Total, result.PerPage)
+		return nil
 	}
 
-	return runNetworkLinkListEffective(cmd, org, vpnName)
-}
-
-func runNetworkLinkListOverrides(cmd *cobra.Command, org, vpnName string) error {
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links",
-		url.PathEscape(org), url.PathEscape(vpnName)), params)
+	deviceFilter, _ := cmd.Flags().GetString("device")
+	connections, err := svc.NetworkLinkListEffective(context.Background(), org, vpnName, deviceFilter)
 	if err != nil {
 		return err
-	}
-
-	var result models.VpnLinkListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	if err := formatter.FormatVpnLinks(result.Items, result.Total); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
-	return nil
-}
-
-func runNetworkLinkListEffective(cmd *cobra.Command, org, vpnName string) error {
-	ctx := context.Background()
-
-	network, err := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
-	if err != nil {
-		return err
-	}
-
-	members, err := vpn.FetchAllMembers(ctx, apiClient, org, vpnName)
-	if err != nil {
-		return err
-	}
-
-	links, err := vpn.FetchAllLinks(ctx, apiClient, org, vpnName)
-	if err != nil {
-		return err
-	}
-
-	connections := vpn.ComputeEffectiveConnections(network, members, links)
-
-	if deviceFilter, _ := cmd.Flags().GetString("device"); deviceFilter != "" {
-		connections = vpn.FilterByDevice(connections, deviceFilter)
 	}
 
 	if err := formatter.FormatVpnConnections(connections, len(connections)); err != nil {
@@ -173,12 +129,10 @@ func runNetworkLinkListEffective(cmd *cobra.Command, org, vpnName string) error 
 			manualLinks++
 		}
 	}
-
 	connWord := "connections"
 	if len(connections) == 1 {
 		connWord = "connection"
 	}
-
 	var parts []string
 	if automatic > 0 {
 		parts = append(parts, fmt.Sprintf("%d automatic", automatic))
@@ -198,7 +152,6 @@ func runNetworkLinkListEffective(cmd *cobra.Command, org, vpnName string) error 
 		parts = append(parts, fmt.Sprintf("%d %s", overrides, word))
 	}
 	output.ColorDim.Printf("\n%d %s (%s)\n", len(connections), connWord, strings.Join(parts, ", "))
-
 	return nil
 }
 
@@ -212,46 +165,32 @@ func runNetworkLinkCreate(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Fetch both members to validate and classify
-	memberA, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceA)
+	// Pre-fetch members + network to classify the pair for the success message.
+	memberA, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceA)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceA, err)
 	}
-	memberB, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceB)
+	memberB, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceB, err)
 	}
-
-	// Fetch network for auto_connect_hubs
-	network, err := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
+	network, err := svc.NetworkGet(ctx, org, vpnName)
 	if err != nil {
 		return err
 	}
-
 	pairType, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
 
-	payload := map[string]interface{}{
-		"device_a_name": deviceA,
-		"device_b_name": deviceB,
-	}
-
+	opts := service.NetworkLinkCreateOpts{}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
-		payload["enabled"] = v
+		opts.Enabled = &v
 	}
 	if cmd.Flags().Changed("generate-psk") {
 		v, _ := cmd.Flags().GetBool("generate-psk")
-		payload["generate_psk"] = v
+		opts.GeneratePSK = &v
 	}
 
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links",
-		url.PathEscape(org), url.PathEscape(vpnName)), payload)
-	if err != nil {
-		return err
-	}
-
-	var link models.VpnLink
-	if err := api.ParseResponse(resp, &link); err != nil {
+	if _, err := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, opts); err != nil {
 		return err
 	}
 
@@ -266,7 +205,6 @@ func runNetworkLinkCreate(cmd *cobra.Command, args []string) error {
 	} else {
 		color.Green("✓ Link created: %s ↔ %s in %s", deviceA, deviceB, vpnName)
 	}
-
 	return nil
 }
 
@@ -280,42 +218,32 @@ func runNetworkLinkDescribe(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Try fetching the link from the API
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links/%s/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceA), url.PathEscape(deviceB)), nil)
-	if err != nil {
-		return err
+	link, getErr := svc.NetworkLinkGet(ctx, org, vpnName, deviceA, deviceB)
+	linkFound := getErr == nil
+	if getErr != nil {
+		// Only swallow the error when it is a 404 (link doesn't exist for an
+		// implicit pair); surface anything else.
+		var apiErr *api.APIError
+		if !errors.As(getErr, &apiErr) || apiErr.StatusCode != 404 {
+			return getErr
+		}
 	}
 
-	linkFound := resp.StatusCode < 400
-	if !linkFound {
-		resp.Body.Close()
-	}
-
-	// Fetch members to classify
-	memberA, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceA)
+	memberA, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceA)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceA, err)
 	}
-	memberB, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceB)
+	memberB, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceB, err)
 	}
-
-	network, err := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
+	network, err := svc.NetworkGet(ctx, org, vpnName)
 	if err != nil {
 		return err
 	}
-
 	pairType, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
 
 	if linkFound {
-		// Link exists — build effective connection from it
-		var link models.VpnLink
-		if err := api.ParseResponse(resp, &link); err != nil {
-			return err
-		}
-
 		conn := &models.EffectiveConnection{
 			DeviceA:     link.DeviceAName,
 			DeviceB:     link.DeviceBName,
@@ -331,9 +259,7 @@ func runNetworkLinkDescribe(cmd *cobra.Command, args []string) error {
 		return formatter.FormatVpnConnection(conn)
 	}
 
-	// Link not found (404)
 	if source == "implicit" {
-		// Automatic pair without override — show default active connection
 		conn := &models.EffectiveConnection{
 			DeviceA:    deviceA,
 			DeviceB:    deviceB,
@@ -347,7 +273,6 @@ func runNetworkLinkDescribe(cmd *cobra.Command, args []string) error {
 		return formatter.FormatVpnConnection(conn)
 	}
 
-	// Explicit pair with no link — not connected
 	return fmt.Errorf("no connection between %s and %s. Create a link with 'ndcli network link create'", deviceA, deviceB)
 }
 
@@ -358,117 +283,68 @@ func runNetworkLinkUpdate(cmd *cobra.Command, args []string) error {
 	vpnName := args[0]
 	deviceA := args[1]
 	deviceB := args[2]
-	payload := make(map[string]interface{})
 
+	opts := service.NetworkLinkUpdateOpts{}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
-		payload["enabled"] = v
+		opts.Enabled = &v
 	}
 	if cmd.Flags().Changed("regenerate-psk") {
 		v, _ := cmd.Flags().GetBool("regenerate-psk")
-		payload["regenerate_psk"] = v
+		opts.RegeneratePSK = &v
 	}
-
-	if len(payload) == 0 {
+	if opts.Enabled == nil && opts.RegeneratePSK == nil {
 		return fmt.Errorf("no update flags specified")
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Patch(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links/%s/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceA), url.PathEscape(deviceB)), payload)
+	_, err := svc.NetworkLinkUpdate(ctx, org, vpnName, deviceA, deviceB, opts)
 	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode == 404 {
-		resp.Body.Close()
-
-		// 404 — check if this is an implicit pair that needs an auto-created override
-		memberA, errA := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceA)
-		memberB, errB := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceB)
-		if errA != nil || errB != nil {
-			return fmt.Errorf("link between '%s' and '%s' not found", deviceA, deviceB)
-		}
-
-		network, errN := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
-		if errN != nil {
-			return fmt.Errorf("link between '%s' and '%s' not found", deviceA, deviceB)
-		}
-
-		pairType, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
-		if source != "implicit" {
-			return fmt.Errorf("link between '%s' and '%s' not found", deviceA, deviceB)
-		}
-
-		// Auto-create override for implicit pair
-		createPayload := map[string]interface{}{
-			"device_a_name": deviceA,
-			"device_b_name": deviceB,
-		}
-		if cmd.Flags().Changed("enabled") {
-			v, _ := cmd.Flags().GetBool("enabled")
-			createPayload["enabled"] = v
-		}
-		if cmd.Flags().Changed("regenerate-psk") {
-			v, _ := cmd.Flags().GetBool("regenerate-psk")
-			createPayload["generate_psk"] = v
-		}
-
-		createResp, createErr := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links",
-			url.PathEscape(org), url.PathEscape(vpnName)), createPayload)
-		if createErr != nil {
-			return createErr
-		}
-
-		var created models.VpnLink
-		if err := api.ParseResponse(createResp, &created); err != nil {
-			return err
-		}
-
-		color.Green("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType))
-		if cmd.Flags().Changed("enabled") {
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			if !enabled {
-				fmt.Println("  This override disables the automatic connection between these devices")
+		// 404 — auto-create override for implicit pairs.
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+			memberA, errA := svc.NetworkMemberGet(ctx, org, vpnName, deviceA)
+			memberB, errB := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
+			network, errN := svc.NetworkGet(ctx, org, vpnName)
+			if errA == nil && errB == nil && errN == nil {
+				pairType, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
+				if source == "implicit" {
+					createOpts := service.NetworkLinkCreateOpts{Enabled: opts.Enabled}
+					if opts.RegeneratePSK != nil {
+						createOpts.GeneratePSK = opts.RegeneratePSK
+					}
+					if _, cErr := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, createOpts); cErr != nil {
+						return cErr
+					}
+					color.Green("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType))
+					if opts.Enabled != nil && !*opts.Enabled {
+						fmt.Println("  This override disables the automatic connection between these devices")
+					}
+					return nil
+				}
 			}
 		}
-		return nil
-	}
-
-	var link models.VpnLink
-	if err := api.ParseResponse(resp, &link); err != nil {
 		return err
 	}
 
-	// Fetch members to classify pair
-	memberA, errA := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceA)
-	memberB, errB := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceB)
-	if errA != nil || errB != nil {
+	// Success — classify the pair to phrase the success line.
+	memberA, errA := svc.NetworkMemberGet(ctx, org, vpnName, deviceA)
+	memberB, errB := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
+	network, errN := svc.NetworkGet(ctx, org, vpnName)
+	if errA != nil || errB != nil || errN != nil {
 		color.Green("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
 		return nil
 	}
-
-	network, errN := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
-	if errN != nil {
-		color.Green("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
-		return nil
-	}
-
 	_, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
-
 	if source == "implicit" {
-		if cmd.Flags().Changed("enabled") {
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			if !enabled {
-				color.Green("✓ Link override updated: %s ↔ %s in %s (automatic connection disabled)", deviceA, deviceB, vpnName)
-				return nil
-			}
+		if opts.Enabled != nil && !*opts.Enabled {
+			color.Green("✓ Link override updated: %s ↔ %s in %s (automatic connection disabled)", deviceA, deviceB, vpnName)
+			return nil
 		}
 		color.Green("✓ Link override updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
 	} else {
 		color.Green("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
 	}
-
 	return nil
 }
 
@@ -482,21 +358,18 @@ func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Fetch members to classify pair before confirmation
-	memberA, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceA)
+	memberA, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceA)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceA, err)
 	}
-	memberB, err := vpn.FetchMember(ctx, apiClient, org, vpnName, deviceB)
+	memberB, err := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
 	if err != nil {
 		return fmt.Errorf("member '%s': %w", deviceB, err)
 	}
-
-	network, err := vpn.FetchNetwork(ctx, apiClient, org, vpnName)
+	network, err := svc.NetworkGet(ctx, org, vpnName)
 	if err != nil {
 		return err
 	}
-
 	pairType, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
 
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
@@ -515,22 +388,13 @@ func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/links/%s/%s",
-		url.PathEscape(org), url.PathEscape(vpnName), url.PathEscape(deviceA), url.PathEscape(deviceB)))
-	if err != nil {
+	if err := svc.NetworkLinkDelete(ctx, org, vpnName, deviceA, deviceB); err != nil {
 		return err
 	}
-
-	var result models.VpnDeleteResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
 	if source == "implicit" {
 		color.Green("✓ Link override removed: %s ↔ %s in %s (automatic connection remains active)", deviceA, deviceB, vpnName)
 	} else {
 		color.Green("✓ Link deleted: %s ↔ %s in %s (devices disconnected)", deviceA, deviceB, vpnName)
 	}
-
 	return nil
 }

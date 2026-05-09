@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/fatih/color"
@@ -15,6 +14,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/pathfinder"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 var deviceCmd = &cobra.Command{
@@ -138,96 +138,29 @@ func runDeviceList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	status, _ := cmd.Flags().GetString("status")
-	ou, _ := cmd.Flags().GetString("ou")
-	name, _ := cmd.Flags().GetString("name")
-	sortBy, _ := cmd.Flags().GetString("sort-by")
-	page, _ := cmd.Flags().GetInt("page")
-	perPage, _ := cmd.Flags().GetInt("per-page")
-	heartbeatAfter, _ := cmd.Flags().GetString("heartbeat-after")
-	heartbeatBefore, _ := cmd.Flags().GetString("heartbeat-before")
-	syncedAfter, _ := cmd.Flags().GetString("synced-after")
-	syncedBefore, _ := cmd.Flags().GetString("synced-before")
-	createdAfter, _ := cmd.Flags().GetString("created-after")
-	createdBefore, _ := cmd.Flags().GetString("created-before")
+	opts := service.DeviceListOpts{}
+	opts.Status, _ = cmd.Flags().GetString("status")
+	opts.OU, _ = cmd.Flags().GetString("ou")
+	opts.Name, _ = cmd.Flags().GetString("name")
+	opts.SortBy, _ = cmd.Flags().GetString("sort-by")
+	opts.Page, _ = cmd.Flags().GetInt("page")
+	opts.PerPage, _ = cmd.Flags().GetInt("per-page")
+	opts.HeartbeatAfter, _ = cmd.Flags().GetString("heartbeat-after")
+	opts.HeartbeatBefore, _ = cmd.Flags().GetString("heartbeat-before")
+	opts.SyncedAfter, _ = cmd.Flags().GetString("synced-after")
+	opts.SyncedBefore, _ = cmd.Flags().GetString("synced-before")
+	opts.CreatedAfter, _ = cmd.Flags().GetString("created-after")
+	opts.CreatedBefore, _ = cmd.Flags().GetString("created-before")
 
-	params := map[string]string{
-		"page":     strconv.Itoa(page),
-		"per_page": strconv.Itoa(perPage),
-	}
-
-	if status != "" {
-		params["status"] = status
-	}
-	if ou != "" {
-		params["ou"] = ou
-	}
-	if name != "" {
-		params["name"] = name
-	}
-	if sortBy != "" {
-		params["sort_by"] = sortBy
-	}
-	if heartbeatAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(heartbeatAfter)
-		if err != nil {
-			return fmt.Errorf("invalid heartbeat-after value: %w", err)
-		}
-		params["heartbeat_after"] = parsed
-	}
-	if heartbeatBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(heartbeatBefore)
-		if err != nil {
-			return fmt.Errorf("invalid heartbeat-before value: %w", err)
-		}
-		params["heartbeat_before"] = parsed
-	}
-	if syncedAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(syncedAfter)
-		if err != nil {
-			return fmt.Errorf("invalid synced-after value: %w", err)
-		}
-		params["synced_after"] = parsed
-	}
-	if syncedBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(syncedBefore)
-		if err != nil {
-			return fmt.Errorf("invalid synced-before value: %w", err)
-		}
-		params["synced_before"] = parsed
-	}
-	if createdAfter != "" {
-		parsed, err := helpers.ParseTimeFilter(createdAfter)
-		if err != nil {
-			return fmt.Errorf("invalid created-after value: %w", err)
-		}
-		params["created_after"] = parsed
-	}
-	if createdBefore != "" {
-		parsed, err := helpers.ParseTimeFilter(createdBefore)
-		if err != nil {
-			return fmt.Errorf("invalid created-before value: %w", err)
-		}
-		params["created_before"] = parsed
-	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices", org), params)
+	result, err := svc.DeviceList(context.Background(), org, opts)
 	if err != nil {
 		return err
 	}
 
-	var result models.DeviceListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
+	if err := formatter.FormatDevices(result.Devices, result.Total, result.Quota); err != nil {
 		return err
 	}
-
-	devices := result.GetItems()
-	if err := formatter.FormatDevices(devices, result.Total, result.Quota); err != nil {
-		return err
-	}
-
-	output.PrintPagination(page, result.Total, perPage)
+	output.PrintPagination(result.Page, result.Total, result.PerPage)
 	return nil
 }
 
@@ -236,17 +169,9 @@ func runDeviceApprove(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	deviceName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/approve", org, deviceName), nil)
-	if err != nil {
+	if err := svc.DeviceApprove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Device approved: %s", deviceName)
 	return nil
 }
@@ -257,19 +182,9 @@ func runDeviceRename(cmd *cobra.Command, args []string) error {
 
 	deviceName := args[0]
 	newName := args[1]
-
-	payload := map[string]string{"new_name": newName}
-
-	ctx := context.Background()
-	resp, err := apiClient.Put(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/rename", org, deviceName), payload)
-	if err != nil {
+	if err := svc.DeviceRename(context.Background(), org, deviceName, newName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Device renamed: %s → %s", deviceName, newName)
 	return nil
 }
@@ -279,22 +194,13 @@ func runDeviceRemove(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	deviceName := args[0]
-
 	if !helpers.Confirm(fmt.Sprintf("Remove device '%s'?", deviceName)) {
 		fmt.Println("Cancelled")
 		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Delete(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s", org, deviceName))
-	if err != nil {
+	if err := svc.DeviceRemove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return err
-	}
-
 	color.Green("✓ Device removed: %s", deviceName)
 	return nil
 }
@@ -303,74 +209,46 @@ func runDeviceDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	deviceName := args[0]
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s", org, deviceName), nil)
+	device, err := svc.DeviceGet(context.Background(), org, args[0])
 	if err != nil {
 		return err
 	}
-
-	var device models.Device
-	if err := api.ParseResponse(resp, &device); err != nil {
-		return err
-	}
-
-	return formatter.FormatDevice(&device)
+	return formatter.FormatDevice(device)
 }
 
 func runDeviceApproveAll(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	params := map[string]string{
-		"status":   "PENDING",
-		"per_page": "500",
-	}
-
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices", org), params)
+
+	// Pre-flight count so we can prompt before issuing the bulk approval.
+	listing, err := svc.DeviceList(ctx, org, service.DeviceListOpts{
+		Status:  models.DeviceStatusPending,
+		PerPage: 500,
+	})
 	if err != nil {
 		return err
 	}
-
-	var result models.DeviceListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return err
-	}
-
-	devices := result.GetItems()
-	if len(devices) == 0 {
+	if len(listing.Devices) == 0 {
 		fmt.Println("No pending devices found")
 		return nil
 	}
-
-	if !helpers.Confirm(fmt.Sprintf("Approve all %d pending devices?", len(devices))) {
+	if !helpers.Confirm(fmt.Sprintf("Approve all %d pending devices?", len(listing.Devices))) {
 		fmt.Println("Cancelled")
 		return nil
 	}
 
-	approved := 0
-	failed := 0
-
-	for _, device := range devices {
-		resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/approve", org, device.Name), nil)
-		if err != nil {
-			color.Red("✗ Failed to approve %s: %s", device.Name, err)
+	approved, failed := 0, 0
+	for _, d := range listing.Devices {
+		if err := svc.DeviceApprove(ctx, org, d.Name); err != nil {
+			color.Red("✗ Failed to approve %s: %s", d.Name, err)
 			failed++
 			continue
 		}
-
-		if err := api.ParseResponse(resp, nil); err != nil {
-			color.Red("✗ Failed to approve %s: %s", device.Name, err)
-			failed++
-			continue
-		}
-
-		color.Green("✓ Approved: %s", device.Name)
+		color.Green("✓ Approved: %s", d.Name)
 		approved++
 	}
-
 	fmt.Println()
 	fmt.Printf("Approved: %d, Failed: %d\n", approved, failed)
 	return nil
@@ -485,38 +363,15 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// rebindTokenResponse mirrors the JSON returned by NDManager's
-// /devices/{name}/issue-rebind-token endpoint.
-type rebindTokenResponse struct {
-	BootstrapToken string `json:"bootstrap_token"`
-	ExpiresAt      string `json:"expires_at"`
-	Message        string `json:"message"`
-}
-
 func runDeviceRebindToken(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
 	deviceName := args[0]
 	ttl, _ := cmd.Flags().GetDuration("ttl")
-	if ttl <= 0 {
-		return fmt.Errorf("--ttl must be positive")
-	}
 
-	body := map[string]int{"ttl_seconds": int(ttl.Seconds())}
-
-	ctx := context.Background()
-	resp, err := apiClient.Post(
-		ctx,
-		fmt.Sprintf("/api/v1/organizations/%s/devices/%s/issue-rebind-token", org, deviceName),
-		body,
-	)
+	parsed, err := svc.DeviceRebindToken(context.Background(), org, deviceName, ttl)
 	if err != nil {
-		return err
-	}
-
-	var parsed rebindTokenResponse
-	if err := api.ParseResponse(resp, &parsed); err != nil {
 		return err
 	}
 
