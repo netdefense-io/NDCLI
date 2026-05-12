@@ -14,6 +14,7 @@ type Task struct {
 	CreatedAt    FlexibleTime `json:"created_at"`
 	UpdatedAt    FlexibleTime `json:"updated_at,omitempty"`
 	ExpiresAt    FlexibleTime `json:"expires_at,omitempty"`
+	ScheduledAt  FlexibleTime `json:"scheduled_at,omitempty"`
 	StartedAt    FlexibleTime `json:"started_at,omitempty"`
 	CompletedAt  FlexibleTime `json:"completed_at,omitempty"`
 }
@@ -40,15 +41,35 @@ const (
 
 // TaskType constants
 const (
-	TaskTypeBackup   = "BACKUP"
-	TaskTypeConnect  = "CONNECT"
-	TaskTypePing     = "PING"
-	TaskTypePull     = "PULL"
-	TaskTypeReboot   = "REBOOT"
-	TaskTypeRestart  = "RESTART"
-	TaskTypeShutdown = "SHUTDOWN"
-	TaskTypeSync     = "SYNC"
+	TaskTypeBackup        = "BACKUP"
+	TaskTypeConnect       = "CONNECT"
+	TaskTypePing          = "PING"
+	TaskTypePull          = "PULL"
+	TaskTypeReboot        = "REBOOT"
+	TaskTypeRestart       = "RESTART"
+	TaskTypeShutdown      = "SHUTDOWN"
+	TaskTypeSync          = "SYNC"
+	TaskTypePluginInstall = "PLUGIN_INSTALL"
 )
+
+// RunResult is the response from POST /organizations/{org}/tasks — the
+// `ndcli run` server-side fan-out endpoint. One row per resolved device.
+type RunResult struct {
+	Type         string        `json:"type"`
+	Organization string        `json:"organization"`
+	ScheduledAt  string        `json:"scheduled_at,omitempty"`
+	Total        int           `json:"total"`
+	Tasks        []RunTaskItem `json:"tasks"`
+}
+
+// RunTaskItem is a single device's task row inside a RunResult.
+type RunTaskItem struct {
+	Task       string `json:"task"`
+	DeviceUUID string `json:"device_uuid"`
+	DeviceName string `json:"device_name"`
+	Status     string `json:"status"`
+	ExpiresAt  string `json:"expires_at"`
+}
 
 // ConnectInitResponse is returned by POST /devices/{device}/connect
 type ConnectInitResponse struct {

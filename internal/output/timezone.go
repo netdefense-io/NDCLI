@@ -31,6 +31,13 @@ func GetTimezone() string {
 	return displayLocation.String()
 }
 
+// Location returns the active display timezone as a *time.Location, for use
+// when parsing bare-tz timestamps the user typed in (e.g. `--at`). Returns
+// time.Local when the config is unset or set to "Local".
+func Location() *time.Location {
+	return displayLocation
+}
+
 // inDisplayZone converts a time to the display timezone.
 func inDisplayZone(t time.Time) time.Time {
 	return t.In(displayLocation)

@@ -135,68 +135,72 @@ func (s *Service) TaskCancel(ctx context.Context, taskID string) error {
 	return nil
 }
 
-// TaskCreateOpts carries the task type and any type-specific payload fields.
-// Only one PingTarget+PingCount or InstallVersion is read, depending on Type.
-type TaskCreateOpts struct {
-	Type           string // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL
-	PingTarget     string // required for PING
-	PingCount      int    // optional for PING; <=0 means use server default
-	InstallVersion string // optional for PLUGIN_INSTALL
+// RunOpts is the typed input for Service.Run. The Type uses NDDataModels
+// enum strings (PING/SHUTDOWN/...). At least one of Devices/OUs/AllDevices
+// must be set; the friendly-name mapping (`ping` → PING, etc.) lives in
+// cli/run.go so it stays out of MCP-facing surface area.
+type RunOpts struct {
+	Type        string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL
+	Payload     map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version
+	Devices     []string               // repeatable
+	OUs         []string               // repeatable
+	AllDevices  bool                   // mutually exclusive with Devices/OUs
+	ScheduledAt string                 // RFC3339; empty = run immediately
 }
 
-// validCreateTypes enumerates the task types create accepts. SYNC, PULL,
-// BACKUP, CONNECT have dedicated endpoints elsewhere.
-var validCreateTypes = map[string]bool{
-	models.TaskTypePing:     true,
-	models.TaskTypeShutdown: true,
-	models.TaskTypeReboot:   true,
-	models.TaskTypeRestart:  true,
-	"PLUGIN_INSTALL":        true,
+var validRunTypes = map[string]bool{
+	models.TaskTypePing:          true,
+	models.TaskTypeShutdown:      true,
+	models.TaskTypeReboot:        true,
+	models.TaskTypeRestart:       true,
+	models.TaskTypePluginInstall: true,
 }
 
-// TaskCreate creates an on-demand task for a device.
-func (s *Service) TaskCreate(ctx context.Context, org, deviceName string, opts TaskCreateOpts) (*models.Task, error) {
-	if deviceName == "" {
-		return nil, &Error{Code: CodeInvalidInput, Message: "device name is required"}
+// Run posts to POST /api/v1/organizations/{org}/tasks — the server-side
+// fan-out endpoint. NDManager resolves devices/OUs/all, creates one task
+// per resolved device, and returns the list. SCHEDULED tasks come back
+// with status=SCHEDULED; immediate tasks come back PENDING.
+func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.RunResult, error) {
+	if org == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "organization is required"}
 	}
 	taskType := strings.ToUpper(opts.Type)
-	if !validCreateTypes[taskType] {
+	if !validRunTypes[taskType] {
 		return nil, &Error{
 			Code:    CodeInvalidInput,
-			Message: fmt.Sprintf("invalid task type: %s. Valid types: PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL", opts.Type),
+			Message: fmt.Sprintf("invalid task type: %s", opts.Type),
 		}
 	}
-
-	var body interface{}
-	switch taskType {
-	case models.TaskTypePing:
-		if opts.PingTarget == "" {
-			return nil, &Error{Code: CodeInvalidInput, Message: "PING requires a target IP or host"}
-		}
-		payload := map[string]interface{}{"target": opts.PingTarget}
-		if opts.PingCount > 0 {
-			payload["count"] = opts.PingCount
-		}
-		body = map[string]interface{}{"payload": payload}
-	case "PLUGIN_INSTALL":
-		payload := map[string]interface{}{}
-		if opts.InstallVersion != "" {
-			payload["target_version"] = opts.InstallVersion
-		}
-		body = map[string]interface{}{"payload": payload}
+	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
+		return nil, &Error{Code: CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+	}
+	if opts.AllDevices && (len(opts.Devices) > 0 || len(opts.OUs) > 0) {
+		return nil, &Error{Code: CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
 	}
 
-	q := url.Values{}
-	q.Set("task_type", taskType)
-	endpoint := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/task?%s", org, deviceName, q.Encode())
+	body := map[string]interface{}{
+		"type": taskType,
+		"targets": map[string]interface{}{
+			"devices": opts.Devices,
+			"ous":     opts.OUs,
+			"all":     opts.AllDevices,
+		},
+	}
+	if opts.Payload != nil && len(opts.Payload) > 0 {
+		body["payload"] = opts.Payload
+	}
+	if opts.ScheduledAt != "" {
+		body["scheduled_at"] = opts.ScheduledAt
+	}
 
+	endpoint := fmt.Sprintf("/api/v1/organizations/%s/tasks", url.PathEscape(org))
 	resp, err := s.api.Post(ctx, endpoint, body)
 	if err != nil {
 		return nil, wrapAPI("%v", err)
 	}
-	var task models.Task
-	if err := api.ParseResponse(resp, &task); err != nil {
+	var result models.RunResult
+	if err := api.ParseResponse(resp, &result); err != nil {
 		return nil, wrapAPI("%v", err)
 	}
-	return &task, nil
+	return &result, nil
 }

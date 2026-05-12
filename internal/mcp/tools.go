@@ -142,6 +142,15 @@ func boolProperty(description string) map[string]interface{} {
 	}
 }
 
+// stringArrayProperty creates a `string[]` property for tool schemas.
+func stringArrayProperty(description string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":        "array",
+		"description": description,
+		"items":       map[string]interface{}{"type": "string"},
+	}
+}
+
 // organizationProperty creates the standard organization property
 func organizationProperty() map[string]interface{} {
 	return stringProperty("Organization name (uses default from config if not specified)")

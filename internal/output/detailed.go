@@ -202,6 +202,18 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 	return nil
 }
 
+// FormatRunResult renders a `ndcli run` response. Detailed uses the same
+// shared body as table/simple — boxing a multi-row task list would be
+// noise, not signal.
+func (f *DetailedFormatter) FormatRunResult(result *models.RunResult) error {
+	header, rows := runResultLines(result)
+	f.Success(header)
+	for _, r := range rows {
+		fmt.Fprintln(f.Writer, r)
+	}
+	return nil
+}
+
 // FormatOrganizations formats a list of organizations with full details
 func (f *DetailedFormatter) FormatOrganizations(orgs []models.Organization) error {
 	if len(orgs) == 0 {

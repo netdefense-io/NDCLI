@@ -90,6 +90,17 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 	return nil
 }
 
+// FormatRunResult renders a `ndcli run` response as a one-line header and
+// one indented bullet per resolved device.
+func (f *SimpleFormatter) FormatRunResult(result *models.RunResult) error {
+	header, rows := runResultLines(result)
+	f.Success(header)
+	for _, r := range rows {
+		fmt.Fprintln(f.Writer, r)
+	}
+	return nil
+}
+
 // FormatOrganizations formats a list of organizations
 func (f *SimpleFormatter) FormatOrganizations(orgs []models.Organization) error {
 	if len(orgs) == 0 {

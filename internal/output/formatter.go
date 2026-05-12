@@ -85,6 +85,7 @@ type Formatter interface {
 	// Tasks
 	FormatTasks(tasks []models.Task, total int) error
 	FormatTask(task *models.Task) error
+	FormatRunResult(result *models.RunResult) error
 
 	// Organizations
 	FormatOrganizations(orgs []models.Organization) error
@@ -204,6 +205,24 @@ func GetFormatter(format string) Formatter {
 	default:
 		return NewTableFormatter()
 	}
+}
+
+// runResultLines renders the shared body used by every text formatter for
+// `ndcli run` output. JSON uses its own representation. Returns the header
+// summary followed by one indented line per task.
+func runResultLines(result *models.RunResult) (header string, rows []string) {
+	if result.ScheduledAt != "" {
+		header = fmt.Sprintf("Scheduled %d %s task(s) in org %q for %s",
+			result.Total, result.Type, result.Organization, result.ScheduledAt)
+	} else {
+		header = fmt.Sprintf("Created %d %s task(s) in org %q",
+			result.Total, result.Type, result.Organization)
+	}
+	for _, t := range result.Tasks {
+		rows = append(rows, fmt.Sprintf("  %-20s %s  →  task %s  (%s, expires %s)",
+			t.DeviceName, t.DeviceUUID, t.Task, t.Status, t.ExpiresAt))
+	}
+	return header, rows
 }
 
 // PrintPagination prints pagination info

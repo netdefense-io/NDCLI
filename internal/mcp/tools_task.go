@@ -29,16 +29,6 @@ type taskIDInput struct {
 	Confirm bool   `json:"confirm,omitempty"`
 }
 
-type taskCreateInput struct {
-	Organization   string `json:"organization,omitempty"`
-	Device         string `json:"device"`
-	Type           string `json:"type"`
-	Target         string `json:"target,omitempty"`
-	Count          int    `json:"count,omitempty"`
-	Version        string `json:"version,omitempty"`
-	Confirm        bool   `json:"confirm,omitempty"`
-}
-
 // registerTaskTools registers task management tools.
 func (s *Server) registerTaskTools() {
 	// ndcli.task.list
@@ -89,24 +79,6 @@ func (s *Server) registerTaskTools() {
 		},
 	}, s.handleTaskCancel)
 
-	// ndcli.task.create
-	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.task.create",
-		Description: "Create an on-demand task for a device. PING requires `target` (and accepts `count`); PLUGIN_INSTALL accepts an optional `version`. SHUTDOWN, REBOOT and RESTART take no extra fields. Requires confirm=true.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"organization": organizationProperty(),
-				"device":       stringProperty("Device name"),
-				"type":         stringEnumProperty("Task type", []string{"PING", "SHUTDOWN", "REBOOT", "RESTART", "PLUGIN_INSTALL"}),
-				"target":       stringProperty("Target IP or host (required for PING)"),
-				"count":        intProperty("Ping packet count (PING only)", 4),
-				"version":      stringProperty("Semver to pin install to (PLUGIN_INSTALL only)"),
-				"confirm":      confirmProperty(),
-			},
-			"required": []string{"device", "type"},
-		},
-	}, s.handleTaskCreate)
 }
 
 func (s *Server) handleTaskList(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -200,43 +172,6 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *mcp.CallToolRequest)
 		"task":   input.Task,
 		"action": "cancelled",
 	}, fmt.Sprintf("Task %s cancelled", input.Task))
-}
-
-func (s *Server) handleTaskCreate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if err := s.svc.RequireAuth(); err != nil {
-		return s.errorResult(err)
-	}
-	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[taskCreateInput](argsJSON)
-	if err != nil {
-		return s.errorResult(err)
-	}
-	org, err := s.svc.ResolveOrg(input.Organization)
-	if err != nil {
-		return s.errorResult(err)
-	}
-	if !input.Confirm {
-		return s.previewResult(fmt.Sprintf("create %s task on", input.Type), input.Device)
-	}
-
-	apiCtx, cancel := contextWithTimeout()
-	defer cancel()
-
-	task, err := s.svc.TaskCreate(apiCtx, org, input.Device, service.TaskCreateOpts{
-		Type:           input.Type,
-		PingTarget:     input.Target,
-		PingCount:      input.Count,
-		InstallVersion: input.Version,
-	})
-	if err != nil {
-		return s.errorResult(err)
-	}
-	return s.successResult(map[string]interface{}{
-		"task":   task.ID,
-		"type":   task.Type,
-		"device": input.Device,
-		"status": task.Status,
-	}, fmt.Sprintf("Task %s created (%s)", task.ID, task.Type))
 }
 
 func taskSummary(t *models.Task) map[string]interface{} {

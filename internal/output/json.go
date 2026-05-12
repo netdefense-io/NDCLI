@@ -70,6 +70,11 @@ func (f *JSONFormatter) FormatTask(task *models.Task) error {
 	return f.output(task)
 }
 
+// FormatRunResult formats a multi-device run result as JSON
+func (f *JSONFormatter) FormatRunResult(result *models.RunResult) error {
+	return f.output(result)
+}
+
 // FormatOrganizations formats organizations as JSON
 func (f *JSONFormatter) FormatOrganizations(orgs []models.Organization) error {
 	return f.output(map[string]interface{}{

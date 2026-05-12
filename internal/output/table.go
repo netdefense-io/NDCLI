@@ -266,6 +266,18 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 	return nil
 }
 
+// FormatRunResult renders a `ndcli run` response as a header line plus
+// a row per resolved device. Same body as the simple formatter — there's
+// no useful "table" representation when every row is a single task.
+func (f *TableFormatter) FormatRunResult(result *models.RunResult) error {
+	header, rows := runResultLines(result)
+	f.Success(header)
+	for _, r := range rows {
+		fmt.Fprintln(f.Writer, r)
+	}
+	return nil
+}
+
 // FormatOrganizations formats a list of organizations as a table
 func (f *TableFormatter) FormatOrganizations(orgs []models.Organization) error {
 	if len(orgs) == 0 {

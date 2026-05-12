@@ -176,6 +176,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(networkCmd)
 	rootCmd.AddCommand(orgCmd)
 	rootCmd.AddCommand(ouCmd)
+	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(snippetCmd)
