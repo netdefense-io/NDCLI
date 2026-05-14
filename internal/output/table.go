@@ -270,14 +270,40 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 }
 
 // FormatRunResult renders a `ndcli run` response as a header line plus
-// a row per resolved device. Same body as the simple formatter — there's
-// no useful "table" representation when every row is a single task.
+// a styled table — one row per resolved device. The device UUID is
+// intentionally omitted: name + task code identify the row, and the UUID
+// is internal info available through `-f json` if a script needs it.
+// Status is omitted from the row because the header already states it
+// (SCHEDULED if scheduled_at is set, PENDING otherwise).
+//
+// For scheduled tasks the table grows a `Fires at` column so the
+// scheduled fire time is visible per-row, not only in the header — when
+// you scroll past the header line, the most relevant timestamp must
+// stay on screen.
 func (f *TableFormatter) FormatRunResult(result *models.RunResult) error {
-	header, rows := runResultLines(result)
-	f.Success(header)
-	for _, r := range rows {
-		fmt.Fprintln(f.Writer, r)
+	f.Success(runResultHeader(result))
+	if len(result.Tasks) == 0 {
+		return nil
 	}
+	scheduled := parseRunTime(result.ScheduledAt)
+	headers := []string{"Device", "Task", "Expires"}
+	if !scheduled.IsZero() {
+		headers = []string{"Device", "Task", "Fires at", "Expires"}
+	}
+	table := NewStyledTable(headers)
+	firesAt := FormatTimestamp(scheduled)
+	for _, t := range result.Tasks {
+		row := []string{
+			t.DeviceName,
+			t.Task,
+		}
+		if !scheduled.IsZero() {
+			row = append(row, firesAt)
+		}
+		row = append(row, FormatTimestamp(parseRunTime(t.ExpiresAt)))
+		table.Append(row)
+	}
+	table.Render()
 	return nil
 }
 

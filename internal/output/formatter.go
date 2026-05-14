@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
@@ -207,22 +208,36 @@ func GetFormatter(format string) Formatter {
 	}
 }
 
-// runResultLines renders the shared body used by every text formatter for
-// `ndcli run` output. JSON uses its own representation. Returns the header
-// summary followed by one indented line per task.
-func runResultLines(result *models.RunResult) (header string, rows []string) {
+// runResultHeader builds the one-line summary used by every text formatter
+// for `ndcli run` output. JSON serializes the model directly. Plural is
+// real (not the parenthesized "task(s)"), and the scheduled-fire timestamp
+// is rendered in the user's display tz.
+func runResultHeader(result *models.RunResult) string {
+	noun := "task"
+	if result.Total != 1 {
+		noun = "tasks"
+	}
 	if result.ScheduledAt != "" {
-		header = fmt.Sprintf("Scheduled %d %s task(s) in org %q for %s",
-			result.Total, result.Type, result.Organization, result.ScheduledAt)
-	} else {
-		header = fmt.Sprintf("Created %d %s task(s) in org %q",
-			result.Total, result.Type, result.Organization)
+		return fmt.Sprintf("Scheduled %d %s %s in org %q — fires at %s",
+			result.Total, result.Type, noun, result.Organization,
+			FormatTimestamp(parseRunTime(result.ScheduledAt)))
 	}
-	for _, t := range result.Tasks {
-		rows = append(rows, fmt.Sprintf("  %-20s %s  →  task %s  (%s, expires %s)",
-			t.DeviceName, t.DeviceUUID, t.Task, t.Status, t.ExpiresAt))
+	return fmt.Sprintf("Created %d %s %s in org %q",
+		result.Total, result.Type, noun, result.Organization)
+}
+
+// parseRunTime parses an RFC3339 timestamp into time.Time. Returns the
+// zero value (which FormatTimestamp renders as "-") on parse failure or
+// empty input — never panics, since render-path failures shouldn't break
+// a successful task creation.
+func parseRunTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
 	}
-	return header, rows
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // PrintPagination prints pagination info

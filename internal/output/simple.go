@@ -94,12 +94,22 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 }
 
 // FormatRunResult renders a `ndcli run` response as a one-line header and
-// one indented bullet per resolved device.
+// one bullet per resolved device. Drops the device UUID (internal info,
+// available via -f json) and the per-row status (already in the header).
+// For scheduled tasks the bullet carries the fire time inline so the
+// timing stays visible when scrolling past the header.
 func (f *SimpleFormatter) FormatRunResult(result *models.RunResult) error {
-	header, rows := runResultLines(result)
-	f.Success(header)
-	for _, r := range rows {
-		fmt.Fprintln(f.Writer, r)
+	f.Success(runResultHeader(result))
+	scheduled := parseRunTime(result.ScheduledAt)
+	for _, t := range result.Tasks {
+		expires := FormatTimestamp(parseRunTime(t.ExpiresAt))
+		if !scheduled.IsZero() {
+			fmt.Fprintf(f.Writer, "• %s → task %s (fires %s, expires %s)\n",
+				t.DeviceName, t.Task, FormatTimestamp(scheduled), expires)
+		} else {
+			fmt.Fprintf(f.Writer, "• %s → task %s (expires %s)\n",
+				t.DeviceName, t.Task, expires)
+		}
 	}
 	return nil
 }

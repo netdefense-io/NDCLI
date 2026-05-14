@@ -205,14 +205,32 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 	return nil
 }
 
-// FormatRunResult renders a `ndcli run` response. Detailed uses the same
-// shared body as table/simple — boxing a multi-row task list would be
-// noise, not signal.
+// FormatRunResult renders a `ndcli run` response with one small box per
+// resolved device — title bar carries the device name, body carries the
+// task code, status, scheduled-at (if any) and expires. UUID is dropped
+// (available via -f json). Same width as FormatTask above for visual
+// consistency when piping output through both views.
 func (f *DetailedFormatter) FormatRunResult(result *models.RunResult) error {
-	header, rows := runResultLines(result)
-	f.Success(header)
-	for _, r := range rows {
-		fmt.Fprintln(f.Writer, r)
+	const width = 55
+	f.Success(runResultHeader(result))
+	scheduled := parseRunTime(result.ScheduledAt)
+	for i, t := range result.Tasks {
+		if i > 0 {
+			fmt.Fprintln(f.Writer)
+		}
+		box := NewBox(width)
+		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Device"))
+		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, t.DeviceName)
+		padding := width - 5 - len(t.DeviceName)
+		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
+		fmt.Fprintln(f.Writer, box.BottomLine())
+		fmt.Fprintln(f.Writer)
+		fmt.Fprintf(f.Writer, "  %-12s %s %s\n", "Status", StatusIndicator(t.Status), ColoredStatus(t.Status))
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Task", t.Task)
+		if !scheduled.IsZero() {
+			fmt.Fprintf(f.Writer, "  %-12s %s\n", "Scheduled", FormatTimestamp(scheduled))
+		}
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Expires", FormatTimestamp(parseRunTime(t.ExpiresAt)))
 	}
 	return nil
 }
