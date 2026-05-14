@@ -248,6 +248,9 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 	fmt.Printf("Device:       %s\n", task.DeviceName)
 	fmt.Printf("Organization: %s\n", task.Organization)
 	fmt.Printf("Created:      %s\n", FormatTimestamp(task.CreatedAt.Time))
+	if !task.ScheduledAt.IsZero() {
+		fmt.Printf("Scheduled:    %s\n", FormatTimestamp(task.ScheduledAt.Time))
+	}
 	if !task.ExpiresAt.IsZero() {
 		fmt.Printf("Expires:      %s\n", FormatTimestamp(task.ExpiresAt.Time))
 	}

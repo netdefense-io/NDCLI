@@ -170,6 +170,9 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 
 	// Timestamps
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Created", FormatTimestamp(task.CreatedAt.Time))
+	if !task.ScheduledAt.IsZero() {
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Scheduled", FormatTimestamp(task.ScheduledAt.Time))
+	}
 	if !task.ExpiresAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Expires", FormatTimestamp(task.ExpiresAt.Time))
 	}

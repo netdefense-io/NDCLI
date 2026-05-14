@@ -199,6 +199,7 @@ func taskFull(t *models.Task) map[string]interface{} {
 		"error_message": t.ErrorMessage,
 		"created_at":    t.CreatedAt,
 		"updated_at":    t.UpdatedAt,
+		"scheduled_at":  t.ScheduledAt,
 		"expires_at":    t.ExpiresAt,
 		"started_at":    t.StartedAt,
 		"completed_at":  t.CompletedAt,

@@ -72,6 +72,9 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 	fmt.Fprintf(f.Writer, "  Device: %s\n", task.DeviceName)
 	fmt.Fprintf(f.Writer, "  Organization: %s\n", task.Organization)
 	fmt.Fprintf(f.Writer, "  Created: %s\n", FormatTimestamp(task.CreatedAt.Time))
+	if !task.ScheduledAt.IsZero() {
+		fmt.Fprintf(f.Writer, "  Scheduled: %s\n", FormatTimestamp(task.ScheduledAt.Time))
+	}
 	if !task.ExpiresAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  Expires: %s\n", FormatTimestamp(task.ExpiresAt.Time))
 	}
