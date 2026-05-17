@@ -27,7 +27,7 @@ func (f *SimpleFormatter) FormatDevices(devices []models.Device, total int, quot
 	for _, d := range devices {
 		status := ColoredStatus(d.Status)
 		synced := SyncIndicator(d.IsSynced())
-		fmt.Fprintf(f.Writer, "• %s [%s] %s - %s\n", d.Name, status, synced, d.GetOUsDisplay())
+		fmt.Fprintf(f.Writer, "• %s [%s] %s %s - %s\n", d.Name, status, OnlineIndicator(d.Online), synced, d.GetOUsDisplay())
 	}
 	if quota != nil {
 		fmt.Fprintf(f.Writer, "\n%s\n", formatQuotaFooterSimple("enabled devices", quota))
@@ -39,6 +39,7 @@ func (f *SimpleFormatter) FormatDevices(devices []models.Device, total int, quot
 func (f *SimpleFormatter) FormatDevice(device *models.Device) error {
 	fmt.Fprintf(f.Writer, "Device: %s\n", device.Name)
 	fmt.Fprintf(f.Writer, "  Status: %s\n", ColoredStatus(device.Status))
+	fmt.Fprintf(f.Writer, "  Online: %s %s\n", OnlineIndicator(device.Online), OnlineLabel(device.Online))
 	fmt.Fprintf(f.Writer, "  Organization: %s\n", device.Organization)
 	if len(device.OrganizationalUnits) > 0 {
 		fmt.Fprintf(f.Writer, "  OUs: %s\n", device.GetOUsDisplay())

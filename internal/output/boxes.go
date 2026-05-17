@@ -208,6 +208,29 @@ func SyncIndicator(synced bool) string {
 	return ColorDim.Sprint("✗")
 }
 
+// OnlineIndicator returns a tri-state indicator for the device online registry:
+// true → connected, false → authoritative offline, nil → unknown (Redis down).
+func OnlineIndicator(online *bool) string {
+	if online == nil {
+		return ColorDim.Sprint("?")
+	}
+	if *online {
+		return ColorEnabled.Sprint("●")
+	}
+	return ColorDisabled.Sprint("○")
+}
+
+// OnlineLabel returns the plain-text label paired with OnlineIndicator.
+func OnlineLabel(online *bool) string {
+	if online == nil {
+		return "unknown"
+	}
+	if *online {
+		return "online"
+	}
+	return "offline"
+}
+
 // Divider returns a horizontal divider line
 func Divider(width int) string {
 	return strings.Repeat("─", width)

@@ -11,6 +11,11 @@ type Device struct {
 	OrganizationalUnits []string      `json:"organizational_units,omitempty"`
 	Version             string        `json:"version,omitempty"`
 	Heartbeat           FlexibleTime  `json:"heartbeat,omitempty"`
+	// Online is tri-state from NDManager's online-device registry:
+	// true = a broker replica owns the device's WS; false = registry up,
+	// no replica reports ownership (authoritative offline); nil = lookup
+	// failed (Redis down / disabled) — callers must not infer offline.
+	Online              *bool         `json:"online,omitempty"`
 	AutoSync            bool          `json:"auto_sync"`
 	SyncedAt            *FlexibleTime `json:"synced_at,omitempty"`
 	SyncedHash          *string       `json:"synced_hash,omitempty"`

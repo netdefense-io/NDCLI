@@ -82,6 +82,7 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 		autoSyncStr = "Yes"
 	}
 	fmt.Fprintf(f.Writer, "%-12s %s\n", "Auto-Sync", autoSyncStr)
+	fmt.Fprintf(f.Writer, "  %-12s %s %s\n", "Online", OnlineIndicator(d.Online), OnlineLabel(d.Online))
 
 	// Details
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Organization", d.Organization)

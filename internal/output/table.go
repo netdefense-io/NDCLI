@@ -150,7 +150,7 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 		return nil
 	}
 
-	table := NewStyledTable([]string{"Name", "Status", "OU", "Version", "Heartbeat", "Synced At"})
+	table := NewStyledTable([]string{"Name", "Status", "Online", "OU", "Version", "Heartbeat", "Synced At"})
 
 	for _, d := range devices {
 		ou := d.GetOUsDisplay()
@@ -169,6 +169,7 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 		table.Append([]string{
 			d.Name,
 			StatusWithIcon(d.Status),
+			OnlineIndicator(d.Online) + " " + OnlineLabel(d.Online),
 			ou,
 			version,
 			heartbeat,
@@ -188,6 +189,7 @@ func (f *TableFormatter) FormatDevice(device *models.Device) error {
 	fmt.Printf("Name:         %s\n", device.Name)
 	fmt.Printf("UUID:         %s\n", device.UUID)
 	fmt.Printf("Status:       %s\n", ColoredStatus(device.Status))
+	fmt.Printf("Online:       %s %s\n", OnlineIndicator(device.Online), OnlineLabel(device.Online))
 	fmt.Printf("Organization: %s\n", device.Organization)
 
 	// OUs
