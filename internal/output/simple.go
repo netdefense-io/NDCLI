@@ -86,7 +86,7 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  Completed: %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		fmt.Fprintf(f.Writer, "\nMessage:\n%s\n", task.Message)
+		fmt.Fprintf(f.Writer, "\nMessage:\n%s\n", FormatTaskMessage(task.Message))
 	}
 	if task.ErrorMessage != "" {
 		fmt.Fprintf(f.Writer, "\nError: %s\n", task.ErrorMessage)

@@ -184,14 +184,19 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Completed", FormatTimestamp(task.CompletedAt.Time))
 	}
 
-	// Message — wrap long lines so the full text is readable inside the box.
-	// ContentLine reserves 5 chars of framing (│ + 2 spaces + 1 space + │), so
-	// the usable content width is width-5.
+	// Message — SYNC tasks store a JSON envelope ({message, results,
+	// validation_errors}); FormatTaskMessage unpacks it into a summary
+	// line plus per-change list. Non-SYNC or older messages pass
+	// through unchanged. wrapMessageLines preserves internal padding
+	// (so columns in the change list line up) and uses a hanging
+	// indent of two past the original leading whitespace for any
+	// continuation lines.
 	if task.Message != "" {
+		formatted := FormatTaskMessage(task.Message)
 		fmt.Fprintln(f.Writer)
 		sectionBox := NewSharpBox(width)
 		fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Message"))
-		for _, line := range wrapToWidth(task.Message, width-5) {
+		for _, line := range wrapMessageLines(formatted, width-5) {
 			fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
 		}
 		fmt.Fprintln(f.Writer, sectionBox.BottomLine())

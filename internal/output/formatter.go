@@ -22,6 +22,47 @@ func sortedSnippetNames(m map[string][]string) []string {
 	return names
 }
 
+// leadingSpaces counts the number of leading ASCII space characters in s.
+func leadingSpaces(s string) int {
+	n := 0
+	for n < len(s) && s[n] == ' ' {
+		n++
+	}
+	return n
+}
+
+// wrapMessageLines wraps each \n-separated paragraph in s to fit width,
+// preserving any internal whitespace that aligns columns. Lines that
+// already fit pass through verbatim. Lines that exceed width are broken
+// at the last space at or before the limit; if no such space exists the
+// break is hard at the limit. Continuation lines are indented two
+// spaces past the original line's leading whitespace so wrapped change
+// rows still sit under their name column.
+func wrapMessageLines(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		hanging := strings.Repeat(" ", leadingSpaces(line)+2)
+		for len(line) > width {
+			// Find last space at or before width to break on.
+			cut := strings.LastIndex(line[:width], " ")
+			if cut <= leadingSpaces(line) {
+				cut = width
+			}
+			out = append(out, strings.TrimRight(line[:cut], " "))
+			line = hanging + strings.TrimLeft(line[cut:], " ")
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // wrapToWidth splits s into lines no longer than width chars, preferring
 // space boundaries. Embedded newlines are preserved; tokens longer than
 // width are hard-split. Used to display multi-line messages inside fixed-width
