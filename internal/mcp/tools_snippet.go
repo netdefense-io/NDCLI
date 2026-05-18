@@ -119,7 +119,7 @@ func (s *Server) registerSnippetTools() {
 				"organization": organizationProperty(),
 				"name":         stringProperty("Snippet name"),
 				"type":         stringEnumProperty("Snippet type", snippetTypeEnum),
-				"content":      stringProperty("Snippet content (XML or whatever the type expects)"),
+				"content":      stringProperty("Snippet content as JSON matching the type's schema (single-line or pretty-printed; the server stores the canonical form)"),
 				"priority":     intProperty("Priority 1-60000 (default 1000)", 1000),
 			},
 			"required": []string{"name", "type", "content"},

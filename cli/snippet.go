@@ -224,7 +224,7 @@ func runSnippetDescribe(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 	color.Cyan("Content:")
-	fmt.Println(snippet.Content)
+	fmt.Println(internalHelpers.PrettyJSON(snippet.Content))
 	return nil
 }
 
@@ -239,11 +239,17 @@ func runSnippetEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	newContent, err := internalHelpers.EditContent(snippet.Content, ".xml")
+	pretty := internalHelpers.PrettyJSON(snippet.Content)
+	edited, err := internalHelpers.EditContent(pretty, ".json")
 	if err != nil {
 		return fmt.Errorf("failed to edit content: %w", err)
 	}
-	if newContent == snippet.Content {
+	// Minify before sending so the server stores compact JSON (matching the
+	// historical wire format). Compare minified-new against the original
+	// (also minified server-side) to detect no-op edits — re-indenting alone
+	// must not trigger an update.
+	newContent := internalHelpers.MinifyJSON(edited)
+	if newContent == internalHelpers.MinifyJSON(snippet.Content) {
 		fmt.Println("No changes made")
 		return nil
 	}
@@ -361,7 +367,7 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 			if task.Message != "" {
 				fmt.Println()
 				color.Cyan("Content:")
-				fmt.Println(task.Message)
+				fmt.Println(internalHelpers.PrettyJSON(task.Message))
 			}
 			return nil
 		case models.TaskStatusFailed:

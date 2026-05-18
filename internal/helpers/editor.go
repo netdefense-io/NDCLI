@@ -54,12 +54,6 @@ func EditContent(content, extension string) (string, error) {
 	}
 	tmpFile.Close()
 
-	// Record file info before editing for integrity check
-	infoBefore, err := os.Lstat(tmpPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to stat temp file: %w", err)
-	}
-
 	// Open editor
 	cmd := exec.Command(editorPath, tmpPath)
 	cmd.Stdin = os.Stdin
@@ -70,17 +64,17 @@ func EditContent(content, extension string) (string, error) {
 		return "", fmt.Errorf("editor exited with error: %w", err)
 	}
 
-	// Verify file integrity after editing: check it's still a regular file
-	// owned by us and not a symlink
+	// Verify the temp file is still a plain regular file. Use Lstat so a
+	// symlink swap is observed as a symlink (not its target). The inode is
+	// intentionally NOT compared — editors like vim, nano, and emacs save
+	// by writing a new file and renaming it over the original (atomic write),
+	// which changes the inode on every successful save.
 	infoAfter, err := os.Lstat(tmpPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read edited file: %w", err)
 	}
-	if infoAfter.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("temp file was replaced with a symlink, aborting")
-	}
-	if !os.SameFile(infoBefore, infoAfter) {
-		return "", fmt.Errorf("temp file was replaced during editing, aborting")
+	if !infoAfter.Mode().IsRegular() {
+		return "", fmt.Errorf("temp file is no longer a regular file, aborting")
 	}
 
 	// Read edited content
