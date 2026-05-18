@@ -72,6 +72,7 @@ type snippetPullInput struct {
 var snippetTypeEnum = []string{
 	"USER", "GROUP", "ALIAS", "RULE",
 	"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD", "UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
+	"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
 }
 
 // registerSnippetTools registers every snippet tool.

@@ -101,6 +101,10 @@ Matching behavior:
 - For UNBOUND_DOMAIN_FORWARD: Match by domain name (e.g., internal.corp)
 - For UNBOUND_HOST_ALIAS: Match by hostname.domain (e.g., www.local)
 - For UNBOUND_ACL: Match by ACL name (e.g., lan-clients)
+- For ZABBIX_SETTINGS: Singleton — name is used only as the destination snippet name;
+  the agent returns the full Zabbix Agent settings tree
+- For ZABBIX_USERPARAMETER: Exact UserParameter key (e.g., nd-cpu-temp)
+- For ZABBIX_ALIAS: Exact item-alias key (e.g., nd-uname)
 
 By default, the command returns immediately with the task ID.
 Use --wait (-w) to wait for the task to complete and display the result.`,
@@ -121,7 +125,7 @@ func init() {
 	snippetCmd.AddCommand(snippetPullCmd)
 
 	// List flags
-	snippetListCmd.Flags().String("type", "", "Filter by type: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL")
+	snippetListCmd.Flags().String("type", "", "Filter by type: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
 	snippetListCmd.Flags().String("name", "", "Filter by name (regex pattern)")
 	snippetListCmd.Flags().String("sort-by", "priority:asc", "Sort field and direction (priority, name, created_at, updated_at)")
 	snippetListCmd.Flags().Int("page", 1, "Page number")
@@ -132,13 +136,13 @@ func init() {
 	snippetListCmd.Flags().String("updated-before", "", "Filter by updated date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 
 	// Create flags
-	snippetCreateCmd.Flags().String("type", "", "Snippet type (required): USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL")
+	snippetCreateCmd.Flags().String("type", "", "Snippet type (required): USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
 	snippetCreateCmd.Flags().String("content", "", "Snippet content (required)")
 	snippetCreateCmd.Flags().String("file", "", "Read content from file instead of --content")
 	snippetCreateCmd.Flags().Int("priority", 1000, "Snippet priority 1-60000 (default 1000)")
 
 	// Pull flags
-	snippetPullCmd.Flags().String("type", "ALIAS", "Config type to pull: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL")
+	snippetPullCmd.Flags().String("type", "ALIAS", "Config type to pull: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
 	snippetPullCmd.Flags().Bool("auto-create", false, "Create snippet in DB if it doesn't exist")
 	snippetPullCmd.Flags().Bool("overwrite", false, "Update snippet in DB if it already exists")
 	snippetPullCmd.Flags().BoolP("wait", "w", false, "Wait for task to complete")
@@ -181,7 +185,7 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 	priority, _ := cmd.Flags().GetInt("priority")
 
 	if snippetType == "" {
-		return fmt.Errorf("--type is required (USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL)")
+		return fmt.Errorf("--type is required (USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS)")
 	}
 	if file != "" {
 		data, err := os.ReadFile(file)

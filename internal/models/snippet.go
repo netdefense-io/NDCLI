@@ -3,7 +3,7 @@ package models
 // Snippet represents a configuration snippet
 type Snippet struct {
 	Name         string       `json:"name"`
-	Type         string       `json:"type,omitempty"` // RULE, ALIAS, USER, GROUP, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL
+	Type         string       `json:"type,omitempty"` // RULE, ALIAS, USER, GROUP, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS
 	Content      string       `json:"content,omitempty"`
 	Priority     int          `json:"priority"`
 	Organization string       `json:"organization_name,omitempty"`
