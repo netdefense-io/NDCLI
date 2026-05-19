@@ -529,6 +529,33 @@ func (f *TableFormatter) FormatSnippet(snippet *models.Snippet) error {
 	return f.FormatSnippets([]models.Snippet{*snippet})
 }
 
+// FormatSoftwarePolicies formats a list of software policies as a table.
+// Counts come from parsing the JSON content cheaply — full content lives in
+// the describe view rather than the table.
+func (f *TableFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+	if len(policies) == 0 {
+		f.Info("No software policies found")
+		return nil
+	}
+	table := NewStyledTable([]string{"Name", "Present", "Absent", "Updated"})
+	for _, p := range policies {
+		present, absent := softwarePolicyCounts(p.Content)
+		table.Append([]string{
+			p.Name,
+			fmt.Sprintf("%d", present),
+			fmt.Sprintf("%d", absent),
+			FormatTimestampShort(p.UpdatedAt.Time),
+		})
+	}
+	table.Render()
+	return nil
+}
+
+// FormatSoftwarePolicy formats a single policy as a table.
+func (f *TableFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) error {
+	return f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy})
+}
+
 // FormatAccounts formats a list of accounts as a table
 func (f *TableFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
 	if len(accounts) == 0 {

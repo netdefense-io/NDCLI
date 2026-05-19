@@ -489,6 +489,30 @@ func (f *DetailedFormatter) FormatSnippet(snippet *models.Snippet) error {
 	return f.FormatSnippets([]models.Snippet{*snippet})
 }
 
+// FormatSoftwarePolicies formats a list of software policies with full details
+func (f *DetailedFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+	if len(policies) == 0 {
+		f.Info("No software policies found")
+		return nil
+	}
+	for i, p := range policies {
+		if i > 0 {
+			fmt.Fprintln(f.Writer)
+		}
+		present, absent := softwarePolicyCounts(p.Content)
+		ColorHeader.Fprintf(f.Writer, "─── %s ───\n", p.Name)
+		f.printLabelValue("Present count", fmt.Sprintf("%d", present))
+		f.printLabelValue("Absent count", fmt.Sprintf("%d", absent))
+		f.printLabelValue("Updated", FormatTimestamp(p.UpdatedAt.Time))
+	}
+	return nil
+}
+
+// FormatSoftwarePolicy formats a single software policy with full details
+func (f *DetailedFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) error {
+	return f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy})
+}
+
 // FormatAccounts formats a list of accounts with full details
 func (f *DetailedFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
 	if len(accounts) == 0 {

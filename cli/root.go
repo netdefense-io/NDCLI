@@ -180,6 +180,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(snippetCmd)
+	rootCmd.AddCommand(softwareCmd)
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(variableCmd)
 	rootCmd.AddCommand(versionCmd)

@@ -70,6 +70,22 @@ var templateRemoveSnippetCmd = &cobra.Command{
 	RunE:              runTemplateRemoveSnippet,
 }
 
+var templateAddSoftwareCmd = &cobra.Command{
+	Use:               "add-software [template] [software-policy]",
+	Short:             "Attach a software policy to a template",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTemplates,
+	RunE:              runTemplateAddSoftware,
+}
+
+var templateRemoveSoftwareCmd = &cobra.Command{
+	Use:               "remove-software [template] [software-policy]",
+	Short:             "Detach a software policy from a template",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTemplates,
+	RunE:              runTemplateRemoveSoftware,
+}
+
 func init() {
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateCreateCmd)
@@ -78,6 +94,8 @@ func init() {
 	templateCmd.AddCommand(templateDeleteCmd)
 	templateCmd.AddCommand(templateAddSnippetCmd)
 	templateCmd.AddCommand(templateRemoveSnippetCmd)
+	templateCmd.AddCommand(templateAddSoftwareCmd)
+	templateCmd.AddCommand(templateRemoveSoftwareCmd)
 
 	templateListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction")
 	templateListCmd.Flags().Int("page", 1, "Page number")
@@ -218,5 +236,29 @@ func runTemplateRemoveSnippet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	color.Green("✓ Snippet removed from %s: %s", templateName, snippetName)
+	return nil
+}
+
+func runTemplateAddSoftware(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	templateName, policyName := args[0], args[1]
+	if err := svc.TemplateAddSoftwarePolicy(context.Background(), org, templateName, policyName); err != nil {
+		return err
+	}
+	color.Green("✓ Software policy added to %s: %s", templateName, policyName)
+	return nil
+}
+
+func runTemplateRemoveSoftware(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	templateName, policyName := args[0], args[1]
+	if err := svc.TemplateRemoveSoftwarePolicy(context.Background(), org, templateName, policyName); err != nil {
+		return err
+	}
+	color.Green("✓ Software policy removed from %s: %s", templateName, policyName)
 	return nil
 }

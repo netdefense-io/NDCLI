@@ -68,6 +68,7 @@ func NewServer() (*Server, error) {
 	s.registerRunTools()
 	s.registerAuthTools()
 	s.registerSnippetTools()
+	s.registerSoftwarePolicyTools()
 	s.registerTemplateTools()
 	s.registerNetworkTools()
 	s.registerVariableTools()

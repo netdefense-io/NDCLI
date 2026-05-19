@@ -127,6 +127,19 @@ func (f *JSONFormatter) FormatSnippet(snippet *models.Snippet) error {
 	return f.output(snippet)
 }
 
+// FormatSoftwarePolicies formats software policies as JSON
+func (f *JSONFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+	return f.output(map[string]interface{}{
+		"software_policies": policies,
+		"total":             len(policies),
+	})
+}
+
+// FormatSoftwarePolicy formats a single software policy as JSON
+func (f *JSONFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
+	return f.output(p)
+}
+
 // FormatAccounts formats accounts as JSON
 func (f *JSONFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
 	out := map[string]interface{}{
