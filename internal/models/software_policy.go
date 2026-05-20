@@ -15,8 +15,14 @@ type SoftwarePolicy struct {
 	Name         string       `json:"name"`
 	Content      string       `json:"content,omitempty"`
 	Organization string       `json:"organization_name,omitempty"`
-	CreatedAt    FlexibleTime `json:"created_at"`
-	UpdatedAt    FlexibleTime `json:"updated_at"`
+	// TemplateNames is the list of templates this policy is currently
+	// attached to. NDManager populates it on the single-policy GET
+	// (describe) only — list endpoints omit it to avoid the JOIN on
+	// every row. Nil here means "not loaded" (e.g. list response); an
+	// empty slice means "explicitly not attached anywhere".
+	TemplateNames []string     `json:"template_names,omitempty"`
+	CreatedAt     FlexibleTime `json:"created_at"`
+	UpdatedAt     FlexibleTime `json:"updated_at"`
 }
 
 // SoftwarePolicyListResponse mirrors the API's paginated list shape.

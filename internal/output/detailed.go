@@ -503,6 +503,16 @@ func (f *DetailedFormatter) FormatSoftwarePolicies(policies []models.SoftwarePol
 		ColorHeader.Fprintf(f.Writer, "─── %s ───\n", p.Name)
 		f.printLabelValue("Present count", fmt.Sprintf("%d", present))
 		f.printLabelValue("Absent count", fmt.Sprintf("%d", absent))
+		// TemplateNames is only populated on describe (GET /…/<name>),
+		// not on list responses. Distinguish nil (not loaded) from
+		// empty (loaded; attached to nothing).
+		if p.TemplateNames != nil {
+			if len(p.TemplateNames) == 0 {
+				f.printLabelValue("Templates", "(none)")
+			} else {
+				f.printLabelValue("Templates", strings.Join(p.TemplateNames, ", "))
+			}
+		}
 		f.printLabelValue("Updated", FormatTimestamp(p.UpdatedAt.Time))
 	}
 	return nil

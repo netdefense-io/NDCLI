@@ -486,6 +486,13 @@ func softwarePolicySummary(p *models.SoftwarePolicy) map[string]interface{} {
 func softwarePolicyFull(p *models.SoftwarePolicy) map[string]interface{} {
 	full := softwarePolicySummary(p)
 	full["content"] = p.Content
+	// Templates this policy is currently attached to. NDManager only
+	// populates the field on the describe (GET) response — list omits
+	// it. Surface it explicitly so the LLM can summarise the impact
+	// radius of the policy without a second tool call.
+	if p.TemplateNames != nil {
+		full["template_names"] = p.TemplateNames
+	}
 	return full
 }
 

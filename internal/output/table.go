@@ -537,18 +537,54 @@ func (f *TableFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy
 		f.Info("No software policies found")
 		return nil
 	}
-	table := NewStyledTable([]string{"Name", "Present", "Absent", "Updated"})
+	// Only add a Templates column when at least one row has the field
+	// loaded (i.e. came from the describe endpoint, not the list).
+	// Keeps `software list` compact while letting describe surface
+	// attached templates inline.
+	showTemplates := false
+	for _, p := range policies {
+		if p.TemplateNames != nil {
+			showTemplates = true
+			break
+		}
+	}
+	headers := []string{"Name", "Present", "Absent", "Updated"}
+	if showTemplates {
+		headers = []string{"Name", "Present", "Absent", "Templates", "Updated"}
+	}
+	table := NewStyledTable(headers)
 	for _, p := range policies {
 		present, absent := softwarePolicyCounts(p.Content)
-		table.Append([]string{
+		row := []string{
 			p.Name,
 			fmt.Sprintf("%d", present),
 			fmt.Sprintf("%d", absent),
-			FormatTimestampShort(p.UpdatedAt.Time),
-		})
+		}
+		if showTemplates {
+			row = append(row, templatesCell(p.TemplateNames))
+		}
+		row = append(row, FormatTimestampShort(p.UpdatedAt.Time))
+		table.Append(row)
 	}
 	table.Render()
 	return nil
+}
+
+func templatesCell(names []string) string {
+	if names == nil {
+		return "-"
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	// Cap the inline list so a heavily-attached policy doesn't blow out
+	// the table width. Full list is available in `detailed`, `simple`,
+	// and `json` formats.
+	const maxInline = 3
+	if len(names) <= maxInline {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, +%d more", strings.Join(names[:maxInline], ", "), len(names)-maxInline)
 }
 
 // FormatSoftwarePolicy formats a single policy as a table.

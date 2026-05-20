@@ -268,6 +268,13 @@ func (f *SimpleFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
 	fmt.Fprintf(f.Writer, "Software policy: %s\n", p.Name)
 	fmt.Fprintf(f.Writer, "  Present: %d\n", present)
 	fmt.Fprintf(f.Writer, "  Absent:  %d\n", absent)
+	if p.TemplateNames != nil {
+		if len(p.TemplateNames) == 0 {
+			fmt.Fprintf(f.Writer, "  Templates: (none)\n")
+		} else {
+			fmt.Fprintf(f.Writer, "  Templates: %s\n", strings.Join(p.TemplateNames, ", "))
+		}
+	}
 	return nil
 }
 
