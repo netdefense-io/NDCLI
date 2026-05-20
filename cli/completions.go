@@ -13,6 +13,18 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
+// Completion list endpoints paginate, and without an explicit page size
+// NDManager defaults to 20–50. The completion code must pass each endpoint's
+// maximum so shells see every entity in the org, not just the first page.
+//
+// The OUs endpoint uses the parameter name `page_size`; everything else uses
+// `per_page` (NDManager-side naming inconsistency, not ours to fix here).
+const (
+	completionPerPageMax500 = "500" // /devices, /vpn-networks (and sub-resources)
+	completionPerPageMax100 = "100" // /templates, /snippets, /variables, /tasks, /software-policies
+	completionPageSizeMax   = "100" // /ous (uses `page_size`, max 100)
+)
+
 
 // completeOrganizations returns organization names for shell completion
 func completeOrganizations(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -90,9 +102,9 @@ func fetchDeviceNamesByStatus(cmd *cobra.Command, status string) ([]string, cobr
 	}
 
 	ctx := context.Background()
-	var params map[string]string
+	params := map[string]string{"per_page": completionPerPageMax500}
 	if status != "" {
-		params = map[string]string{"status": status}
+		params["status"] = status
 	}
 	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/devices", params)
 	if err != nil {
@@ -133,7 +145,7 @@ func fetchOUNames(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) {
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/ous", nil)
+	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/ous", map[string]string{"page_size": completionPageSizeMax})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -187,7 +199,7 @@ func fetchTemplateNames(cmd *cobra.Command) ([]string, cobra.ShellCompDirective)
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/templates", nil)
+	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/templates", map[string]string{"per_page": completionPerPageMax100})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -296,7 +308,7 @@ func fetchSnippetNames(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) 
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/snippets", nil)
+	resp, err := apiClient.Get(ctx, "/api/v1/organizations/"+org+"/snippets", map[string]string{"per_page": completionPerPageMax100})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -355,7 +367,7 @@ func fetchVariableNames(cmd *cobra.Command, scopeURL string) ([]string, cobra.Sh
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, scopeURL, nil)
+	resp, err := apiClient.Get(ctx, scopeURL, map[string]string{"per_page": completionPerPageMax100})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -436,7 +448,7 @@ func fetchVpnNetworkNames(cmd *cobra.Command) ([]string, cobra.ShellCompDirectiv
 	}
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks", org), nil)
+	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks", org), map[string]string{"per_page": completionPerPageMax500})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -524,7 +536,7 @@ func completeVpnMemberDevices(cmd *cobra.Command, args []string, toComplete stri
 	vpnName := args[0]
 
 	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members", org, vpnName), nil)
+	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/vpn-networks/%s/members", org, vpnName), map[string]string{"per_page": completionPerPageMax500})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
