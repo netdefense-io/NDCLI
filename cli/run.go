@@ -183,6 +183,9 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 	cmd.MarkFlagsMutuallyExclusive("org", "device")
 	cmd.MarkFlagsMutuallyExclusive("org", "ou")
 
+	_ = cmd.RegisterFlagCompletionFunc("device", completeDevices)
+	_ = cmd.RegisterFlagCompletionFunc("ou", completeOUs)
+
 	return cmd
 }
 

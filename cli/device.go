@@ -132,6 +132,7 @@ func init() {
 	deviceListCmd.Flags().String("synced-before", "", "Filter by synced date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 	deviceListCmd.Flags().String("created-after", "", "Filter by created date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 	deviceListCmd.Flags().String("created-before", "", "Filter by created date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
+	_ = deviceListCmd.RegisterFlagCompletionFunc("ou", completeOUs)
 }
 
 func runDeviceList(cmd *cobra.Command, args []string) error {

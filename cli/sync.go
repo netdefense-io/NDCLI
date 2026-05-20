@@ -43,6 +43,14 @@ func init() {
 	syncApplyCmd.Flags().String("org", "", "Filter by organization (regex pattern, defaults to current org)")
 	syncApplyCmd.Flags().Bool("force", false, "Force sync even if already synced")
 	syncApplyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
+	// The --device/--ou flags accept regex patterns but the common case is an
+	// exact name, so completion against the live list helps either way.
+	for _, sub := range []*cobra.Command{syncStatusCmd, syncApplyCmd} {
+		_ = sub.RegisterFlagCompletionFunc("device", completeDevices)
+		_ = sub.RegisterFlagCompletionFunc("ou", completeOUs)
+		_ = sub.RegisterFlagCompletionFunc("org", completeOrganizations)
+	}
 }
 
 func runSyncStatus(cmd *cobra.Command, args []string) error {

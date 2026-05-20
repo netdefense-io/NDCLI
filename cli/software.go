@@ -41,38 +41,43 @@ var softwareCreateCmd = &cobra.Command{
 }
 
 var softwareDescribeCmd = &cobra.Command{
-	Use:   "describe [name]",
-	Short: "Show software policy details",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSoftwareDescribe,
+	Use:               "describe [name]",
+	Short:             "Show software policy details",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareDescribe,
 }
 
 var softwareEditCmd = &cobra.Command{
-	Use:   "edit [name]",
-	Short: "Edit software policy content in an external editor",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSoftwareEdit,
+	Use:               "edit [name]",
+	Short:             "Edit software policy content in an external editor",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareEdit,
 }
 
 var softwareUpdateContentCmd = &cobra.Command{
-	Use:   "update-content [name] [file]",
-	Short: "Update software policy content from a file",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runSoftwareUpdateContent,
+	Use:               "update-content [name] [file]",
+	Short:             "Update software policy content from a file",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareUpdateContent,
 }
 
 var softwareRenameCmd = &cobra.Command{
-	Use:   "rename [name] [new-name]",
-	Short: "Rename a software policy",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runSoftwareRename,
+	Use:               "rename [name] [new-name]",
+	Short:             "Rename a software policy",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareRename,
 }
 
 var softwareDeleteCmd = &cobra.Command{
-	Use:   "delete [name]",
-	Short: "Delete a software policy",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSoftwareDelete,
+	Use:               "delete [name]",
+	Short:             "Delete a software policy",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareDelete,
 }
 
 var softwareRequirePackageCmd = &cobra.Command{
@@ -84,8 +89,9 @@ Required packages are installed on every device that picks up the policy
 through its templates. A package already required is a no-op; a package
 currently blocked by the same policy is moved (block → require) with a
 notice.`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runSoftwareRequirePackage,
+	Args:              cobra.MinimumNArgs(2),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareRequirePackage,
 }
 
 var softwareBlockPackageCmd = &cobra.Command{
@@ -97,8 +103,9 @@ Blocked packages are uninstalled on every device that picks up the policy
 through its templates. A package already blocked is a no-op; a package
 currently required by the same policy is moved (require → block) with a
 notice.`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runSoftwareBlockPackage,
+	Args:              cobra.MinimumNArgs(2),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareBlockPackage,
 }
 
 var softwareWaivePackageCmd = &cobra.Command{
@@ -110,8 +117,9 @@ Removes each package from whichever list (required or blocked) it sits
 in. A package not specified in either list is a no-op. Devices keep
 whatever they currently have installed — waive does not uninstall or
 re-install anything.`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runSoftwareWaivePackage,
+	Args:              cobra.MinimumNArgs(2),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareWaivePackage,
 }
 
 func init() {

@@ -28,17 +28,19 @@ var taskListCmd = &cobra.Command{
 }
 
 var taskDescribeCmd = &cobra.Command{
-	Use:   "describe [task-id]",
-	Short: "Show task details",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runTaskDescribe,
+	Use:               "describe [task-id]",
+	Short:             "Show task details",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTasks,
+	RunE:              runTaskDescribe,
 }
 
 var taskCancelCmd = &cobra.Command{
-	Use:   "cancel [task-id]",
-	Short: "Cancel a pending or scheduled task",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runTaskCancel,
+	Use:               "cancel [task-id]",
+	Short:             "Cancel a pending or scheduled task",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTasks,
+	RunE:              runTaskCancel,
 }
 
 func init() {

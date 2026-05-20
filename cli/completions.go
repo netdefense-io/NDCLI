@@ -571,3 +571,126 @@ func completeDeviceThenVariable(cmd *cobra.Command, args []string, toComplete st
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 }
+
+// fetchSoftwarePolicyNames fetches software-policy names for the current org.
+func fetchSoftwarePolicyNames(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) {
+	if err := initForCompletion(); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	org := getOrgForCompletion(cmd)
+	if org == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ctx := context.Background()
+	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/software-policies", org), map[string]string{"per_page": completionPerPageMax100})
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var result models.SoftwarePolicyListResponse
+	if err := api.ParseResponse(resp, &result); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names := make([]string, 0, len(result.Items))
+	for _, p := range result.Items {
+		names = append(names, p.Name)
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeSoftwarePolicies completes a software-policy name as first arg.
+func completeSoftwarePolicies(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return fetchSoftwarePolicyNames(cmd)
+}
+
+// fetchTaskCodes returns recent task codes (any status) for the current org,
+// newest first. Both `task describe` and `task cancel` use this — cancelling a
+// terminal task is harmless (NDManager rejects it) and trimming completions to
+// only-cancellable would require a second roundtrip.
+func fetchTaskCodes(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) {
+	if err := initForCompletion(); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	org := getOrgForCompletion(cmd)
+	if org == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ctx := context.Background()
+	params := map[string]string{
+		"organization": org,
+		"per_page":     completionPerPageMax100,
+		"sort_by":      "created_at:desc",
+	}
+	resp, err := apiClient.Get(ctx, "/api/v1/tasks", params)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var result models.TaskListResponse
+	if err := api.ParseResponse(resp, &result); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	codes := make([]string, 0, len(result.Items))
+	for _, t := range result.Items {
+		codes = append(codes, t.ID)
+	}
+	return codes, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeTasks completes a task code as the first (and only) arg.
+func completeTasks(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return fetchTaskCodes(cmd)
+}
+
+// fetchAccountEmails fetches account emails for the current org. Used by
+// `org account` mutation commands.
+func fetchAccountEmails(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) {
+	if err := initForCompletion(); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	org := getOrgForCompletion(cmd)
+	if org == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ctx := context.Background()
+	resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/organizations/%s/accounts", org), nil)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var result models.AccountListResponse
+	if err := api.ParseResponse(resp, &result); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	emails := make([]string, 0, len(result.Accounts))
+	for _, a := range result.Accounts {
+		emails = append(emails, a.Email)
+	}
+	return emails, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeAccountEmails completes an account email as the first arg.
+func completeAccountEmails(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return fetchAccountEmails(cmd)
+}
+
+// completeAccountEmailThenRole completes email for the first arg and the
+// canonical role short codes for the second (see service.NormalizeRole for the
+// full alias list — only the canonical forms appear here to keep menu noise
+// down).
+func completeAccountEmailThenRole(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return fetchAccountEmails(cmd)
+	case 1:
+		return []string{"SU", "RW", "RO"}, cobra.ShellCompDirectiveNoFileComp
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}

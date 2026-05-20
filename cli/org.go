@@ -119,17 +119,19 @@ var orgAccountListCmd = &cobra.Command{
 }
 
 var orgAccountDisableCmd = &cobra.Command{
-	Use:   "disable [email]",
-	Short: "Disable an account",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runOrgAccountDisable,
+	Use:               "disable [email]",
+	Short:             "Disable an account",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeAccountEmails,
+	RunE:              runOrgAccountDisable,
 }
 
 var orgAccountEnableCmd = &cobra.Command{
-	Use:   "enable [email]",
-	Short: "Enable an account",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runOrgAccountEnable,
+	Use:               "enable [email]",
+	Short:             "Enable an account",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeAccountEmails,
+	RunE:              runOrgAccountEnable,
 }
 
 var orgAccountRoleCmd = &cobra.Command{
@@ -141,8 +143,9 @@ Valid roles:
   SU, superuser  - Full administrative access
   RW, readwrite  - Can view and modify resources
   RO, readonly   - Can only view resources`,
-	Args: cobra.ExactArgs(2),
-	RunE: runOrgAccountRole,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeAccountEmailThenRole,
+	RunE:              runOrgAccountRole,
 }
 
 func init() {
