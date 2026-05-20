@@ -96,8 +96,21 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	cfg := config.Get()
 
 	color.Cyan("Configuration:")
-	fmt.Printf("  Config file: %s\n", config.GetConfigFilePath())
-	fmt.Printf("  Auth file:   %s\n", config.GetAuthFilePath())
+	fmt.Printf("  Config file:  %s\n", config.GetConfigFilePath())
+
+	// Report the auth backend actually in use, not just the auth.json path —
+	// when keyring is the backend (the common case on macOS/Linux) auth.json
+	// doesn't exist and listing it is misleading. authManager picks the
+	// backend via storage.pickStorage, which honors `auth.storage` config
+	// plus runtime keyring availability.
+	storageName := authManager.GetStorageName()
+	fmt.Printf("  Auth storage: %s\n", storageName)
+	if storageName == "file" {
+		fmt.Printf("  Auth file:    %s\n", config.GetAuthFilePath())
+	}
+	if cfg.Auth.Account != "" {
+		fmt.Printf("  Auth account: %s\n", cfg.Auth.Account)
+	}
 	fmt.Println()
 
 	color.Cyan("Controlplane:")
