@@ -15,6 +15,7 @@ type syncFilterInput struct {
 	Organization string `json:"organization,omitempty"`
 	Device       string `json:"device,omitempty"`
 	OU           string `json:"ou,omitempty"`
+	Template     string `json:"template,omitempty"`
 }
 
 type syncApplyInput struct {
@@ -35,6 +36,7 @@ func (s *Server) registerSyncTools() {
 				"organization": stringProperty("Organization name regex (defaults to configured org)"),
 				"device":       stringProperty("Device name regex"),
 				"ou":           stringProperty("OU name regex"),
+				"template":     stringProperty("Template name regex — restricts to devices whose effective OU→Template chain matches"),
 			},
 		},
 	}, s.handleSyncStatus)
@@ -49,6 +51,7 @@ func (s *Server) registerSyncTools() {
 				"organization": stringProperty("Organization name regex (defaults to configured org)"),
 				"device":       stringProperty("Device name regex"),
 				"ou":           stringProperty("OU name regex"),
+				"template":     stringProperty("Template name regex — restricts to devices whose effective OU→Template chain matches"),
 				"force":        boolProperty("Force sync even if already in sync"),
 				"confirm":      confirmProperty(),
 			},
@@ -77,6 +80,7 @@ func (s *Server) handleSyncStatus(ctx context.Context, req *mcp.CallToolRequest)
 		Organization: input.Organization,
 		Device:       input.Device,
 		OU:           input.OU,
+		Template:     input.Template,
 	})
 	if err != nil {
 		return s.errorResult(err)
@@ -111,6 +115,7 @@ func (s *Server) handleSyncApply(ctx context.Context, req *mcp.CallToolRequest) 
 		Organization: input.Organization,
 		Device:       input.Device,
 		OU:           input.OU,
+		Template:     input.Template,
 	}
 
 	apiCtx, cancel := contextWithTimeout()

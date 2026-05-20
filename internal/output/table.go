@@ -263,7 +263,10 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 		fmt.Printf("Completed:    %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		fmt.Printf("\nMessage:\n%s\n", task.Message)
+		// SYNC tasks store a JSON envelope; FormatTaskMessage unpacks it
+		// into a summary line plus per-change list. Plain messages pass
+		// through unchanged, so older/non-SYNC tasks render as before.
+		fmt.Printf("\nMessage:\n%s\n", FormatTaskMessage(task.Message))
 	}
 	if task.ErrorMessage != "" {
 		fmt.Printf("\nError: %s\n", task.ErrorMessage)

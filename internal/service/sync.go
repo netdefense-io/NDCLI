@@ -18,6 +18,10 @@ type SyncFilter struct {
 	Organization string
 	Device       string
 	OU           string
+	// Template is a regex matched against template names; NDManager keeps
+	// only devices whose Device→OU→Template chain includes a hit. Composes
+	// with the other filters via AND.
+	Template string
 }
 
 // SyncApplyResult bundles the parsed sync apply response with the raw HTTP
@@ -74,6 +78,9 @@ func buildSyncParams(defaultOrg string, filter SyncFilter) map[string]string {
 	}
 	if filter.OU != "" {
 		params["ou"] = filter.OU
+	}
+	if filter.Template != "" {
+		params["template"] = filter.Template
 	}
 	if filter.Organization != "" {
 		params["organization"] = filter.Organization
