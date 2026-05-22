@@ -101,12 +101,34 @@ Operator workflow:
 	RunE:              runDeviceRebindToken,
 }
 
+// `ndcli device health <name>` — per-device drill-down backed by the
+// dashboard endpoint's drill-down sibling. Returns the full agent
+// snapshot: resources, disks, services, pending updates, cert expiries.
+var deviceHealthCmd = &cobra.Command{
+	Use:   "health [device]",
+	Short: "Show the device's instantaneous health snapshot",
+	Long: `Show the instantaneous health snapshot for a device.
+
+Returns the full agent telemetry: uptime, load averages, mem/swap, disk
+usage per mountpoint, OPNsense service states, pending OS/plugin
+updates, and certificate expiries. No history — this is "right now".
+
+The snapshot updates on every 60s heartbeat; heavy fields (services,
+updates, certs) refresh every 15min on the agent and ride every
+subsequent heartbeat. Snapshot age is rendered against the broker's
+wallclock so the freshness is honest.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeDevices,
+	RunE:              runDeviceHealth,
+}
+
 func init() {
 	deviceCmd.AddCommand(deviceListCmd)
 	deviceCmd.AddCommand(deviceApproveCmd)
 	deviceCmd.AddCommand(deviceRenameCmd)
 	deviceCmd.AddCommand(deviceRemoveCmd)
 	deviceCmd.AddCommand(deviceDescribeCmd)
+	deviceCmd.AddCommand(deviceHealthCmd)
 	deviceCmd.AddCommand(deviceApproveAllCmd)
 	deviceCmd.AddCommand(deviceConnectCmd)
 	deviceCmd.AddCommand(deviceRebindTokenCmd)
@@ -215,6 +237,17 @@ func runDeviceDescribe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return formatter.FormatDevice(device)
+}
+
+func runDeviceHealth(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	result, err := svc.DeviceHealth(context.Background(), org, args[0])
+	if err != nil {
+		return err
+	}
+	return formatter.FormatDeviceHealth(result)
 }
 
 func runDeviceApproveAll(cmd *cobra.Command, args []string) error {

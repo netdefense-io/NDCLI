@@ -165,6 +165,10 @@ type Formatter interface {
 	FormatSyncStatus(items []models.SyncStatusItem, total int) error
 	FormatSyncApply(result *models.SyncApplyResponse) error
 
+	// Dashboard / device health
+	FormatDashboard(result *models.DashboardResponse) error
+	FormatDeviceHealth(result *models.DeviceTelemetryResponse) error
+
 	// Variables
 	FormatVariables(variables []models.Variable, total int) error
 	FormatVariable(variable *models.Variable) error

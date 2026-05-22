@@ -328,3 +328,13 @@ func (f *JSONFormatter) Warning(message string) {
 func (f *JSONFormatter) Info(message string) {
 	fmt.Fprintln(os.Stderr, message)
 }
+
+// FormatDashboard renders the org dashboard roll-up as JSON.
+func (f *JSONFormatter) FormatDashboard(result *models.DashboardResponse) error {
+	return f.output(result)
+}
+
+// FormatDeviceHealth renders the per-device telemetry drill-down as JSON.
+func (f *JSONFormatter) FormatDeviceHealth(result *models.DeviceTelemetryResponse) error {
+	return f.output(result)
+}

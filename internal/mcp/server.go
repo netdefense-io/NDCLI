@@ -73,6 +73,7 @@ func NewServer() (*Server, error) {
 	s.registerNetworkTools()
 	s.registerVariableTools()
 	s.registerBackupTools()
+	s.registerDashboardTools()
 
 	// Register all resources
 	s.registerResources()
