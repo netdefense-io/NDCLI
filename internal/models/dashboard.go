@@ -78,9 +78,13 @@ type DashboardCompactTelemetry struct {
 // DashboardHeavySummary is three attention counters; each is nil when
 // the underlying probe failed (distinct from 0 = "no concerns").
 type DashboardHeavySummary struct {
-	ServicesDown      *int `json:"services_down,omitempty"`
-	PendingUpdates    *int `json:"pending_updates,omitempty"`
-	CertsExpiring30d  *int `json:"certs_expiring_30d,omitempty"`
+	ServicesDown    *int `json:"services_down,omitempty"`
+	PendingUpdates  *int `json:"pending_updates,omitempty"`
+	// CertsExpired counts certs whose days_left ≤ 0 (already past their
+	// notAfter). Distinct from CertsExpiring30d so the dashboard can
+	// render an already-expired cert as a P1 rather than a "≤30 d" warn.
+	CertsExpired     *int `json:"certs_expired,omitempty"`
+	CertsExpiring30d *int `json:"certs_expiring_30d,omitempty"`
 }
 
 // DeviceTelemetryResponse is the per-device drill-down returned by

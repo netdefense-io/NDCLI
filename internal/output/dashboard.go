@@ -140,6 +140,10 @@ func attentionRank(row *models.DashboardCompactRow) int {
 		if h.ServicesDown != nil && *h.ServicesDown > 0 {
 			r += 300 + 10*(*h.ServicesDown)
 		}
+		// Already-expired certs are P1 — outrank "expiring soon".
+		if h.CertsExpired != nil && *h.CertsExpired > 0 {
+			r += 600 + 20*(*h.CertsExpired)
+		}
 		if h.CertsExpiring30d != nil && *h.CertsExpiring30d > 0 {
 			r += 200 + 5*(*h.CertsExpiring30d)
 		}
@@ -185,8 +189,11 @@ func attentionTags(row *models.DashboardCompactRow) string {
 	if h.PendingUpdates != nil && *h.PendingUpdates > 0 {
 		tags = append(tags, fmt.Sprintf("%d pkg", *h.PendingUpdates))
 	}
+	if h.CertsExpired != nil && *h.CertsExpired > 0 {
+		tags = append(tags, fmt.Sprintf("%d cert-expired", *h.CertsExpired))
+	}
 	if h.CertsExpiring30d != nil && *h.CertsExpiring30d > 0 {
-		tags = append(tags, fmt.Sprintf("%d cert", *h.CertsExpiring30d))
+		tags = append(tags, fmt.Sprintf("%d cert-≤30d", *h.CertsExpiring30d))
 	}
 	return strings.Join(tags, ", ")
 }
