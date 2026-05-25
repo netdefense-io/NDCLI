@@ -35,6 +35,7 @@ func (s *Server) registerDeviceTools() {
 				"synced_before":    stringProperty("Filter by synced-at before date (e.g., 30m, 2h, 7d or ISO 8601)"),
 				"created_after":    stringProperty("Filter by created date after (e.g., 30m, 2h, 7d or ISO 8601)"),
 				"created_before":   stringProperty("Filter by created date before (e.g., 30m, 2h, 7d or ISO 8601)"),
+				"drift_status":     stringEnumProperty("Filter by drift status", []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
 			},
 		},
 	}, s.handleDeviceList)
@@ -158,6 +159,7 @@ type deviceListInput struct {
 	SyncedBefore    string `json:"synced_before,omitempty"`
 	CreatedAfter    string `json:"created_after,omitempty"`
 	CreatedBefore   string `json:"created_before,omitempty"`
+	DriftStatus     string `json:"drift_status,omitempty"`
 }
 
 type deviceApproveAllInput struct {
@@ -204,6 +206,7 @@ func (s *Server) handleDeviceList(ctx context.Context, req *mcp.CallToolRequest)
 		SyncedBefore:    input.SyncedBefore,
 		CreatedAfter:    input.CreatedAfter,
 		CreatedBefore:   input.CreatedBefore,
+		DriftStatus:     input.DriftStatus,
 	})
 	if err != nil {
 		return s.errorResult(err)
@@ -552,6 +555,8 @@ func deviceSummary(d *models.Device) map[string]interface{} {
 		"organizational_units": d.OrganizationalUnits,
 		"heartbeat":            d.Heartbeat,
 		"synced_at":            d.SyncedAt,
+		"drift_status":         d.DriftStatus,
+		"drift_checked_at":     d.DriftCheckedAt,
 		"created_at":           d.CreatedAt,
 	}
 }
@@ -567,6 +572,8 @@ func deviceFull(d *models.Device) map[string]interface{} {
 		"heartbeat":            d.Heartbeat,
 		"synced_at":            d.SyncedAt,
 		"synced_hash":          d.SyncedHash,
+		"drift_status":         d.DriftStatus,
+		"drift_checked_at":     d.DriftCheckedAt,
 		"created_at":           d.CreatedAt,
 	}
 }

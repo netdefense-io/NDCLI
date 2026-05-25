@@ -27,7 +27,11 @@ func (f *SimpleFormatter) FormatDevices(devices []models.Device, total int, quot
 	for _, d := range devices {
 		status := ColoredStatus(d.Status)
 		synced := SyncIndicator(d.IsSynced())
-		fmt.Fprintf(f.Writer, "• %s [%s] %s %s - %s\n", d.Name, status, OnlineIndicator(d.Online), synced, d.GetOUsDisplay())
+		drift := ""
+		if d.DriftStatus != "" {
+			drift = fmt.Sprintf(" drift:%s", DriftStatusDisplay(d.DriftStatus))
+		}
+		fmt.Fprintf(f.Writer, "• %s [%s] %s %s - %s%s\n", d.Name, status, OnlineIndicator(d.Online), synced, d.GetOUsDisplay(), drift)
 	}
 	if quota != nil {
 		fmt.Fprintf(f.Writer, "\n%s\n", formatQuotaFooterSimple("enabled devices", quota))
@@ -48,6 +52,9 @@ func (f *SimpleFormatter) FormatDevice(device *models.Device) error {
 		fmt.Fprintf(f.Writer, "  Version: %s\n", device.Version)
 	}
 	fmt.Fprintf(f.Writer, "  Synced: %s\n", SyncIndicator(device.IsSynced()))
+	if device.DriftStatus != "" {
+		fmt.Fprintf(f.Writer, "  Drift: %s\n", DriftStatusDisplay(device.DriftStatus))
+	}
 	return nil
 }
 

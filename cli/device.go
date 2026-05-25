@@ -154,6 +154,7 @@ func init() {
 	deviceListCmd.Flags().String("synced-before", "", "Filter by synced date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 	deviceListCmd.Flags().String("created-after", "", "Filter by created date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 	deviceListCmd.Flags().String("created-before", "", "Filter by created date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
+	deviceListCmd.Flags().String("drift-status", "", "Filter by drift status (IN_SYNC, DRIFT, NEVER_SYNCED, UNKNOWN, ERROR)")
 	_ = deviceListCmd.RegisterFlagCompletionFunc("ou", completeOUs)
 }
 
@@ -174,6 +175,7 @@ func runDeviceList(cmd *cobra.Command, args []string) error {
 	opts.SyncedBefore, _ = cmd.Flags().GetString("synced-before")
 	opts.CreatedAfter, _ = cmd.Flags().GetString("created-after")
 	opts.CreatedBefore, _ = cmd.Flags().GetString("created-before")
+	opts.DriftStatus, _ = cmd.Flags().GetString("drift-status")
 
 	result, err := svc.DeviceList(context.Background(), org, opts)
 	if err != nil {

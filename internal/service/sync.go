@@ -18,9 +18,7 @@ type SyncFilter struct {
 	Organization string
 	Device       string
 	OU           string
-	// Template is a regex matched against template names; NDManager keeps
-	// only devices whose Device→OU→Template chain includes a hit. Composes
-	// with the other filters via AND.
+	DriftStatus  string
 	Template string
 }
 
@@ -86,6 +84,9 @@ func buildSyncParams(defaultOrg string, filter SyncFilter) map[string]string {
 		params["organization"] = filter.Organization
 	} else if defaultOrg != "" {
 		params["organization"] = defaultOrg
+	}
+	if filter.DriftStatus != "" {
+		params["drift_status"] = filter.DriftStatus
 	}
 	return params
 }

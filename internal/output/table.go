@@ -150,7 +150,7 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 		return nil
 	}
 
-	table := NewStyledTable([]string{"Name", "Status", "Online", "OU", "Version", "Heartbeat", "Synced At"})
+	table := NewStyledTable([]string{"Name", "Status", "Online", "OU", "Version", "Heartbeat", "Synced At", "Drift"})
 
 	for _, d := range devices {
 		ou := d.GetOUsDisplay()
@@ -174,6 +174,7 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 			version,
 			heartbeat,
 			syncedAt,
+			DriftStatusWithColor(d.DriftStatus),
 		})
 	}
 
@@ -208,6 +209,12 @@ func (f *TableFormatter) FormatDevice(device *models.Device) error {
 	}
 	if device.SyncedHash != nil && *device.SyncedHash != "" {
 		fmt.Printf("Synced Hash:  %s\n", *device.SyncedHash)
+	}
+	if device.DriftStatus != "" {
+		fmt.Printf("Drift:        %s\n", DriftStatusWithColor(device.DriftStatus))
+	}
+	if device.DriftCheckedAt != nil && !device.DriftCheckedAt.IsZero() {
+		fmt.Printf("Drift Check:  %s (%s)\n", FormatTimestamp(device.DriftCheckedAt.Time), RelativeTimeShort(device.DriftCheckedAt.Time))
 	}
 	fmt.Printf("Created:      %s\n", FormatTimestamp(device.CreatedAt.Time))
 	fmt.Printf("Updated:      %s\n", FormatTimestamp(device.UpdatedAt.Time))

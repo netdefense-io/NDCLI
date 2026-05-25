@@ -100,6 +100,12 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 	} else {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Synced At", "Never")
 	}
+	if d.DriftStatus != "" {
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Drift", DriftStatusWithColor(d.DriftStatus))
+	}
+	if d.DriftCheckedAt != nil && !d.DriftCheckedAt.IsZero() {
+		fmt.Fprintf(f.Writer, "  %-12s %s (%s)\n", "Drift Check", FormatTimestamp(d.DriftCheckedAt.Time), RelativeTime(d.DriftCheckedAt.Time))
+	}
 
 	// Timing info
 	if !d.Heartbeat.IsZero() {

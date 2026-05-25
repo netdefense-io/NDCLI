@@ -136,6 +136,44 @@ func KeyOverrideWithIcon(hasOverride bool) string {
 	return ColorDim.Sprint("○") + " " + ColorDim.Sprint("Using org default")
 }
 
+// DriftStatusDisplay returns a human-friendly display string for a device drift status.
+func DriftStatusDisplay(status string) string {
+	switch status {
+	case "IN_SYNC":
+		return "In Sync"
+	case "DRIFT":
+		return "Drift"
+	case "NEVER_SYNCED":
+		return "Never Synced"
+	case "UNKNOWN":
+		return "Unknown"
+	case "ERROR":
+		return "Error"
+	default:
+		if status == "" {
+			return "-"
+		}
+		return status
+	}
+}
+
+// DriftStatusWithColor returns a colored drift status display string.
+func DriftStatusWithColor(status string) string {
+	display := DriftStatusDisplay(status)
+	switch status {
+	case "IN_SYNC":
+		return ColorSuccess.Sprint(display)
+	case "DRIFT":
+		return ColorWarning.Sprint(display)
+	case "ERROR":
+		return ColorError.Sprint(display)
+	case "NEVER_SYNCED":
+		return ColorDim.Sprint(display)
+	default:
+		return display
+	}
+}
+
 // VpnActiveStatus returns a colored active/inactive indicator
 func VpnActiveStatus(active bool) string {
 	if active {

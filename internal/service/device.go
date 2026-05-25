@@ -30,6 +30,7 @@ type DeviceListOpts struct {
 	SyncedBefore    string
 	CreatedAfter    string
 	CreatedBefore   string
+	DriftStatus     string
 }
 
 // DeviceListResult mirrors the paginated device list response, with
@@ -69,6 +70,9 @@ func (s *Service) DeviceList(ctx context.Context, org string, opts DeviceListOpt
 	}
 	if opts.SortBy != "" {
 		params["sort_by"] = opts.SortBy
+	}
+	if opts.DriftStatus != "" {
+		params["drift_status"] = opts.DriftStatus
 	}
 
 	timeFilters := []struct {

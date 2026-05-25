@@ -19,6 +19,8 @@ type Device struct {
 	AutoSync            bool          `json:"auto_sync"`
 	SyncedAt            *FlexibleTime `json:"synced_at,omitempty"`
 	SyncedHash          *string       `json:"synced_hash,omitempty"`
+	DriftStatus         string        `json:"drift_status,omitempty"`
+	DriftCheckedAt      *FlexibleTime `json:"drift_checked_at,omitempty"`
 	CreatedAt           FlexibleTime  `json:"created_at"`
 	UpdatedAt           FlexibleTime  `json:"updated_at"`
 }
@@ -60,4 +62,13 @@ const (
 	DeviceStatusPending  = "PENDING"
 	DeviceStatusEnabled  = "ENABLED"
 	DeviceStatusDisabled = "DISABLED"
+)
+
+// DeviceDriftStatus constants
+const (
+	DeviceDriftStatusInSync      = "IN_SYNC"
+	DeviceDriftStatusDrift       = "DRIFT"
+	DeviceDriftStatusNeverSynced = "NEVER_SYNCED"
+	DeviceDriftStatusUnknown     = "UNKNOWN"
+	DeviceDriftStatusError       = "ERROR"
 )

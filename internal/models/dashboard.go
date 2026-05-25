@@ -56,6 +56,7 @@ type DashboardCompactRow struct {
 	HeartbeatAgeSec *int64                       `json:"heartbeat_age_sec,omitempty"`
 	Sync            DashboardCompactSync         `json:"sync"`
 	AgentVersion    string                       `json:"agent_version,omitempty"`
+	OPNsenseVersion string                       `json:"opnsense_version,omitempty"`
 	Telemetry       *DashboardCompactTelemetry   `json:"telemetry,omitempty"`
 }
 

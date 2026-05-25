@@ -37,12 +37,14 @@ func init() {
 	syncStatusCmd.Flags().String("ou", "", "Filter by organizational unit (regex pattern)")
 	syncStatusCmd.Flags().String("template", "", "Filter by template name (regex pattern) — devices whose effective OU→Template chain matches")
 	syncStatusCmd.Flags().String("org", "", "Filter by organization (regex pattern, defaults to current org)")
+	syncStatusCmd.Flags().String("drift-status", "", "Filter by drift status (IN_SYNC, DRIFT, NEVER_SYNCED, UNKNOWN, ERROR)")
 
 	// Apply flags - all support regex patterns
 	syncApplyCmd.Flags().String("device", "", "Sync devices matching pattern (regex)")
 	syncApplyCmd.Flags().String("ou", "", "Sync all devices in OUs matching pattern (regex)")
 	syncApplyCmd.Flags().String("template", "", "Sync all devices whose OU→Template chain matches the template name (regex)")
 	syncApplyCmd.Flags().String("org", "", "Filter by organization (regex pattern, defaults to current org)")
+	syncApplyCmd.Flags().String("drift-status", "", "Only sync devices with this drift status (IN_SYNC, DRIFT, NEVER_SYNCED, UNKNOWN, ERROR)")
 	syncApplyCmd.Flags().Bool("force", false, "Force sync even if already synced")
 	syncApplyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
@@ -65,6 +67,7 @@ func runSyncStatus(cmd *cobra.Command, args []string) error {
 	filter.OU, _ = cmd.Flags().GetString("ou")
 	filter.Template, _ = cmd.Flags().GetString("template")
 	filter.Organization, _ = cmd.Flags().GetString("org")
+	filter.DriftStatus, _ = cmd.Flags().GetString("drift-status")
 
 	result, err := svc.SyncStatus(context.Background(), org, filter)
 	if err != nil {
@@ -87,6 +90,7 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	filter.OU, _ = cmd.Flags().GetString("ou")
 	filter.Template, _ = cmd.Flags().GetString("template")
 	filter.Organization, _ = cmd.Flags().GetString("org")
+	filter.DriftStatus, _ = cmd.Flags().GetString("drift-status")
 	force, _ := cmd.Flags().GetBool("force")
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
