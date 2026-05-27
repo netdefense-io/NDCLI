@@ -1415,3 +1415,80 @@ func yesNo(v bool) string {
 	}
 	return "No"
 }
+
+// FormatPersonalAccessTokens formats a list of PATs as a table
+func (f *TableFormatter) FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error {
+	if len(tokens) == 0 {
+		f.Info("No personal access tokens found")
+		return nil
+	}
+
+	table := NewStyledTable([]string{"NAME", "PREFIX", "SCOPE", "ORG", "EXPIRES", "LAST USED", "STATUS"})
+
+	for _, t := range tokens {
+		expires := "never"
+		if t.ExpiresAt != nil && !t.ExpiresAt.IsZero() {
+			expires = FormatDate(t.ExpiresAt.Time)
+		}
+		lastUsed := "-"
+		if t.LastUsedAt != nil && !t.LastUsedAt.IsZero() {
+			lastUsed = RelativeTimeShort(t.LastUsedAt.Time)
+		}
+		org := "-"
+		if t.Org != nil && *t.Org != "" {
+			org = *t.Org
+		}
+		status := tokenStatusDisplay(t.Status())
+		table.Append([]string{t.Name, t.TokenPrefix, t.Scope, org, expires, lastUsed, status})
+	}
+
+	table.Render()
+	fmt.Printf("\nTotal: %d token(s)\n", len(tokens))
+	return nil
+}
+
+// FormatTokenCreated formats a newly created PAT with a prominent warning
+func (f *TableFormatter) FormatTokenCreated(resp models.TokenCreateResponse) error {
+	fmt.Fprintln(f.Writer)
+	ColorSuccess.Fprintln(f.Writer, "✓ Personal access token created")
+	fmt.Fprintln(f.Writer)
+	ColorWarning.Fprintln(f.Writer, "  ⚠  Copy your token now — it will NOT be shown again.")
+	fmt.Fprintln(f.Writer)
+	ColorHeader.Fprintf(f.Writer, "  Token:  ")
+	fmt.Fprintln(f.Writer, resp.Token)
+	fmt.Fprintln(f.Writer)
+	fmt.Fprintf(f.Writer, "  Name:   %s\n", resp.Name)
+	fmt.Fprintf(f.Writer, "  Scope:  %s\n", resp.Scope)
+	if resp.Org != nil && *resp.Org != "" {
+		fmt.Fprintf(f.Writer, "  Org:    %s\n", *resp.Org)
+	}
+	expires := "never"
+	if resp.ExpiresAt != nil && !resp.ExpiresAt.IsZero() {
+		expires = FormatDate(resp.ExpiresAt.Time)
+	}
+	fmt.Fprintf(f.Writer, "  Expires: %s\n", expires)
+	fmt.Fprintln(f.Writer)
+	ColorDim.Fprintln(f.Writer, "  Set NDCLI_TOKEN=<token> to use static auth without interactive login.")
+	return nil
+}
+
+// FormatTokenRevoked formats a token revocation confirmation
+func (f *TableFormatter) FormatTokenRevoked(name string) error {
+	ColorSuccess.Fprintf(f.Writer, "✓ ")
+	fmt.Fprintf(f.Writer, "Token %q revoked\n", name)
+	return nil
+}
+
+// tokenStatusDisplay returns a colored status label for a PAT
+func tokenStatusDisplay(status string) string {
+	switch status {
+	case "active":
+		return ColorEnabled.Sprint("active")
+	case "expired":
+		return ColorWarning.Sprint("expired")
+	case "revoked":
+		return ColorDisabled.Sprint("revoked")
+	default:
+		return status
+	}
+}

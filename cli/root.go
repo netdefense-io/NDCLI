@@ -56,6 +56,22 @@ It provides commands for managing devices, organizations, templates, and more.`,
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
+		// Static PAT via NDCLI_TOKEN — skips OAuth2 device flow entirely.
+		if token := os.Getenv("NDCLI_TOKEN"); token != "" {
+			if !isValidPATFormat(token) {
+				return fmt.Errorf("NDCLI_TOKEN does not look like a valid personal access token (expected prefix: ndpat_)")
+			}
+			// Commands that write/revoke tokens require interactive JWT auth.
+			if isTokenMutationCommand(cmd) {
+				return fmt.Errorf("token create/revoke requires interactive authentication — unset NDCLI_TOKEN and log in with 'ndcli auth login'")
+			}
+			staticProvider := auth.NewStaticTokenProvider(token)
+			apiClient = api.NewClientFromConfig(staticProvider)
+			// No auth manager needed for static auth; leave authManager nil.
+			svc = service.New(apiClient, nil, config.Get())
+			return setupOutputAndFormatter(cmd)
+		}
+
 		// Initialize auth manager
 		authManager = auth.GetManager()
 
@@ -65,29 +81,7 @@ It provides commands for managing devices, organizations, templates, and more.`,
 		// Initialize service layer (shared with MCP server)
 		svc = service.New(apiClient, authManager, config.Get())
 
-		// Initialize timezone from config
-		timezone := config.Get().Output.Timezone
-		if timezone == "" {
-			timezone = config.DefaultTimezone
-		}
-		if err := output.SetTimezone(timezone); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid timezone '%s', using system local\n", timezone)
-			output.SetTimezone("Local")
-		}
-
-		// Determine output format: flag > config > default
-		format := outputFmt
-		if format == "" {
-			format = config.Get().Output.Format
-		}
-		if format == "" {
-			format = config.DefaultOutputFormat
-		}
-
-		// Initialize formatter
-		formatter = output.GetFormatter(format)
-
-		return nil
+		return setupOutputAndFormatter(cmd)
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// Clean up auth manager
@@ -206,14 +200,59 @@ func requireOrganization() string {
 	return org
 }
 
-// requireAuth checks if the user is authenticated, attempting token refresh if needed
+// requireAuth checks if the user is authenticated, attempting token refresh if needed.
+// It is a no-op when using NDCLI_TOKEN static auth (authManager is nil in that path).
 func requireAuth() {
+	if authManager == nil {
+		// Running with NDCLI_TOKEN — static token is already wired into apiClient.
+		return
+	}
 	// Use GetAccessToken() which attempts token refresh if expired
 	_, err := authManager.GetAccessToken()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error: Not authenticated. Please run 'ndcli auth login' first.")
 		os.Exit(1)
 	}
+}
+
+// setupOutputAndFormatter initialises the timezone and formatter global. Called
+// from both the static-token and OAuth2 paths in PersistentPreRunE.
+func setupOutputAndFormatter(_ *cobra.Command) error {
+	timezone := config.Get().Output.Timezone
+	if timezone == "" {
+		timezone = config.DefaultTimezone
+	}
+	if err := output.SetTimezone(timezone); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Invalid timezone '%s', using system local\n", timezone)
+		output.SetTimezone("Local")
+	}
+
+	format := outputFmt
+	if format == "" {
+		format = config.Get().Output.Format
+	}
+	if format == "" {
+		format = config.DefaultOutputFormat
+	}
+	formatter = output.GetFormatter(format)
+	return nil
+}
+
+// isValidPATFormat returns true when s starts with the expected PAT prefix.
+func isValidPATFormat(s string) bool {
+	return len(s) > 6 && s[:6] == "ndpat_"
+}
+
+// isTokenMutationCommand returns true when cmd is one of the token subcommands
+// that require interactive JWT auth (create, revoke). Token list is allowed
+// with static auth because the API accepts PAT for read operations.
+func isTokenMutationCommand(cmd *cobra.Command) bool {
+	name := cmd.Name()
+	if name != "create" && name != "revoke" {
+		return false
+	}
+	parent := cmd.Parent()
+	return parent != nil && parent.Name() == "token"
 }
 
 // versionCmd displays version information

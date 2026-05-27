@@ -338,3 +338,25 @@ func (f *JSONFormatter) FormatDashboard(result *models.DashboardResponse) error 
 func (f *JSONFormatter) FormatDeviceHealth(result *models.DeviceTelemetryResponse) error {
 	return f.output(result)
 }
+
+// FormatPersonalAccessTokens renders a PAT list as JSON.
+func (f *JSONFormatter) FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error {
+	return f.output(map[string]interface{}{
+		"tokens": tokens,
+		"total":  len(tokens),
+	})
+}
+
+// FormatTokenCreated renders a newly created token as JSON, including the raw
+// token value (displayed once).
+func (f *JSONFormatter) FormatTokenCreated(resp models.TokenCreateResponse) error {
+	return f.output(resp)
+}
+
+// FormatTokenRevoked renders a token revocation confirmation as JSON.
+func (f *JSONFormatter) FormatTokenRevoked(name string) error {
+	return f.output(map[string]interface{}{
+		"revoked": true,
+		"name":    name,
+	})
+}

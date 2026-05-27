@@ -850,3 +850,39 @@ func (f *SimpleFormatter) FormatVpnConnection(connection *models.EffectiveConnec
 	}
 	return nil
 }
+
+// FormatPersonalAccessTokens formats a list of PATs (simple)
+func (f *SimpleFormatter) FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error {
+	if len(tokens) == 0 {
+		f.Info("No personal access tokens found")
+		return nil
+	}
+	for _, t := range tokens {
+		expires := "never"
+		if t.ExpiresAt != nil && !t.ExpiresAt.IsZero() {
+			expires = FormatDate(t.ExpiresAt.Time)
+		}
+		org := "-"
+		if t.Org != nil && *t.Org != "" {
+			org = *t.Org
+		}
+		fmt.Fprintf(f.Writer, "• %s [%s/%s] org:%s expires:%s status:%s\n",
+			t.Name, t.TokenPrefix, t.Scope, org, expires, t.Status())
+	}
+	return nil
+}
+
+// FormatTokenCreated formats a newly created PAT (simple)
+func (f *SimpleFormatter) FormatTokenCreated(resp models.TokenCreateResponse) error {
+	fmt.Fprintln(f.Writer, "Token created. Copy it now — it will NOT be shown again.")
+	fmt.Fprintf(f.Writer, "Token:  %s\n", resp.Token)
+	fmt.Fprintf(f.Writer, "Name:   %s\n", resp.Name)
+	fmt.Fprintf(f.Writer, "Scope:  %s\n", resp.Scope)
+	return nil
+}
+
+// FormatTokenRevoked formats a token revocation confirmation (simple)
+func (f *SimpleFormatter) FormatTokenRevoked(name string) error {
+	fmt.Fprintf(f.Writer, "Token %q revoked\n", name)
+	return nil
+}

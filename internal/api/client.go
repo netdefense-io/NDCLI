@@ -113,9 +113,14 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		time.Sleep(100 * time.Millisecond)
 
 		if err := c.authMgr.ForceRefresh(); err != nil {
+			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
+			// Preserve the provider's own message (e.g. static-token sentinel).
+			if err.Error() != "" {
+				msg = err.Error()
+			}
 			return nil, &APIError{
 				StatusCode: http.StatusUnauthorized,
-				Message:    "Authentication failed. Please run 'ndcli auth login' to re-authenticate.",
+				Message:    msg,
 			}
 		}
 

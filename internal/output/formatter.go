@@ -200,6 +200,11 @@ type Formatter interface {
 	FormatDeviceBackupStatuses(statuses []models.DeviceBackupStatus, total int, enabledCount int) error
 	FormatDeviceBackupStatus(status *models.DeviceBackupStatus) error
 
+	// Personal Access Tokens
+	FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error
+	FormatTokenCreated(resp models.TokenCreateResponse) error
+	FormatTokenRevoked(name string) error
+
 	// Messages
 	Success(message string)
 	Error(message string)

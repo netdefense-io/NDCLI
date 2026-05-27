@@ -1517,3 +1517,81 @@ func (f *DetailedFormatter) FormatVpnConnection(connection *models.EffectiveConn
 
 	return nil
 }
+
+// FormatPersonalAccessTokens formats a list of PATs (detailed)
+func (f *DetailedFormatter) FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error {
+	if len(tokens) == 0 {
+		f.Info("No personal access tokens found")
+		return nil
+	}
+	for i, t := range tokens {
+		if i > 0 {
+			fmt.Fprintln(f.Writer)
+		}
+		const width = 55
+		box := NewBox(width)
+		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Personal Access Token"))
+		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, t.Name)
+		padding := width - 5 - len(t.Name)
+		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
+		fmt.Fprintln(f.Writer, box.BottomLine())
+		fmt.Fprintln(f.Writer)
+
+		expires := "never"
+		if t.ExpiresAt != nil && !t.ExpiresAt.IsZero() {
+			expires = FormatDate(t.ExpiresAt.Time)
+		}
+		lastUsed := "-"
+		if t.LastUsedAt != nil && !t.LastUsedAt.IsZero() {
+			lastUsed = RelativeTime(t.LastUsedAt.Time)
+		}
+		org := "-"
+		if t.Org != nil && *t.Org != "" {
+			org = *t.Org
+		}
+		f.printLabelValue("Prefix", t.TokenPrefix)
+		f.printLabelValue("Scope", t.Scope)
+		f.printLabelValue("Org", org)
+		f.printLabelValue("Expires", expires)
+		f.printLabelValue("Last Used", lastUsed)
+		f.printLabelValue("Status", tokenStatusDisplay(t.Status()))
+		f.printLabelValue("Created", FormatTimestamp(t.CreatedAt.Time))
+	}
+	return nil
+}
+
+// FormatTokenCreated formats a newly created PAT (detailed)
+func (f *DetailedFormatter) FormatTokenCreated(resp models.TokenCreateResponse) error {
+	const width = 62
+	box := NewBox(width)
+	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Personal Access Token Created"))
+	fmt.Fprintln(f.Writer, box.BottomLine())
+	fmt.Fprintln(f.Writer)
+
+	ColorWarning.Fprintln(f.Writer, "  ⚠  Copy your token now — it will NOT be shown again.")
+	fmt.Fprintln(f.Writer)
+	ColorHeader.Fprintf(f.Writer, "  Token:   ")
+	fmt.Fprintln(f.Writer, resp.Token)
+	fmt.Fprintln(f.Writer)
+
+	f.printLabelValue("Name", resp.Name)
+	f.printLabelValue("Scope", resp.Scope)
+	if resp.Org != nil && *resp.Org != "" {
+		f.printLabelValue("Org", *resp.Org)
+	}
+	expires := "never"
+	if resp.ExpiresAt != nil && !resp.ExpiresAt.IsZero() {
+		expires = FormatDate(resp.ExpiresAt.Time)
+	}
+	f.printLabelValue("Expires", expires)
+	fmt.Fprintln(f.Writer)
+	ColorDim.Fprintln(f.Writer, "  Set NDCLI_TOKEN=<token> to use static auth without interactive login.")
+	return nil
+}
+
+// FormatTokenRevoked formats a token revocation confirmation (detailed)
+func (f *DetailedFormatter) FormatTokenRevoked(name string) error {
+	ColorSuccess.Fprintf(f.Writer, "✓ ")
+	fmt.Fprintf(f.Writer, "Token %q revoked\n", name)
+	return nil
+}

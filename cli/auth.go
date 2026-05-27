@@ -76,6 +76,7 @@ func init() {
 	authCmd.AddCommand(authRefreshCmd)
 	authCmd.AddCommand(authMigrateCmd)
 	authCmd.AddCommand(authDeleteCmd)
+	authCmd.AddCommand(authTokenCmd)
 
 	// Login flags
 	authLoginCmd.Flags().Bool("force", false, "Force new login even if already authenticated")
