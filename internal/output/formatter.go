@@ -200,6 +200,12 @@ type Formatter interface {
 	FormatDeviceBackupStatuses(statuses []models.DeviceBackupStatus, total int, enabledCount int) error
 	FormatDeviceBackupStatus(status *models.DeviceBackupStatus) error
 
+	// Schedules
+	FormatSchedules(schedules []models.Schedule, total int) error
+	FormatSchedule(sch *models.Schedule) error
+	FormatScheduledTasks(tasks []models.ScheduledTask, total int) error
+	FormatScheduledTaskRegisterResult(result *models.ScheduledTaskRegisterResult) error
+
 	// Personal Access Tokens
 	FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error
 	FormatTokenCreated(resp models.TokenCreateResponse) error

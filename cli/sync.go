@@ -43,10 +43,12 @@ func init() {
 	syncApplyCmd.Flags().String("device", "", "Sync devices matching pattern (regex)")
 	syncApplyCmd.Flags().String("ou", "", "Sync all devices in OUs matching pattern (regex)")
 	syncApplyCmd.Flags().String("template", "", "Sync all devices whose OU→Template chain matches the template name (regex)")
-	syncApplyCmd.Flags().String("org", "", "Filter by organization (regex pattern, defaults to current org)")
+	syncApplyCmd.Flags().String("org", "", "Filter by organization (regex pattern, defaults to current org; must be exact name when --schedule is used)")
 	syncApplyCmd.Flags().String("drift-status", "", "Only sync devices with this drift status (IN_SYNC, DRIFT, NEVER_SYNCED, UNKNOWN, ERROR)")
 	syncApplyCmd.Flags().Bool("force", false, "Force sync even if already synced")
 	syncApplyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	syncApplyCmd.Flags().String("schedule", "", "Register as a recurring spec on this named schedule instead of syncing immediately.")
+	_ = syncApplyCmd.RegisterFlagCompletionFunc("schedule", completeScheduleNames)
 
 	// The --device/--ou flags accept regex patterns but the common case is an
 	// exact name, so completion against the live list helps either way.
@@ -91,10 +93,21 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	filter.Template, _ = cmd.Flags().GetString("template")
 	filter.Organization, _ = cmd.Flags().GetString("org")
 	filter.DriftStatus, _ = cmd.Flags().GetString("drift-status")
+	filter.Schedule, _ = cmd.Flags().GetString("schedule")
 	force, _ := cmd.Flags().GetBool("force")
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 	ctx := context.Background()
+
+	// When --schedule is set, register a recurring spec — skip the confirm
+	// prompt (no immediate side-effects) and return the spec descriptor.
+	if filter.Schedule != "" {
+		spec, err := svc.SyncRegisterSpec(ctx, org, filter, force)
+		if err != nil {
+			return err
+		}
+		return formatter.FormatScheduledTaskRegisterResult(spec)
+	}
 
 	if !skipConfirm {
 		status, err := svc.SyncStatus(ctx, org, filter)

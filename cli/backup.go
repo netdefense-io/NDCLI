@@ -103,8 +103,10 @@ func init() {
 	backupConfigSetCmd.Flags().String("s3-key-id", "", "S3 access key ID")
 	backupConfigSetCmd.Flags().String("s3-access-key", "", "S3 secret access key (prompts if not provided)")
 	backupConfigSetCmd.Flags().String("s3-folder", "", "S3 folder path (prefix) within the bucket")
-	backupConfigSetCmd.Flags().String("schedule", "", "Cron schedule expression")
+	backupConfigSetCmd.Flags().String("schedule", "", "Attach to a named Schedule (use 'ndcli schedule create' first). Pass an empty string or --no-schedule to detach.")
+	backupConfigSetCmd.Flags().Bool("no-schedule", false, "Detach the backup from any attached schedule")
 	backupConfigSetCmd.Flags().String("encryption-key", "", "Encryption key (prompts if not provided)")
+	backupConfigSetCmd.MarkFlagsMutuallyExclusive("schedule", "no-schedule")
 
 	backupStatusCmd.Flags().Bool("enabled-only", false, "Show only devices with backup enabled")
 	backupStatusCmd.Flags().String("status", "", "Filter by backup status (SUCCESS, FAILED, IN_PROGRESS)")
@@ -142,82 +144,127 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 	s3KeyID, _ := cmd.Flags().GetString("s3-key-id")
 	s3AccessKey, _ := cmd.Flags().GetString("s3-access-key")
 	s3Folder, _ := cmd.Flags().GetString("s3-folder")
-	schedule, _ := cmd.Flags().GetString("schedule")
+	scheduleName, _ := cmd.Flags().GetString("schedule")
+	noSchedule, _ := cmd.Flags().GetBool("no-schedule")
 	encryptionKey, _ := cmd.Flags().GetString("encryption-key")
+
+	scheduleChanged := cmd.Flags().Changed("schedule") || noSchedule
+	// Effective schedule target: empty string means detach.
+	targetSchedule := scheduleName
+	if noSchedule {
+		targetSchedule = ""
+	}
 
 	ctx := context.Background()
 
-	// Decide create vs update by trying to fetch the existing config.
-	_, err := svc.BackupConfigGet(ctx, org)
-	isCreate := false
-	if err != nil {
-		var apiErr *api.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
-			isCreate = true
+	// ── S3 / key config (create or update) ───────────────────────────────────
+
+	s3FlagsSet := s3Endpoint != "" || s3Bucket != "" || s3KeyID != "" ||
+		s3AccessKey != "" || s3Folder != "" || encryptionKey != "" ||
+		cmd.Flags().Changed("s3-endpoint") || cmd.Flags().Changed("s3-bucket") ||
+		cmd.Flags().Changed("s3-key-id") || cmd.Flags().Changed("s3-folder") ||
+		cmd.Flags().Changed("encryption-key")
+
+	if s3FlagsSet || !scheduleChanged {
+		// Decide create vs update by probing for an existing config.
+		_, err := svc.BackupConfigGet(ctx, org)
+		isCreate := false
+		if err != nil {
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+				isCreate = true
+			} else {
+				isCreate = true
+			}
+		}
+
+		if isCreate {
+			if s3Endpoint == "" || s3Bucket == "" || s3KeyID == "" {
+				return fmt.Errorf("for new configuration, --s3-endpoint, --s3-bucket, and --s3-key-id are required")
+			}
+			if s3AccessKey == "" {
+				pw, err := promptSecret("S3 Access Key: ")
+				if err != nil {
+					return fmt.Errorf("failed to read access key: %w", err)
+				}
+				s3AccessKey = pw
+			}
+			if encryptionKey == "" {
+				k, err := promptSecret("Encryption Key: ")
+				if err != nil {
+					return fmt.Errorf("failed to read encryption key: %w", err)
+				}
+				encryptionKey = k
+			}
+			if _, err := svc.BackupConfigCreate(ctx, org, service.BackupConfigCreateOpts{
+				S3Endpoint:    s3Endpoint,
+				S3Bucket:      s3Bucket,
+				S3KeyID:       s3KeyID,
+				S3AccessKey:   s3AccessKey,
+				S3Folder:      s3Folder,
+				EncryptionKey: encryptionKey,
+			}); err != nil {
+				return err
+			}
+			color.Green("Backup configuration created")
 		} else {
-			// Treat other errors as "config doesn't exist yet" too — matches
-			// previous CLI behaviour where any GET failure pushed the create
-			// path.
-			isCreate = true
+			opts := service.BackupConfigUpdateOpts{
+				S3Endpoint:    s3Endpoint,
+				S3Bucket:      s3Bucket,
+				S3KeyID:       s3KeyID,
+				S3AccessKey:   s3AccessKey,
+				S3Folder:      s3Folder,
+				EncryptionKey: encryptionKey,
+			}
+			// Prompt for access key only if key ID is being changed and the
+			// key itself wasn't supplied.
+			if opts.S3AccessKey == "" && opts.S3KeyID != "" {
+				pw, err := promptSecret("S3 Access Key: ")
+				if err != nil {
+					return fmt.Errorf("failed to read access key: %w", err)
+				}
+				opts.S3AccessKey = pw
+			}
+			if opts.S3Endpoint == "" && opts.S3Bucket == "" && opts.S3KeyID == "" &&
+				opts.S3AccessKey == "" && opts.S3Folder == "" && opts.EncryptionKey == "" {
+				// No S3 fields changed; only schedule is being modified — skip
+				// the update call entirely.
+			} else {
+				if _, err := svc.BackupConfigUpdate(ctx, org, opts); err != nil {
+					return err
+				}
+				color.Green("Backup configuration updated")
+			}
 		}
 	}
 
-	if isCreate {
-		if s3Endpoint == "" || s3Bucket == "" || s3KeyID == "" || schedule == "" {
-			return fmt.Errorf("for new configuration, all fields are required: --s3-endpoint, --s3-bucket, --s3-key-id, --schedule")
-		}
-		if s3AccessKey == "" {
-			pw, err := promptSecret("S3 Access Key: ")
-			if err != nil {
-				return fmt.Errorf("failed to read access key: %w", err)
-			}
-			s3AccessKey = pw
-		}
-		if encryptionKey == "" {
-			k, err := promptSecret("Encryption Key: ")
-			if err != nil {
-				return fmt.Errorf("failed to read encryption key: %w", err)
-			}
-			encryptionKey = k
-		}
-		if _, err := svc.BackupConfigCreate(ctx, org, service.BackupConfigCreateOpts{
-			S3Endpoint:    s3Endpoint,
-			S3Bucket:      s3Bucket,
-			S3KeyID:       s3KeyID,
-			S3AccessKey:   s3AccessKey,
-			S3Folder:      s3Folder,
-			Schedule:      schedule,
-			EncryptionKey: encryptionKey,
-		}); err != nil {
-			return err
-		}
-		color.Green("Backup configuration created")
+	// ── Schedule attachment / detachment ──────────────────────────────────────
+
+	if !scheduleChanged {
 		return nil
 	}
 
-	// Update path
-	opts := service.BackupConfigUpdateOpts{
-		S3Endpoint:    s3Endpoint,
-		S3Bucket:      s3Bucket,
-		S3KeyID:       s3KeyID,
-		S3AccessKey:   s3AccessKey,
-		S3Folder:      s3Folder,
-		Schedule:      schedule,
-		EncryptionKey: encryptionKey,
-	}
-	// Prompt for access key only if key ID is being changed and the key
-	// itself wasn't supplied.
-	if opts.S3AccessKey == "" && opts.S3KeyID != "" {
-		pw, err := promptSecret("S3 Access Key: ")
-		if err != nil {
-			return fmt.Errorf("failed to read access key: %w", err)
+	// When detaching, warn the user that backups will stop running.
+	if targetSchedule == "" {
+		color.Yellow("⚠  Detaching the schedule stops scheduled backups.")
+		color.Yellow("   The backup config stays configured but won't run until re-attached.")
+		if !helpers.Confirm("Detach backup from its schedule?") {
+			fmt.Println("Cancelled")
+			return nil
 		}
-		opts.S3AccessKey = pw
 	}
-	if _, err := svc.BackupConfigUpdate(ctx, org, opts); err != nil {
+
+	result, err := svc.BackupConfigSetSchedule(ctx, org, targetSchedule)
+	if err != nil {
 		return err
 	}
-	color.Green("Backup configuration updated")
+
+	if result.Attached != nil {
+		a := result.Attached
+		color.Green("Backup attached to schedule %q — spec code: %s", a.ScheduleName, a.Code)
+	} else {
+		color.Green("Backup detached from schedule (org: %s)", result.Detached.OrganizationName)
+	}
 	return nil
 }
 

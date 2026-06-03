@@ -41,14 +41,14 @@ func (s *Service) BackupConfigExists(ctx context.Context, org string) bool {
 
 // BackupConfigCreateOpts holds the required fields for creating an org
 // backup configuration. S3AccessKey and EncryptionKey carry secrets — never
-// log them.
+// log them. Schedule is no longer part of BackupConfig; attach a named
+// Schedule separately via BackupConfigSetSchedule.
 type BackupConfigCreateOpts struct {
 	S3Endpoint    string
 	S3Bucket      string
 	S3KeyID       string
 	S3AccessKey   string
 	S3Folder      string // mapped to s3_prefix
-	Schedule      string
 	EncryptionKey string
 }
 
@@ -64,8 +64,6 @@ func (s *Service) BackupConfigCreate(ctx context.Context, org string, opts Backu
 		return nil, &Error{Code: CodeInvalidInput, Message: "s3_key_id is required"}
 	case opts.S3AccessKey == "":
 		return nil, &Error{Code: CodeInvalidInput, Message: "s3_access_key is required"}
-	case opts.Schedule == "":
-		return nil, &Error{Code: CodeInvalidInput, Message: "schedule is required"}
 	case opts.EncryptionKey == "":
 		return nil, &Error{Code: CodeInvalidInput, Message: "encryption_key is required"}
 	}
@@ -74,7 +72,6 @@ func (s *Service) BackupConfigCreate(ctx context.Context, org string, opts Backu
 		"s3_bucket":      opts.S3Bucket,
 		"s3_key_id":      opts.S3KeyID,
 		"s3_access_key":  opts.S3AccessKey,
-		"schedule":       opts.Schedule,
 		"encryption_key": opts.EncryptionKey,
 	}
 	if opts.S3Folder != "" {
@@ -93,14 +90,14 @@ func (s *Service) BackupConfigCreate(ctx context.Context, org string, opts Backu
 
 // BackupConfigUpdateOpts holds the optional fields for an update PATCH-style
 // operation (the underlying endpoint is a PUT but only sends provided
-// fields). Empty strings mean "no change".
+// fields). Empty strings mean "no change". Schedule attachment is now
+// handled separately via BackupConfigSetSchedule.
 type BackupConfigUpdateOpts struct {
 	S3Endpoint    string
 	S3Bucket      string
 	S3KeyID       string
 	S3AccessKey   string
 	S3Folder      string
-	Schedule      string
 	EncryptionKey string
 }
 
@@ -123,9 +120,6 @@ func (s *Service) BackupConfigUpdate(ctx context.Context, org string, opts Backu
 	if opts.S3Folder != "" {
 		payload["s3_prefix"] = opts.S3Folder
 	}
-	if opts.Schedule != "" {
-		payload["schedule"] = opts.Schedule
-	}
 	if opts.EncryptionKey != "" {
 		payload["encryption_key"] = opts.EncryptionKey
 	}
@@ -141,6 +135,53 @@ func (s *Service) BackupConfigUpdate(ctx context.Context, org string, opts Backu
 		return nil, wrapAPI("%v", err)
 	}
 	return &cfg, nil
+}
+
+// BackupScheduleResult is the discriminated return from BackupConfigSetSchedule.
+// Exactly one of Attached / Detached will be non-nil.
+type BackupScheduleResult struct {
+	Attached *models.BackupScheduleAttachResult
+	Detached *models.BackupScheduleDetachResult
+}
+
+// BackupConfigSetSchedule attaches or detaches the org's backup from a named
+// Schedule via PUT /backup-config/schedule.
+//
+//   - scheduleName != "" → attach; body: {"schedule":"<name>"}
+//     Returns the BACKUP spec descriptor. 404 from the server means the named
+//     schedule does not exist in the org and is surfaced as a service error.
+//   - scheduleName == "" → detach; body: {"schedule":null}
+//     Returns the detach confirmation.
+func (s *Service) BackupConfigSetSchedule(ctx context.Context, org, scheduleName string) (*BackupScheduleResult, error) {
+	if org == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "organization is required"}
+	}
+	endpoint := fmt.Sprintf("/api/v1/organizations/%s/backup-config/schedule", org)
+
+	var body map[string]interface{}
+	if scheduleName != "" {
+		body = map[string]interface{}{"schedule": scheduleName}
+	} else {
+		body = map[string]interface{}{"schedule": nil}
+	}
+
+	resp, err := s.api.Put(ctx, endpoint, body)
+	if err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+
+	if scheduleName != "" {
+		var attach models.BackupScheduleAttachResult
+		if err := api.ParseResponse(resp, &attach); err != nil {
+			return nil, wrapAPI("%v", err)
+		}
+		return &BackupScheduleResult{Attached: &attach}, nil
+	}
+	var detach models.BackupScheduleDetachResult
+	if err := api.ParseResponse(resp, &detach); err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+	return &BackupScheduleResult{Detached: &detach}, nil
 }
 
 // BackupConfigDelete removes the backup configuration. This implicitly

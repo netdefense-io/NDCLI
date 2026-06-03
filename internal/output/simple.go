@@ -512,13 +512,13 @@ func (f *SimpleFormatter) FormatVariableOverview(items []models.VariableOverview
 // FormatBackupConfig formats a backup configuration (simple view)
 func (f *SimpleFormatter) FormatBackupConfig(config *models.BackupConfig) error {
 	fmt.Fprintf(f.Writer, "Backup Config: %s\n", config.Organization)
-	fmt.Fprintf(f.Writer, "  Status: %s\n", ColoredStatus(config.Status))
-	fmt.Fprintf(f.Writer, "  S3 Endpoint: %s\n", config.S3Endpoint)
-	fmt.Fprintf(f.Writer, "  S3 Bucket: %s\n", config.S3Bucket)
+	fmt.Fprintf(f.Writer, "  Status:         %s\n", ColoredStatus(config.Status))
+	fmt.Fprintf(f.Writer, "  S3 Endpoint:    %s\n", config.S3Endpoint)
+	fmt.Fprintf(f.Writer, "  S3 Bucket:      %s\n", config.S3Bucket)
 	if config.S3Prefix != nil && *config.S3Prefix != "" {
-		fmt.Fprintf(f.Writer, "  S3 Folder: %s\n", *config.S3Prefix)
+		fmt.Fprintf(f.Writer, "  S3 Folder:      %s\n", *config.S3Prefix)
 	}
-	fmt.Fprintf(f.Writer, "  Schedule: %s\n", config.Schedule)
+	fmt.Fprintf(f.Writer, "  Schedule:       %s\n", backupScheduleLine(config))
 	encKey := "Not configured"
 	if config.HasEncryptionKey {
 		encKey = "Configured"

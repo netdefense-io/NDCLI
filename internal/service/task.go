@@ -139,13 +139,18 @@ func (s *Service) TaskCancel(ctx context.Context, taskID string) error {
 // enum strings (PING/SHUTDOWN/...). At least one of Devices/OUs/AllDevices
 // must be set; the friendly-name mapping (`ping` → PING, etc.) lives in
 // cli/run.go so it stays out of MCP-facing surface area.
+//
+// Schedule and ScheduledAt are mutually exclusive. When Schedule is set, the
+// server registers a ScheduledTask spec instead of creating tasks immediately;
+// use RunRegisterSpec for that path so the two response types stay separate.
 type RunOpts struct {
 	Type        string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL
 	Payload     map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version
 	Devices     []string               // repeatable
 	OUs         []string               // repeatable
 	AllDevices  bool                   // mutually exclusive with Devices/OUs
-	ScheduledAt string                 // RFC3339; empty = run immediately
+	ScheduledAt string                 // RFC3339; empty = run immediately; mutually exclusive with Schedule
+	Schedule    string                 // schedule name; when set, call RunRegisterSpec instead
 }
 
 var validRunTypes = map[string]bool{
@@ -199,6 +204,56 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 		return nil, wrapAPI("%v", err)
 	}
 	var result models.RunResult
+	if err := api.ParseResponse(resp, &result); err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+	return &result, nil
+}
+
+// RunRegisterSpec posts to POST /api/v1/organizations/{org}/tasks with a
+// "schedule" field, which instructs NDManager to register a recurring
+// ScheduledTask spec instead of creating tasks immediately. The server returns
+// a 201 spec descriptor rather than a task table.
+func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts) (*models.ScheduledTaskRegisterResult, error) {
+	if org == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "organization is required"}
+	}
+	if opts.Schedule == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "schedule name is required for spec registration"}
+	}
+	taskType := strings.ToUpper(opts.Type)
+	if !validRunTypes[taskType] {
+		return nil, &Error{
+			Code:    CodeInvalidInput,
+			Message: fmt.Sprintf("invalid task type: %s", opts.Type),
+		}
+	}
+	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
+		return nil, &Error{Code: CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+	}
+	if opts.AllDevices && (len(opts.Devices) > 0 || len(opts.OUs) > 0) {
+		return nil, &Error{Code: CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
+	}
+
+	body := map[string]interface{}{
+		"type": taskType,
+		"targets": map[string]interface{}{
+			"devices": opts.Devices,
+			"ous":     opts.OUs,
+			"all":     opts.AllDevices,
+		},
+		"schedule": opts.Schedule,
+	}
+	if opts.Payload != nil && len(opts.Payload) > 0 {
+		body["payload"] = opts.Payload
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/organizations/%s/tasks", url.PathEscape(org))
+	resp, err := s.api.Post(ctx, endpoint, body)
+	if err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+	var result models.ScheduledTaskRegisterResult
 	if err := api.ParseResponse(resp, &result); err != nil {
 		return nil, wrapAPI("%v", err)
 	}

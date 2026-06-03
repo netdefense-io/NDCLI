@@ -7,7 +7,25 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"golang.org/x/term"
 )
+
+// ConfirmOrForce is the standard destructive-action gate for commands that
+// accept a --force / --yes flag.
+//
+//   - force == true  → proceed immediately (scripting / CI path).
+//   - stdin is a TTY → show the prompt from Confirm; proceed only on y/yes.
+//   - stdin is NOT a TTY and force is false → return an error asking for
+//     --force so the command never hangs waiting on piped input.
+func ConfirmOrForce(message string, force bool) (bool, error) {
+	if force {
+		return true, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, fmt.Errorf("stdin is not a terminal — pass --force to confirm non-interactively")
+	}
+	return Confirm(message), nil
+}
 
 // Confirm prompts the user for a yes/no confirmation
 func Confirm(message string) bool {

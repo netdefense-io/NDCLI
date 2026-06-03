@@ -965,6 +965,29 @@ func (f *TableFormatter) FormatVariableOverview(items []models.VariableOverview,
 	return nil
 }
 
+// backupScheduleLine returns the display string for the scheduling state of a
+// BackupConfig. It uses the new AttachedSchedule/Scheduled fields from
+// NDManager bb8744f+ and falls back gracefully when they are absent.
+//
+// Three states:
+//   - DISABLED              → plain "Disabled" (status line already covers this)
+//   - ENABLED + !Scheduled  → yellow warning (won't run)
+//   - ENABLED + Scheduled   → schedule name
+func backupScheduleLine(config *models.BackupConfig) string {
+	if config.Status == "DISABLED" {
+		return ColorDisabled.Sprint("disabled")
+	}
+	if !config.Scheduled {
+		return ColorWarning.Sprint("NOT SCHEDULED — backups will not run") +
+			"  (attach: ndcli backup config set --schedule <name>)"
+	}
+	name := ""
+	if config.AttachedSchedule != nil {
+		name = *config.AttachedSchedule
+	}
+	return ColorEnabled.Sprint("Scheduled: ") + name
+}
+
 // FormatBackupConfig formats a backup configuration
 func (f *TableFormatter) FormatBackupConfig(config *models.BackupConfig) error {
 	fmt.Printf("Organization:   %s\n", config.Organization)
@@ -976,7 +999,7 @@ func (f *TableFormatter) FormatBackupConfig(config *models.BackupConfig) error {
 		fmt.Printf("S3 Folder:      %s\n", *config.S3Prefix)
 	}
 	fmt.Printf("S3 Key ID:      %s\n", config.S3KeyID)
-	fmt.Printf("Schedule:       %s\n", config.Schedule)
+	fmt.Printf("Schedule:       %s\n", backupScheduleLine(config))
 	fmt.Printf("Encryption Key: %s\n", EncryptionKeyWithIcon(config.HasEncryptionKey))
 	fmt.Println()
 	fmt.Printf("Created:        %s\n", FormatTimestamp(config.CreatedAt.Time))

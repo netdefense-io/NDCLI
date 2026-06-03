@@ -997,7 +997,7 @@ func (f *DetailedFormatter) FormatBackupConfig(config *models.BackupConfig) erro
 	fmt.Fprintln(f.Writer)
 
 	// Schedule and encryption
-	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Schedule", config.Schedule)
+	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Schedule", backupScheduleLine(config))
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Encryption Key", EncryptionKeyWithIcon(config.HasEncryptionKey))
 	fmt.Fprintln(f.Writer)
 

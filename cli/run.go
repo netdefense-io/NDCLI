@@ -154,17 +154,31 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 				at = t.UTC().Format(time.RFC3339)
 			}
 
+			scheduleName, _ := cmd.Flags().GetString("schedule")
+
 			opts := service.RunOpts{
 				Type:        taskType,
 				Devices:     devices,
 				OUs:         ous,
 				AllDevices:  all,
 				ScheduledAt: at,
+				Schedule:    scheduleName,
 			}
 			if extra != nil {
 				if err := extra(cmd, &opts); err != nil {
 					return err
 				}
+			}
+
+			// When --schedule is set, register a recurring spec instead of
+			// creating tasks immediately. The server enforces mutual exclusion
+			// with scheduled_at (422); we also guard client-side.
+			if scheduleName != "" {
+				spec, err := svc.RunRegisterSpec(context.Background(), org, opts)
+				if err != nil {
+					return err
+				}
+				return formatter.FormatScheduledTaskRegisterResult(spec)
 			}
 
 			result, err := svc.Run(context.Background(), org, opts)
@@ -179,13 +193,15 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 	cmd.Flags().StringSlice("ou", nil, "Target OU name (repeatable; expands to enabled members)")
 	cmd.Flags().Bool("org", false, "Target every enabled device in the current org")
 	cmd.Flags().String("at", "", "Schedule execution. Accepts:  relative (30m, 2h, 3d, 1w);  date+time in your configured timezone (2026-05-12 03:00);  RFC3339 with tz (2026-05-12T03:00:00Z, 2026-05-12T03:00:00-03:00).")
+	cmd.Flags().String("schedule", "", "Register as a recurring spec on this named schedule (mutually exclusive with --at).")
 
 	cmd.MarkFlagsMutuallyExclusive("org", "device")
 	cmd.MarkFlagsMutuallyExclusive("org", "ou")
+	cmd.MarkFlagsMutuallyExclusive("at", "schedule")
 
 	_ = cmd.RegisterFlagCompletionFunc("device", completeDevices)
 	_ = cmd.RegisterFlagCompletionFunc("ou", completeOUs)
+	_ = cmd.RegisterFlagCompletionFunc("schedule", completeScheduleNames)
 
 	return cmd
 }
-

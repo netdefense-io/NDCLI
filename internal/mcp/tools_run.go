@@ -14,12 +14,16 @@ import (
 // Shared input for every `ndcli.run.*` tool. Per-command fields land in
 // the same struct because every tool has identical target+scheduling
 // surface; the handler picks out the fields it cares about.
+//
+// At and Schedule are mutually exclusive: At defers a one-shot run;
+// Schedule registers a recurring spec. The server enforces exclusion (422).
 type runInput struct {
 	Organization string   `json:"organization,omitempty"`
 	Devices      []string `json:"devices,omitempty"`
 	OUs          []string `json:"ous,omitempty"`
 	Org          bool     `json:"org,omitempty"`
 	At           string   `json:"at,omitempty"`
+	Schedule     string   `json:"schedule,omitempty"` // recurring spec registration
 	// PING
 	Host  string `json:"host,omitempty"`
 	Count int    `json:"count,omitempty"`
@@ -37,7 +41,8 @@ func (s *Server) registerRunTools() {
 		"devices":      stringArrayProperty("Target device names (repeatable)"),
 		"ous":          stringArrayProperty("Target OU names; expands to enabled members"),
 		"org":          boolProperty("Target every enabled device in the current org"),
-		"at":           stringProperty("Defer execution. Accepts a relative offset (30m, 2h, 3d, 1w), a bare timestamp interpreted in NDCLI's configured timezone (2026-05-12 03:00), or RFC3339 with explicit tz (2026-05-12T03:00:00Z). Omit for immediate run."),
+		"at":           stringProperty("Defer execution. Accepts a relative offset (30m, 2h, 3d, 1w), a bare timestamp interpreted in NDCLI's configured timezone (2026-05-12 03:00), or RFC3339 with explicit tz (2026-05-12T03:00:00Z). Omit for immediate run. Mutually exclusive with schedule."),
+		"schedule":     stringProperty("Register as a recurring spec on this named schedule instead of running immediately. Mutually exclusive with at."),
 		"confirm":      confirmProperty(),
 	}
 
@@ -142,17 +147,13 @@ func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runIn
 		if err != nil {
 			return s.errorResult(err)
 		}
-		if !input.Confirm {
-			scope := runScopeDescription(input)
-			return s.previewResult(fmt.Sprintf("run %s on", friendly), scope)
-		}
-
 		opts := service.RunOpts{
 			Type:        taskType,
 			Devices:     input.Devices,
 			OUs:         input.OUs,
 			AllDevices:  input.Org,
 			ScheduledAt: input.At,
+			Schedule:    input.Schedule,
 		}
 		if payloadFn != nil {
 			opts.Payload = payloadFn(input)
@@ -160,6 +161,21 @@ func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runIn
 
 		apiCtx, cancel := contextWithTimeout()
 		defer cancel()
+
+		// When --schedule is set, register a recurring spec. No confirm gate
+		// needed (no immediate side-effects).
+		if input.Schedule != "" {
+			spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
+			if err != nil {
+				return s.errorResult(err)
+			}
+			return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", taskType, spec.Code, spec.ScheduleName))
+		}
+
+		if !input.Confirm {
+			scope := runScopeDescription(input)
+			return s.previewResult(fmt.Sprintf("run %s on", friendly), scope)
+		}
 
 		result, err := s.svc.Run(apiCtx, org, opts)
 		if err != nil {

@@ -21,8 +21,9 @@ type syncFilterInput struct {
 
 type syncApplyInput struct {
 	syncFilterInput
-	Force   bool `json:"force,omitempty"`
-	Confirm bool `json:"confirm,omitempty"`
+	Force    bool   `json:"force,omitempty"`
+	Confirm  bool   `json:"confirm,omitempty"`
+	Schedule string `json:"schedule,omitempty"` // recurring spec registration; mutually exclusive with immediate apply
 }
 
 // registerSyncTools registers all sync-related tools.
@@ -46,16 +47,17 @@ func (s *Server) registerSyncTools() {
 	// ndcli.sync.apply
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.sync.apply",
-		Description: "Trigger configuration sync for every device matching the filter. Filters are regex patterns; org defaults to the configured org. Requires confirm=true to execute; without it, returns the affected device list as a preview.",
+		Description: "Trigger configuration sync for every device matching the filter. Filters are regex patterns; org defaults to the configured org. Requires confirm=true for immediate apply. Pass schedule to register a recurring sync spec instead.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization": stringProperty("Organization name regex (defaults to configured org)"),
+				"organization": stringProperty("Organization name regex (defaults to configured org; must be exact name when schedule is provided)"),
 				"device":       stringProperty("Device name regex"),
 				"ou":           stringProperty("OU name regex"),
 				"drift_status": stringEnumProperty("Only sync devices with this drift status", []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
 				"template":     stringProperty("Template name regex — restricts to devices whose effective OU→Template chain matches"),
 				"force":        boolProperty("Force sync even if already in sync"),
+				"schedule":     stringProperty("Register as a recurring sync spec on this named schedule. Mutually exclusive with immediate apply (confirm)."),
 				"confirm":      confirmProperty(),
 			},
 		},
@@ -121,10 +123,20 @@ func (s *Server) handleSyncApply(ctx context.Context, req *mcp.CallToolRequest) 
 		OU:           input.OU,
 		DriftStatus:  input.DriftStatus,
 		Template:     input.Template,
+		Schedule:     input.Schedule,
 	}
 
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
+
+	// When schedule is set, register a recurring spec (no confirm required).
+	if input.Schedule != "" {
+		spec, err := s.svc.SyncRegisterSpec(apiCtx, defaultOrg, filter, input.Force)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		return s.successResult(spec, fmt.Sprintf("Registered SYNC spec %s on schedule %q", spec.Code, spec.ScheduleName))
+	}
 
 	if !input.Confirm {
 		status, err := s.svc.SyncStatus(apiCtx, defaultOrg, filter)
@@ -186,4 +198,3 @@ func syncStatusItem(it *models.SyncStatusItem) map[string]interface{} {
 		"error":        it.Error,
 	}
 }
-

@@ -29,7 +29,6 @@ type backupConfigCreateInput struct {
 	S3KeyID       string `json:"s3_key_id"`
 	S3AccessKey   string `json:"s3_access_key"`
 	S3Folder      string `json:"s3_folder,omitempty"`
-	Schedule      string `json:"schedule"`
 	EncryptionKey string `json:"encryption_key"`
 	Confirm       bool   `json:"confirm,omitempty"`
 }
@@ -41,9 +40,15 @@ type backupConfigUpdateInput struct {
 	S3KeyID       string `json:"s3_key_id,omitempty"`
 	S3AccessKey   string `json:"s3_access_key,omitempty"`
 	S3Folder      string `json:"s3_folder,omitempty"`
-	Schedule      string `json:"schedule,omitempty"`
 	EncryptionKey string `json:"encryption_key,omitempty"`
 	Confirm       bool   `json:"confirm,omitempty"`
+}
+
+// backupConfigSetScheduleInput is the input for the dedicated schedule
+// attach/detach tool. ScheduleName empty → detach (null body).
+type backupConfigSetScheduleInput struct {
+	Organization string  `json:"organization,omitempty"`
+	ScheduleName *string `json:"schedule_name"` // null/absent = detach
 }
 
 type backupStatusListInput struct {
@@ -75,8 +80,8 @@ func (s *Server) registerBackupTools() {
 	}, s.handleBackupConfigShow)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.backup.config_create",
-		Description: "Create the org's backup configuration. Carries S3 secrets and the org-default backup encryption key — only invoke this when the user has explicitly authorised exposing those values to MCP. Requires confirm=true.",
+		Name:        "ndcli.backup.config_create",
+		Description: "Create the org's backup configuration. Carries S3 secrets and the org-default backup encryption key — only invoke this when the user has explicitly authorised exposing those values to MCP. Requires confirm=true. Attach a schedule separately with ndcli.backup.config_set_schedule.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -86,17 +91,16 @@ func (s *Server) registerBackupTools() {
 				"s3_key_id":      stringProperty("S3 access key ID"),
 				"s3_access_key":  stringProperty("S3 secret access key (sensitive)"),
 				"s3_folder":      stringProperty("Optional folder prefix within the bucket"),
-				"schedule":       stringProperty("Cron schedule expression"),
 				"encryption_key": stringProperty("Org-default backup encryption key (sensitive)"),
 				"confirm":        confirmProperty(),
 			},
-			"required": []string{"s3_endpoint", "s3_bucket", "s3_key_id", "s3_access_key", "schedule", "encryption_key"},
+			"required": []string{"s3_endpoint", "s3_bucket", "s3_key_id", "s3_access_key", "encryption_key"},
 		},
 	}, s.handleBackupConfigCreate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.backup.config_update",
-		Description: "Update the org's backup configuration. At least one field must be set. Requires confirm=true.",
+		Name:        "ndcli.backup.config_update",
+		Description: "Update the org's S3/key backup configuration. At least one field must be set. Requires confirm=true. To change the attached schedule use ndcli.backup.config_set_schedule.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -106,12 +110,23 @@ func (s *Server) registerBackupTools() {
 				"s3_key_id":      stringProperty("New S3 access key ID"),
 				"s3_access_key":  stringProperty("New S3 secret access key (sensitive)"),
 				"s3_folder":      stringProperty("New folder prefix"),
-				"schedule":       stringProperty("New cron schedule"),
 				"encryption_key": stringProperty("New org-default encryption key (sensitive)"),
 				"confirm":        confirmProperty(),
 			},
 		},
 	}, s.handleBackupConfigUpdate)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.backup.config_set_schedule",
+		Description: "Attach the org's backup to a named Schedule (creates a BACKUP spec), or detach it. Provide schedule_name to attach; omit or set to null to detach. The named Schedule must already exist in the org (404 otherwise).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization":  organizationProperty(),
+				"schedule_name": stringProperty("Name of the Schedule to attach to. Omit or set to null to detach."),
+			},
+		},
+	}, s.handleBackupConfigSetSchedule)
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.backup.config_delete",
@@ -265,7 +280,6 @@ func (s *Server) handleBackupConfigCreate(ctx context.Context, req *mcp.CallTool
 		S3KeyID:       input.S3KeyID,
 		S3AccessKey:   input.S3AccessKey,
 		S3Folder:      input.S3Folder,
-		Schedule:      input.Schedule,
 		EncryptionKey: input.EncryptionKey,
 	})
 	if err != nil {
@@ -302,7 +316,6 @@ func (s *Server) handleBackupConfigUpdate(ctx context.Context, req *mcp.CallTool
 		S3KeyID:       input.S3KeyID,
 		S3AccessKey:   input.S3AccessKey,
 		S3Folder:      input.S3Folder,
-		Schedule:      input.Schedule,
 		EncryptionKey: input.EncryptionKey,
 	})
 	if err != nil {
@@ -525,13 +538,62 @@ func (s *Server) handleBackupDeviceDisable(ctx context.Context, req *mcp.CallToo
 	}, fmt.Sprintf("Backup disabled for device: %s", input.Device))
 }
 
+func (s *Server) handleBackupConfigSetSchedule(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[backupConfigSetScheduleInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	// Resolve the effective schedule name (nil pointer = detach).
+	targetName := ""
+	if input.ScheduleName != nil {
+		targetName = *input.ScheduleName
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	result, err := s.svc.BackupConfigSetSchedule(apiCtx, org, targetName)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	if result.Attached != nil {
+		a := result.Attached
+		return s.successResult(map[string]interface{}{
+			"action":        "attached",
+			"code":          a.Code,
+			"kind":          a.Kind,
+			"schedule_name": a.ScheduleName,
+			"enabled":       a.Enabled,
+			"created_by":    a.CreatedBy,
+			"created_at":    a.CreatedAt,
+		}, fmt.Sprintf("Backup attached to schedule %q — spec code: %s", a.ScheduleName, a.Code))
+	}
+	d := result.Detached
+	return s.successResult(map[string]interface{}{
+		"action":            "detached",
+		"detached":          d.Detached,
+		"organization_name": d.OrganizationName,
+	}, fmt.Sprintf("Backup detached from schedule (org: %s)", d.OrganizationName))
+}
+
 func backupConfigSummary(c *models.BackupConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"s3_endpoint":        c.S3Endpoint,
 		"s3_bucket":          c.S3Bucket,
 		"s3_key_id":          c.S3KeyID,
 		"s3_prefix":          c.S3Prefix,
-		"schedule":           c.Schedule,
+		"attached_schedule":  c.AttachedSchedule,
+		"scheduled":          c.Scheduled,
 		"status":             c.Status,
 		"has_encryption_key": c.HasEncryptionKey,
 		"organization":       c.Organization,
@@ -542,12 +604,12 @@ func backupConfigSummary(c *models.BackupConfig) map[string]interface{} {
 
 func deviceBackupSummary(d *models.DeviceBackupStatus) map[string]interface{} {
 	return map[string]interface{}{
-		"device_name":                  d.DeviceName,
-		"enabled":                      d.Enabled,
-		"has_encryption_key_override":  d.HasEncryptionKeyOverride,
-		"last_backup_at":               d.LastBackupAt,
-		"last_backup_status":           d.LastBackupStatus,
-		"last_backup_message":          d.LastBackupMessage,
-		"organization":                 d.Organization,
+		"device_name":                 d.DeviceName,
+		"enabled":                     d.Enabled,
+		"has_encryption_key_override": d.HasEncryptionKeyOverride,
+		"last_backup_at":              d.LastBackupAt,
+		"last_backup_status":          d.LastBackupStatus,
+		"last_backup_message":         d.LastBackupMessage,
+		"organization":                d.Organization,
 	}
 }

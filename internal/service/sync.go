@@ -14,12 +14,17 @@ import (
 //
 // Organization defaults to the caller's current org when empty; the caller
 // supplies that fallback explicitly via SyncStatus / SyncApply.
+//
+// Schedule, when set, registers a recurring ScheduledTask spec instead of
+// triggering an immediate sync. The org filter must be an exact name (not a
+// regex) when scheduling, per the API contract.
 type SyncFilter struct {
 	Organization string
 	Device       string
 	OU           string
 	DriftStatus  string
-	Template string
+	Template     string
+	Schedule     string // schedule name; when set, registers a recurring spec
 }
 
 // SyncApplyResult bundles the parsed sync apply response with the raw HTTP
@@ -88,5 +93,32 @@ func buildSyncParams(defaultOrg string, filter SyncFilter) map[string]string {
 	if filter.DriftStatus != "" {
 		params["drift_status"] = filter.DriftStatus
 	}
+	if filter.Schedule != "" {
+		params["schedule"] = filter.Schedule
+	}
 	return params
+}
+
+// SyncRegisterSpec triggers sync with a "schedule" query param, which causes
+// NDManager to register a recurring ScheduledTask spec and return a 201
+// descriptor instead of running sync immediately.
+func (s *Service) SyncRegisterSpec(ctx context.Context, defaultOrg string, filter SyncFilter, force bool) (*models.ScheduledTaskRegisterResult, error) {
+	if filter.Schedule == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "schedule name is required for spec registration"}
+	}
+	params := buildSyncParams(defaultOrg, filter)
+	if force {
+		params["force"] = "true"
+	}
+	resp, err := s.api.PostWithParams(ctx, "/api/v1/sync", params, nil)
+	if err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+	defer resp.Body.Close()
+
+	var result models.ScheduledTaskRegisterResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", err), err)
+	}
+	return &result, nil
 }
