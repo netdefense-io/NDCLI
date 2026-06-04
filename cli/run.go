@@ -118,7 +118,6 @@ func init() {
 			if mode != "minor" && mode != "major" {
 				return &service.Error{Code: service.CodeInvalidInput, Message: `--mode must be "minor" or "major"`}
 			}
-			version, _ := cmd.Flags().GetString("version")
 			reboot, _ := cmd.Flags().GetBool("reboot")
 			noCheck, _ := cmd.Flags().GetBool("no-check")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -134,21 +133,16 @@ func init() {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will upgrade firmware packages on the targeted device(s) without a reboot. The device(s) will enter a mixed state until a subsequent reboot is performed.\n")
 			}
 
-			payload := map[string]interface{}{
+			opts.Payload = map[string]interface{}{
 				"mode":        mode,
 				"reboot":      reboot,
 				"check_first": !noCheck,
 				"dry_run":     dryRun,
 			}
-			if version != "" {
-				payload["target_version"] = version
-			}
-			opts.Payload = payload
 			return nil
 		},
 	)
 	firmwareUpgradeCmd.Flags().String("mode", "", `Upgrade mode: "minor" (point release) or "major" (series upgrade) (required)`)
-	firmwareUpgradeCmd.Flags().String("version", "", "Target version (optional; e.g. \"26.1.9\" for minor, \"26.7\" for a major series)")
 	firmwareUpgradeCmd.Flags().Bool("reboot", true, "Reboot after applying the upgrade (default true; --no-reboot applies packages only, leaving base/kernel deferred)")
 	firmwareUpgradeCmd.Flags().Bool("no-check", false, "Skip the pre-upgrade firmware availability check (check_first=false)")
 	firmwareUpgradeCmd.Flags().Bool("dry-run", false, "Report what would be applied without making any changes")

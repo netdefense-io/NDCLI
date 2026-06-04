@@ -124,7 +124,6 @@ func (s *Server) registerRunTools() {
 	// ndcli.run.firmware_upgrade
 	firmwareUpgradeProps := mergeProps(targetingProps, map[string]interface{}{
 		"mode":        map[string]interface{}{"type": "string", "description": `Upgrade mode: "minor" (point release within current series) or "major" (series upgrade). Required.`, "enum": []string{"minor", "major"}},
-		"version":     stringProperty(`Target version (optional). For minor: a point release such as "26.1.9". For major: a series such as "26.7".`),
 		"reboot":      boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only, leaving base/kernel deferred — the device will enter a mixed state. Not allowed when mode=major."),
 		"check_first": boolProperty("Run a firmware availability check before applying (default true). Set to false to skip the pre-upgrade check."),
 		"dry_run":     boolProperty("Report what would be applied without making any changes (default false)."),
@@ -190,16 +189,12 @@ func (s *Server) handleFirmwareUpgrade(ctx context.Context, req *mcp.CallToolReq
 		ScheduledAt: input.At,
 		Schedule:    input.Schedule,
 	}
-	payload := map[string]interface{}{
+	opts.Payload = map[string]interface{}{
 		"mode":        input.Mode,
 		"reboot":      reboot,
 		"check_first": checkFirst,
 		"dry_run":     input.DryRun,
 	}
-	if input.Version != "" {
-		payload["target_version"] = input.Version
-	}
-	opts.Payload = payload
 
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
