@@ -135,6 +135,11 @@ func attentionRank(row *models.DashboardCompactRow) int {
 	case "drift":
 		r += 100
 	}
+	// Devices in firmware mixed-state have base/kernel deferred — low-severity
+	// but warrants attention so operators schedule the follow-up reboot.
+	if row.FirmwareMixedState {
+		r += 50
+	}
 	if row.Telemetry != nil && row.Telemetry.HeavySummary != nil {
 		h := row.Telemetry.HeavySummary
 		if h.ServicesDown != nil && *h.ServicesDown > 0 {
@@ -172,9 +177,12 @@ func sortedCompact(rows []models.DashboardCompactRow) []models.DashboardCompactR
 // attentionTags renders the compact row's attention badges as a short
 // comma-joined string for table cells. Empty when nothing's wrong.
 func attentionTags(row *models.DashboardCompactRow) string {
-	tags := make([]string, 0, 4)
+	tags := make([]string, 0, 5)
 	if row.Sync.State == "error" {
 		tags = append(tags, "sync-error")
+	}
+	if row.FirmwareMixedState {
+		tags = append(tags, "fw-mixed-state")
 	}
 	if row.Telemetry == nil || row.Telemetry.HeavySummary == nil {
 		if len(tags) == 0 {

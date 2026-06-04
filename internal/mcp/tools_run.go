@@ -29,11 +29,16 @@ type runInput struct {
 	Count int    `json:"count,omitempty"`
 	// PLUGIN_INSTALL
 	Version string `json:"version,omitempty"`
+	// FIRMWARE_UPGRADE
+	Mode       string `json:"mode,omitempty"`        // "minor" | "major"
+	Reboot     *bool  `json:"reboot,omitempty"`      // default true; nil = use default
+	CheckFirst *bool  `json:"check_first,omitempty"` // default true; nil = use default
+	DryRun     bool   `json:"dry_run,omitempty"`
 	// Common
 	Confirm bool `json:"confirm,omitempty"`
 }
 
-// registerRunTools registers the five `ndcli run` MCP tools — the
+// registerRunTools registers the `ndcli run` MCP tools — the
 // LLM-facing twin of the CLI surface in cli/run.go.
 func (s *Server) registerRunTools() {
 	targetingProps := map[string]interface{}{
@@ -115,6 +120,130 @@ func (s *Server) registerRunTools() {
 			"properties": targetingProps,
 		},
 	}, s.makeRunHandler("plugin-reload", models.TaskTypeRestart, nil))
+
+	// ndcli.run.firmware_upgrade
+	firmwareUpgradeProps := mergeProps(targetingProps, map[string]interface{}{
+		"mode":        map[string]interface{}{"type": "string", "description": `Upgrade mode: "minor" (point release within current series) or "major" (series upgrade). Required.`, "enum": []string{"minor", "major"}},
+		"version":     stringProperty(`Target version (optional). For minor: a point release such as "26.1.9". For major: a series such as "26.7".`),
+		"reboot":      boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only, leaving base/kernel deferred — the device will enter a mixed state. Not allowed when mode=major."),
+		"check_first": boolProperty("Run a firmware availability check before applying (default true). Set to false to skip the pre-upgrade check."),
+		"dry_run":     boolProperty("Report what would be applied without making any changes (default false)."),
+	})
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name: "ndcli.run.firmware_upgrade",
+		Description: "Upgrade OPNsense firmware on one or more devices. " +
+			"mode=minor applies a point release; mode=major upgrades the full series. " +
+			"DESTRUCTIVE: triggers an upgrade and (by default) reboots the firewall. " +
+			"major+reboot=false is rejected by the server (422). " +
+			"Requires confirm=true.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": firmwareUpgradeProps,
+			"required":   []string{"mode"},
+		},
+	}, s.handleFirmwareUpgrade)
+}
+
+// handleFirmwareUpgrade is the MCP handler for ndcli.run.firmware_upgrade.
+// It mirrors makeRunHandler but adds client-side mode/reboot validation so
+// LLM agents get a fast, clear rejection instead of a round-trip 422.
+func (s *Server) handleFirmwareUpgrade(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[runInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	// Client-side validation: mode must be minor or major.
+	if input.Mode != "minor" && input.Mode != "major" {
+		return s.errorResult(fmt.Errorf(`mode must be "minor" or "major", got %q`, input.Mode))
+	}
+
+	// Resolve reboot/check_first with defaults (true).
+	reboot := true
+	if input.Reboot != nil {
+		reboot = *input.Reboot
+	}
+	checkFirst := true
+	if input.CheckFirst != nil {
+		checkFirst = *input.CheckFirst
+	}
+
+	// Client-side guard: major + no-reboot is invalid.
+	if input.Mode == "major" && !reboot {
+		return s.errorResult(fmt.Errorf("major firmware upgrades require a reboot (reboot=false is not allowed with mode=major)"))
+	}
+
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	opts := service.RunOpts{
+		Type:        models.TaskTypeFirmwareUpgrade,
+		Devices:     input.Devices,
+		OUs:         input.OUs,
+		AllDevices:  input.Org,
+		ScheduledAt: input.At,
+		Schedule:    input.Schedule,
+	}
+	payload := map[string]interface{}{
+		"mode":        input.Mode,
+		"reboot":      reboot,
+		"check_first": checkFirst,
+		"dry_run":     input.DryRun,
+	}
+	if input.Version != "" {
+		payload["target_version"] = input.Version
+	}
+	opts.Payload = payload
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	// When --schedule is set, register a recurring spec. No confirm gate needed.
+	if input.Schedule != "" {
+		spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", models.TaskTypeFirmwareUpgrade, spec.Code, spec.ScheduleName))
+	}
+
+	if !input.Confirm {
+		scope := runScopeDescription(input)
+		return s.previewResult("run firmware-upgrade on", scope)
+	}
+
+	result, err := s.svc.Run(apiCtx, org, opts)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
+	for _, t := range result.Tasks {
+		tasks = append(tasks, map[string]interface{}{
+			"task":        t.Task,
+			"device":      t.DeviceName,
+			"device_uuid": t.DeviceUUID,
+			"status":      t.Status,
+			"expires_at":  t.ExpiresAt,
+		})
+	}
+	summary := fmt.Sprintf("%d %s task(s) created", result.Total, models.TaskTypeFirmwareUpgrade)
+	if result.ScheduledAt != "" {
+		summary = fmt.Sprintf("%d %s task(s) scheduled for %s", result.Total, models.TaskTypeFirmwareUpgrade, result.ScheduledAt)
+	}
+	return s.successResult(map[string]interface{}{
+		"type":         result.Type,
+		"organization": result.Organization,
+		"scheduled_at": result.ScheduledAt,
+		"total":        result.Total,
+		"tasks":        tasks,
+	}, summary)
 }
 
 func mergeProps(a, b map[string]interface{}) map[string]interface{} {

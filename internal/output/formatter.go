@@ -1,6 +1,7 @@
 package output
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -298,6 +299,85 @@ func parseRunTime(s string) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+// parseFirmwareUpgradeData attempts to unmarshal a task Message into a
+// models.FirmwareUpgradeData. Returns nil when the message is absent,
+// empty, or not a firmware upgrade data block.
+func parseFirmwareUpgradeData(raw string) *firmwareUpgradeData {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "{") {
+		return nil
+	}
+	var d firmwareUpgradeData
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		return nil
+	}
+	// Require at least one firmware-specific field to be present so we
+	// don't accidentally claim a generic JSON message as firmware data.
+	if d.ResolvedMode == "" && d.FromVersion == "" && d.ToVersion == "" {
+		return nil
+	}
+	return &d
+}
+
+// firmwareUpgradeData mirrors models.FirmwareUpgradeData but lives in the
+// output package so no import cycle is introduced. Fields must match the
+// wire contract exactly.
+type firmwareUpgradeData struct {
+	ResolvedMode    string `json:"resolved_mode,omitempty"`
+	FromVersion     string `json:"from_version,omitempty"`
+	ToVersion       string `json:"to_version,omitempty"`
+	RebootPerformed bool   `json:"reboot_performed"`
+	Applied         bool   `json:"applied"`
+	NoUpdate        bool   `json:"no_update"`
+	PackagesApplied int    `json:"packages_applied"`
+	MixedState      bool   `json:"mixed_state"`
+}
+
+// formatFirmwareDataLines returns the firmware upgrade result data block as a
+// slice of "Label: value" lines suitable for embedding in any formatter.
+// Returns nil when d is nil (nothing to render).
+func formatFirmwareDataLines(d *firmwareUpgradeData) []string {
+	if d == nil {
+		return nil
+	}
+	var lines []string
+	if d.NoUpdate {
+		lines = append(lines, "Result:   no update available (no-op)")
+		return lines
+	}
+	if d.ResolvedMode != "" {
+		lines = append(lines, fmt.Sprintf("Mode:     %s", d.ResolvedMode))
+	}
+	if d.FromVersion != "" || d.ToVersion != "" {
+		from := d.FromVersion
+		if from == "" {
+			from = "?"
+		}
+		to := d.ToVersion
+		if to == "" {
+			to = "?"
+		}
+		lines = append(lines, fmt.Sprintf("Version:  %s → %s", from, to))
+	}
+	if d.PackagesApplied > 0 {
+		lines = append(lines, fmt.Sprintf("Packages: %d applied", d.PackagesApplied))
+	}
+	if d.MixedState {
+		lines = append(lines, "Mixed:    base/kernel deferred — reboot required to complete upgrade")
+	}
+	rebootStr := "no"
+	if d.RebootPerformed {
+		rebootStr = "yes"
+	}
+	lines = append(lines, fmt.Sprintf("Rebooted: %s", rebootStr))
+	appliedStr := "no"
+	if d.Applied {
+		appliedStr = "yes"
+	}
+	lines = append(lines, fmt.Sprintf("Applied:  %s", appliedStr))
+	return lines
 }
 
 // PrintPagination prints pagination info

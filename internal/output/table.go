@@ -270,10 +270,18 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 		fmt.Printf("Completed:    %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		// SYNC tasks store a JSON envelope; FormatTaskMessage unpacks it
-		// into a summary line plus per-change list. Plain messages pass
-		// through unchanged, so older/non-SYNC tasks render as before.
-		fmt.Printf("\nMessage:\n%s\n", FormatTaskMessage(task.Message))
+		// FIRMWARE_UPGRADE tasks store a structured JSON data block;
+		// parseFirmwareUpgradeData unpacks it. SYNC tasks store a different
+		// JSON envelope handled by FormatTaskMessage. Plain messages pass
+		// through unchanged.
+		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+			fmt.Printf("\nFirmware upgrade result:\n")
+			for _, line := range formatFirmwareDataLines(fw) {
+				fmt.Printf("  %s\n", line)
+			}
+		} else {
+			fmt.Printf("\nMessage:\n%s\n", FormatTaskMessage(task.Message))
+		}
 	}
 	if task.ErrorMessage != "" {
 		fmt.Printf("\nError: %s\n", task.ErrorMessage)

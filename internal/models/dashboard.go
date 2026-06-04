@@ -57,7 +57,11 @@ type DashboardCompactRow struct {
 	Sync            DashboardCompactSync         `json:"sync"`
 	AgentVersion    string                       `json:"agent_version,omitempty"`
 	OPNsenseVersion string                       `json:"opnsense_version,omitempty"`
-	Telemetry       *DashboardCompactTelemetry   `json:"telemetry,omitempty"`
+	// FirmwareMixedState is true when the device last ran a FIRMWARE_UPGRADE
+	// with reboot=false and base/kernel updates are still pending. NDManager
+	// sets this when it receives a task result with mixed_state=true.
+	FirmwareMixedState bool                        `json:"firmware_mixed_state,omitempty"`
+	Telemetry          *DashboardCompactTelemetry  `json:"telemetry,omitempty"`
 }
 
 type DashboardCompactSync struct {

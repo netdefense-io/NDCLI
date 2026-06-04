@@ -41,16 +41,47 @@ const (
 
 // TaskType constants
 const (
-	TaskTypeBackup        = "BACKUP"
-	TaskTypeConnect       = "CONNECT"
-	TaskTypePing          = "PING"
-	TaskTypePull          = "PULL"
-	TaskTypeReboot        = "REBOOT"
-	TaskTypeRestart       = "RESTART"
-	TaskTypeShutdown      = "SHUTDOWN"
-	TaskTypeSync          = "SYNC"
-	TaskTypePluginInstall = "PLUGIN_INSTALL"
+	TaskTypeBackup          = "BACKUP"
+	TaskTypeConnect         = "CONNECT"
+	TaskTypeFirmwareUpgrade = "FIRMWARE_UPGRADE"
+	TaskTypePing            = "PING"
+	TaskTypePull            = "PULL"
+	TaskTypeReboot          = "REBOOT"
+	TaskTypeRestart         = "RESTART"
+	TaskTypeShutdown        = "SHUTDOWN"
+	TaskTypeSync            = "SYNC"
+	TaskTypePluginInstall   = "PLUGIN_INSTALL"
 )
+
+// FirmwareUpgradeData is the result data block reported by NDAgent for
+// FIRMWARE_UPGRADE tasks. The agent stores it serialised as JSON inside
+// Task.Message. Field names mirror the NDDataModels / NDAgent wire contract
+// exactly — do not rename without updating those modules too.
+type FirmwareUpgradeData struct {
+	// ResolvedMode is the mode the agent actually executed ("minor" or "major").
+	ResolvedMode string `json:"resolved_mode,omitempty"`
+	// FromVersion is the OPNsense product version read at execution time.
+	FromVersion string `json:"from_version,omitempty"`
+	// ToVersion is the version reached after a successful upgrade, or the
+	// available target if the run was a dry-run.
+	ToVersion string `json:"to_version,omitempty"`
+	// RebootPerformed is true when the agent triggered a reboot as part of
+	// the upgrade (minor reboot=true or major).
+	RebootPerformed bool `json:"reboot_performed"`
+	// Applied is true when at least one package or component was installed.
+	Applied bool `json:"applied"`
+	// NoUpdate is true when the firmware check found nothing to apply (no-op
+	// COMPLETED). Distinct from Applied=false because dry_run also has
+	// Applied=false.
+	NoUpdate bool `json:"no_update"`
+	// PackagesApplied is the count of non-base/non-kernel packages applied
+	// when reboot=false (split-and-apply path).
+	PackagesApplied int `json:"packages_applied"`
+	// MixedState is true when the split-and-apply path was used and base/kernel
+	// updates are still pending (device is running new packages against the old
+	// base/kernel — normal for the no-reboot path, but worth tracking).
+	MixedState bool `json:"mixed_state"`
+}
 
 // RunResult is the response from POST /organizations/{org}/tasks — the
 // `ndcli run` server-side fan-out endpoint. One row per resolved device.

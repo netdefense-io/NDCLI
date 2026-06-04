@@ -18,11 +18,12 @@ import (
 // internal — the user-facing names are simpler. This map is the ONLY
 // place that translation happens.
 var runFriendlyToTaskType = map[string]string{
-	"ping":           models.TaskTypePing,
-	"poweroff":       models.TaskTypeShutdown,
-	"restart":        models.TaskTypeReboot,
-	"plugin-install": models.TaskTypePluginInstall,
-	"plugin-reload":  models.TaskTypeRestart,
+	"ping":             models.TaskTypePing,
+	"poweroff":         models.TaskTypeShutdown,
+	"restart":          models.TaskTypeReboot,
+	"plugin-install":   models.TaskTypePluginInstall,
+	"plugin-reload":    models.TaskTypeRestart,
+	"firmware-upgrade": models.TaskTypeFirmwareUpgrade,
 }
 
 var runCmd = &cobra.Command{
@@ -109,7 +110,51 @@ func init() {
 		nil,
 	)
 
-	runCmd.AddCommand(pingCmd, powerCmd, restartCmd, pluginInstallCmd, pluginReloadCmd)
+	firmwareUpgradeCmd := newRunSubcommand(
+		"firmware-upgrade",
+		"Upgrade OPNsense firmware on the device(s)",
+		func(cmd *cobra.Command, opts *service.RunOpts) error {
+			mode, _ := cmd.Flags().GetString("mode")
+			if mode != "minor" && mode != "major" {
+				return &service.Error{Code: service.CodeInvalidInput, Message: `--mode must be "minor" or "major"`}
+			}
+			version, _ := cmd.Flags().GetString("version")
+			reboot, _ := cmd.Flags().GetBool("reboot")
+			noCheck, _ := cmd.Flags().GetBool("no-check")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			if mode == "major" && !reboot {
+				return &service.Error{Code: service.CodeInvalidInput, Message: "major firmware upgrades require a reboot (--no-reboot is not allowed with --mode major)"}
+			}
+
+			// Warn: this command may reboot the firewall.
+			if reboot && !dryRun {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will trigger a firmware upgrade and reboot the targeted device(s).\n")
+			} else if !reboot && !dryRun {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will upgrade firmware packages on the targeted device(s) without a reboot. The device(s) will enter a mixed state until a subsequent reboot is performed.\n")
+			}
+
+			payload := map[string]interface{}{
+				"mode":        mode,
+				"reboot":      reboot,
+				"check_first": !noCheck,
+				"dry_run":     dryRun,
+			}
+			if version != "" {
+				payload["target_version"] = version
+			}
+			opts.Payload = payload
+			return nil
+		},
+	)
+	firmwareUpgradeCmd.Flags().String("mode", "", `Upgrade mode: "minor" (point release) or "major" (series upgrade) (required)`)
+	firmwareUpgradeCmd.Flags().String("version", "", "Target version (optional; e.g. \"26.1.9\" for minor, \"26.7\" for a major series)")
+	firmwareUpgradeCmd.Flags().Bool("reboot", true, "Reboot after applying the upgrade (default true; --no-reboot applies packages only, leaving base/kernel deferred)")
+	firmwareUpgradeCmd.Flags().Bool("no-check", false, "Skip the pre-upgrade firmware availability check (check_first=false)")
+	firmwareUpgradeCmd.Flags().Bool("dry-run", false, "Report what would be applied without making any changes")
+	_ = firmwareUpgradeCmd.MarkFlagRequired("mode")
+
+	runCmd.AddCommand(pingCmd, powerCmd, restartCmd, pluginInstallCmd, pluginReloadCmd, firmwareUpgradeCmd)
 }
 
 // newRunSubcommand builds a `ndcli run <name>` subcommand wired with the

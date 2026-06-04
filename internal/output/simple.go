@@ -93,7 +93,14 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  Completed: %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		fmt.Fprintf(f.Writer, "\nMessage:\n%s\n", FormatTaskMessage(task.Message))
+		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+			fmt.Fprintf(f.Writer, "  Firmware upgrade result:\n")
+			for _, line := range formatFirmwareDataLines(fw) {
+				fmt.Fprintf(f.Writer, "    %s\n", line)
+			}
+		} else {
+			fmt.Fprintf(f.Writer, "\nMessage:\n%s\n", FormatTaskMessage(task.Message))
+		}
 	}
 	if task.ErrorMessage != "" {
 		fmt.Fprintf(f.Writer, "\nError: %s\n", task.ErrorMessage)

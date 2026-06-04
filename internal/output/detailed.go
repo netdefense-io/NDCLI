@@ -190,22 +190,29 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Completed", FormatTimestamp(task.CompletedAt.Time))
 	}
 
-	// Message — SYNC tasks store a JSON envelope ({message, results,
-	// validation_errors}); FormatTaskMessage unpacks it into a summary
-	// line plus per-change list. Non-SYNC or older messages pass
-	// through unchanged. wrapMessageLines preserves internal padding
-	// (so columns in the change list line up) and uses a hanging
-	// indent of two past the original leading whitespace for any
-	// continuation lines.
+	// Message — FIRMWARE_UPGRADE tasks store a structured JSON data block
+	// rendered via parseFirmwareUpgradeData. SYNC tasks store a different
+	// JSON envelope handled by FormatTaskMessage. Non-structured messages
+	// pass through unchanged. wrapMessageLines preserves internal padding
+	// (so columns in the change list line up) and uses a hanging indent
+	// of two past the original leading whitespace for continuation lines.
 	if task.Message != "" {
-		formatted := FormatTaskMessage(task.Message)
 		fmt.Fprintln(f.Writer)
 		sectionBox := NewSharpBox(width)
-		fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Message"))
-		for _, line := range wrapMessageLines(formatted, width-5) {
-			fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
+		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+			fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Firmware Upgrade Result"))
+			for _, line := range formatFirmwareDataLines(fw) {
+				fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
+			}
+			fmt.Fprintln(f.Writer, sectionBox.BottomLine())
+		} else {
+			formatted := FormatTaskMessage(task.Message)
+			fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Message"))
+			for _, line := range wrapMessageLines(formatted, width-5) {
+				fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
+			}
+			fmt.Fprintln(f.Writer, sectionBox.BottomLine())
 		}
-		fmt.Fprintln(f.Writer, sectionBox.BottomLine())
 	}
 
 	// Error message

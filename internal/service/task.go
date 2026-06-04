@@ -144,8 +144,8 @@ func (s *Service) TaskCancel(ctx context.Context, taskID string) error {
 // server registers a ScheduledTask spec instead of creating tasks immediately;
 // use RunRegisterSpec for that path so the two response types stay separate.
 type RunOpts struct {
-	Type        string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL
-	Payload     map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version
+	Type        string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL, FIRMWARE_UPGRADE
+	Payload     map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version, FIRMWARE_UPGRADE: mode/reboot/check_first/dry_run
 	Devices     []string               // repeatable
 	OUs         []string               // repeatable
 	AllDevices  bool                   // mutually exclusive with Devices/OUs
@@ -154,11 +154,12 @@ type RunOpts struct {
 }
 
 var validRunTypes = map[string]bool{
-	models.TaskTypePing:          true,
-	models.TaskTypeShutdown:      true,
-	models.TaskTypeReboot:        true,
-	models.TaskTypeRestart:       true,
-	models.TaskTypePluginInstall: true,
+	models.TaskTypePing:            true,
+	models.TaskTypeShutdown:        true,
+	models.TaskTypeReboot:          true,
+	models.TaskTypeRestart:         true,
+	models.TaskTypePluginInstall:   true,
+	models.TaskTypeFirmwareUpgrade: true,
 }
 
 // Run posts to POST /api/v1/organizations/{org}/tasks — the server-side
