@@ -81,6 +81,13 @@ type FirmwareUpgradeData struct {
 	// updates are still pending (device is running new packages against the old
 	// base/kernel — normal for the no-reboot path, but worth tracking).
 	MixedState bool `json:"mixed_state"`
+	// DryRun is true when the upgrade ran in preview/simulation mode — packages
+	// were resolved but nothing was installed (Applied is also false).
+	DryRun bool `json:"dry_run"`
+	// NeedsReboot is true when a reboot is required to complete a pending
+	// upgrade (e.g. after the no-reboot/split-apply path leaves base/kernel
+	// updates deferred).
+	NeedsReboot bool `json:"needs_reboot"`
 }
 
 // RunResult is the response from POST /organizations/{org}/tasks — the

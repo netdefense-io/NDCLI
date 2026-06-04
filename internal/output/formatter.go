@@ -333,11 +333,21 @@ type firmwareUpgradeData struct {
 	NoUpdate        bool   `json:"no_update"`
 	PackagesApplied int    `json:"packages_applied"`
 	MixedState      bool   `json:"mixed_state"`
+	DryRun          bool   `json:"dry_run"`
+	NeedsReboot     bool   `json:"needs_reboot"`
 }
 
 // formatFirmwareDataLines returns the firmware upgrade result data block as a
 // slice of "Label: value" lines suitable for embedding in any formatter.
 // Returns nil when d is nil (nothing to render).
+//
+// Rendering rules:
+//   - dry-run (d.DryRun || !d.Applied && !d.NoUpdate): show "Packages: N to apply"
+//     and a "Preview: yes" line — never say "applied" for something that was not.
+//   - no-reboot / split-apply (d.Applied && d.MixedState): "Packages: N applied"
+//     followed by a "Pending: base/kernel deferred — reboot required" note.
+//   - full apply (d.Applied && !d.MixedState): "Packages: N applied".
+//   - no-op (d.NoUpdate): single "Result: no update available" line.
 func formatFirmwareDataLines(d *firmwareUpgradeData) []string {
 	if d == nil {
 		return nil
@@ -346,6 +356,15 @@ func formatFirmwareDataLines(d *firmwareUpgradeData) []string {
 	if d.NoUpdate {
 		lines = append(lines, "Result:   no update available (no-op)")
 		return lines
+	}
+
+	// Determine whether this was a dry-run / preview. The DryRun flag is the
+	// canonical signal; falling back to Applied=false covers older agents that
+	// don't emit it yet (excluding no-update, handled above).
+	isDryRun := d.DryRun || (!d.Applied && !d.NoUpdate)
+
+	if isDryRun {
+		lines = append(lines, "Preview:  yes (dry-run — nothing was installed)")
 	}
 	if d.ResolvedMode != "" {
 		lines = append(lines, fmt.Sprintf("Mode:     %s", d.ResolvedMode))
@@ -362,21 +381,27 @@ func formatFirmwareDataLines(d *firmwareUpgradeData) []string {
 		lines = append(lines, fmt.Sprintf("Version:  %s → %s", from, to))
 	}
 	if d.PackagesApplied > 0 {
-		lines = append(lines, fmt.Sprintf("Packages: %d applied", d.PackagesApplied))
+		if isDryRun {
+			lines = append(lines, fmt.Sprintf("Packages: %d to apply", d.PackagesApplied))
+		} else {
+			lines = append(lines, fmt.Sprintf("Packages: %d applied", d.PackagesApplied))
+		}
 	}
 	if d.MixedState {
-		lines = append(lines, "Mixed:    base/kernel deferred — reboot required to complete upgrade")
+		lines = append(lines, "Pending:  base/kernel deferred — reboot required to complete upgrade")
 	}
-	rebootStr := "no"
-	if d.RebootPerformed {
-		rebootStr = "yes"
+	if !isDryRun {
+		rebootStr := "no"
+		if d.RebootPerformed {
+			rebootStr = "yes"
+		}
+		lines = append(lines, fmt.Sprintf("Rebooted: %s", rebootStr))
+		appliedStr := "no"
+		if d.Applied {
+			appliedStr = "yes"
+		}
+		lines = append(lines, fmt.Sprintf("Applied:  %s", appliedStr))
 	}
-	lines = append(lines, fmt.Sprintf("Rebooted: %s", rebootStr))
-	appliedStr := "no"
-	if d.Applied {
-		appliedStr = "yes"
-	}
-	lines = append(lines, fmt.Sprintf("Applied:  %s", appliedStr))
 	return lines
 }
 

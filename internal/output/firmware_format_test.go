@@ -1,6 +1,7 @@
 package output
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -108,6 +109,122 @@ func TestFormatFirmwareDataLines_MixedState(t *testing.T) {
 func TestFormatFirmwareDataLines_NilReturnsNil(t *testing.T) {
 	if got := formatFirmwareDataLines(nil); got != nil {
 		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+// renderTableBlock simulates the table formatter: header + two-space indent.
+func renderTableBlock(d *firmwareUpgradeData) string {
+	lines := formatFirmwareDataLines(d)
+	var sb strings.Builder
+	sb.WriteString("Firmware upgrade result:\n")
+	for _, l := range lines {
+		fmt.Fprintf(&sb, "  %s\n", l)
+	}
+	return sb.String()
+}
+
+// TestFormatFirmwareDataLines_DryRunMinor covers the case where the agent ran
+// in dry-run mode: nothing installed, 66 packages would be applied.
+// Expected table block (verbatim):
+//
+//	Firmware upgrade result:
+//	  Preview:  yes (dry-run — nothing was installed)
+//	  Mode:     minor
+//	  Version:  26.1.2 → 26.1.9
+//	  Packages: 66 to apply
+func TestFormatFirmwareDataLines_DryRunMinor(t *testing.T) {
+	d := &firmwareUpgradeData{
+		ResolvedMode:    "minor",
+		FromVersion:     "26.1.2",
+		ToVersion:       "26.1.9",
+		Applied:         false,
+		DryRun:          true,
+		PackagesApplied: 66,
+		RebootPerformed: false,
+	}
+	got := renderTableBlock(d)
+	want := "Firmware upgrade result:\n" +
+		"  Preview:  yes (dry-run — nothing was installed)\n" +
+		"  Mode:     minor\n" +
+		"  Version:  26.1.2 → 26.1.9\n" +
+		"  Packages: 66 to apply\n"
+	if got != want {
+		t.Errorf("dry-run minor: output mismatch.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	// Must not contain "Applied:" or "Rebooted:" in dry-run output.
+	if strings.Contains(got, "Applied:") {
+		t.Error("dry-run minor: output must not contain 'Applied:' line")
+	}
+	if strings.Contains(got, "Rebooted:") {
+		t.Error("dry-run minor: output must not contain 'Rebooted:' line")
+	}
+}
+
+// TestFormatFirmwareDataLines_NoRebootMixedState covers the --no-reboot path:
+// packages were applied but base/kernel updates are pending a reboot.
+// Expected table block (verbatim):
+//
+//	Firmware upgrade result:
+//	  Mode:     minor
+//	  Version:  26.1.2 → 26.1.9
+//	  Packages: 116 applied
+//	  Pending:  base/kernel deferred — reboot required to complete upgrade
+//	  Rebooted: no
+//	  Applied:  yes
+func TestFormatFirmwareDataLines_NoRebootMixedState(t *testing.T) {
+	d := &firmwareUpgradeData{
+		ResolvedMode:    "minor",
+		FromVersion:     "26.1.2",
+		ToVersion:       "26.1.9",
+		Applied:         true,
+		DryRun:          false,
+		PackagesApplied: 116,
+		MixedState:      true,
+		RebootPerformed: false,
+	}
+	got := renderTableBlock(d)
+	want := "Firmware upgrade result:\n" +
+		"  Mode:     minor\n" +
+		"  Version:  26.1.2 → 26.1.9\n" +
+		"  Packages: 116 applied\n" +
+		"  Pending:  base/kernel deferred — reboot required to complete upgrade\n" +
+		"  Rebooted: no\n" +
+		"  Applied:  yes\n"
+	if got != want {
+		t.Errorf("no-reboot mixed-state: output mismatch.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestFormatFirmwareDataLines_FullMinorWithReboot covers a complete minor upgrade
+// that triggered a reboot.
+// Expected table block (verbatim):
+//
+//	Firmware upgrade result:
+//	  Mode:     minor
+//	  Version:  26.1.2 → 26.1.9
+//	  Packages: 116 applied
+//	  Rebooted: yes
+//	  Applied:  yes
+func TestFormatFirmwareDataLines_FullMinorWithReboot(t *testing.T) {
+	d := &firmwareUpgradeData{
+		ResolvedMode:    "minor",
+		FromVersion:     "26.1.2",
+		ToVersion:       "26.1.9",
+		Applied:         true,
+		DryRun:          false,
+		PackagesApplied: 116,
+		MixedState:      false,
+		RebootPerformed: true,
+	}
+	got := renderTableBlock(d)
+	want := "Firmware upgrade result:\n" +
+		"  Mode:     minor\n" +
+		"  Version:  26.1.2 → 26.1.9\n" +
+		"  Packages: 116 applied\n" +
+		"  Rebooted: yes\n" +
+		"  Applied:  yes\n"
+	if got != want {
+		t.Errorf("full minor with reboot: output mismatch.\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 
