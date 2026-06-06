@@ -300,6 +300,122 @@ func TestDeviceFormAndShellDispatch(t *testing.T) {
 	}
 }
 
+func TestNavDispatchPushesChildScreen(t *testing.T) {
+	a := testApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	res, ok := a.ctx.Reg.Get("network")
+	if !ok {
+		t.Fatal("network resource not registered")
+	}
+	ls := newListScreen(a.ctx, res)
+	ls.SetSize(a.contentWidth(), a.contentHeight())
+	a.stack = append(a.stack, ls)
+	a.Update(listLoadedMsg{kind: "network", page: 1, total: 1, rows: []registry.Row{
+		{ID: "vpn-a", Cells: []string{"vpn-a", "10.0.0.0/24", "auto", "2", "0"}},
+	}})
+	before := len(a.stack)
+	// "m" (members) is a Nav action — it must push a child list screen.
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	if len(a.stack) != before+1 {
+		t.Fatalf("Nav action should push a child screen: stack %d -> %d", before, len(a.stack))
+	}
+	if got := a.active().Title(); got != "Members" {
+		t.Fatalf("child screen title = %q, want Members", got)
+	}
+}
+
+func TestNavRequiresSelection(t *testing.T) {
+	a := testApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	res, _ := a.ctx.Reg.Get("network")
+	ls := newListScreen(a.ctx, res)
+	ls.SetSize(a.contentWidth(), a.contentHeight())
+	a.stack = append(a.stack, ls)
+	// No rows loaded -> selectedID() == "".
+	before := len(a.stack)
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	if len(a.stack) != before {
+		t.Fatal("Nav with no selection must not push a screen")
+	}
+	if a.toastText == "" || !a.toastErr {
+		t.Fatal("Nav with no selection should set an error toast")
+	}
+}
+
+// TestDynamicFormStalenessGuard locks in the fix for the review-found bug: a
+// dynamic-options result that resolves after the user navigated to a different
+// resource (or switched org) must be dropped, never opened over — and then
+// dispatched against — the now-active screen.
+func TestDynamicFormStalenessGuard(t *testing.T) {
+	a := testApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	res, _ := a.ctx.Reg.Get("ou")
+	ls := newListScreen(a.ctx, res)
+	ls.SetSize(a.contentWidth(), a.contentHeight())
+	a.stack = append(a.stack, ls)
+	act := registry.Action{Key: "D", Label: "remove-device", Form: []registry.FormField{
+		{Key: "device", Label: "Device", Options: []string{"fw-a", "fw-b"}},
+	}}
+	a.Update(formReadyMsg{kind: "template", org: a.ctx.Org, act: act, target: "ou-1"})
+	if a.form != nil {
+		t.Fatal("stale-kind formReadyMsg must be dropped")
+	}
+	a.Update(formReadyMsg{kind: "ou", org: "other-org", act: act, target: "ou-1"})
+	if a.form != nil {
+		t.Fatal("stale-org formReadyMsg must be dropped")
+	}
+	a.Update(formReadyMsg{kind: "ou", org: a.ctx.Org, act: act, target: "ou-1"})
+	if a.form == nil {
+		t.Fatal("matching formReadyMsg should open the form")
+	}
+}
+
+// TestResourceActionKeysSane checks every resource (registered + Nav-only
+// children) for duplicate action keys and use of keys reserved by the global
+// handler or the list-screen navigation.
+func TestResourceActionKeysSane(t *testing.T) {
+	reserved := map[string]bool{
+		"q": true, "?": true, ":": true, "o": true, "r": true,
+		"j": true, "k": true, "g": true, "G": true,
+		"/": true, "[": true, "]": true,
+		"esc": true, "backspace": true, "enter": true, "up": true, "down": true,
+	}
+	all := []registry.Resource{
+		resources.NetworkMemberResource{}, resources.NetworkLinkResource{},
+		resources.NetworkPrefixResource{}, resources.ScheduledTaskResource{},
+	}
+	reg := registry.New()
+	resources.RegisterAll(reg)
+	all = append(all, reg.All()...)
+	for _, res := range all {
+		seen := map[string]bool{}
+		for _, ac := range res.Actions() {
+			if reserved[ac.Key] {
+				t.Errorf("%s: action %q uses reserved key %q", res.Kind(), ac.Label, ac.Key)
+			}
+			if seen[ac.Key] {
+				t.Errorf("%s: duplicate action key %q", res.Kind(), ac.Key)
+			}
+			seen[ac.Key] = true
+		}
+	}
+}
+
+func TestBackupConfigIsOrgScoped(t *testing.T) {
+	reg := registry.New()
+	resources.RegisterAll(reg)
+	res, _ := reg.Get("backup")
+	for _, ac := range res.Actions() {
+		if ac.Key == "c" {
+			if !ac.TargetsAll {
+				t.Fatal("backup config (c) must be TargetsAll so it does not require a device row")
+			}
+			return
+		}
+	}
+	t.Fatal("backup config action (c) not found")
+}
+
 func mustRender(t *testing.T, a *App, label string) {
 	t.Helper()
 	out := a.View()

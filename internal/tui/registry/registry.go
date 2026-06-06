@@ -42,6 +42,13 @@ type FormField struct {
 	Placeholder string
 	Required    bool
 	Options     []string
+	// OptionsFrom, when set, makes this a dynamic select: the app resolves the
+	// option list when the form opens by calling the Resource's FormOptions with
+	// this token (e.g. "template-snippets"), then populates Options from the
+	// result. Mutually exclusive with a static Options slice. If the resolved
+	// list is empty the app aborts the action with a "no <field> available"
+	// message instead of opening an unusable form.
+	OptionsFrom string
 }
 
 // Action is an operation a Resource exposes from its list view, surfaced as a
@@ -73,6 +80,12 @@ type Action struct {
 	// edits) instead of calling Execute. Each arg has {id} and {org}
 	// substituted. Shell actions do not call Execute.
 	Shell []string
+	// Nav, when set, makes this action a drill-in: instead of executing, the app
+	// pushes a child list screen over the Resource returned by the Resource's
+	// Navigate(org, id, Nav). Use for parent→children relationships too rich for
+	// a single row action — a network's members/links/prefixes, a schedule's
+	// tasks, an OU/template's variables. Nav actions require a selected row.
+	Nav string
 }
 
 // Field is a labelled value in a describe Section.
@@ -118,6 +131,24 @@ type Resource interface {
 // their row cells as fields.
 type Describer interface {
 	Describe(ctx context.Context, svc *service.Service, org, id string) ([]Section, error)
+}
+
+// FormOptioner is an optional capability for a Resource whose form actions need
+// option lists resolved at runtime (e.g. the snippets attachable to a template,
+// or the OUs of an org). The app calls FormOptions when opening a form that has
+// a FormField with OptionsFrom set, passing the action key, the selected row id
+// (empty for TargetsAll actions) and the field's OptionsFrom token; the returned
+// slice becomes that field's selectable options.
+type FormOptioner interface {
+	FormOptions(ctx context.Context, svc *service.Service, org, id, actionKey, optionsFrom string) ([]string, error)
+}
+
+// Navigator is an optional capability for a Resource whose rows drill into child
+// resources. The app calls Navigate when a Nav action fires, passing the
+// selected row id and the action's Nav token, and pushes a list screen over the
+// returned child Resource. ok=false surfaces a "cannot open" message.
+type Navigator interface {
+	Navigate(org, id, nav string) (Resource, bool)
 }
 
 // Registry holds the registered resources in a stable display order.

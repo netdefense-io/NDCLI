@@ -52,16 +52,33 @@ func (scheduleResource) Fetch(ctx context.Context, svc *service.Service, org str
 
 func (scheduleResource) Actions() []registry.Action {
 	return []registry.Action{
+		{Key: "n", Label: "create", TargetsAll: true, Form: []registry.FormField{
+			{Key: "name", Label: "Name", Required: true},
+			{Key: "cron", Label: "Cron", Placeholder: "0 2 * * 0", Required: true},
+			{Key: "timezone", Label: "Timezone", Default: "UTC"},
+			{Key: "enabled", Label: "Enabled", Options: []string{"yes", "no"}, Default: "yes"},
+		}},
 		{Key: "e", Label: "enable"},
 		{Key: "d", Label: "disable", Destructive: true,
 			Prompt: "Disable schedule {id}?"},
 		{Key: "x", Label: "delete", Destructive: true,
 			Prompt: "Delete schedule {id}? Removes all its task specs."},
+		{Key: "t", Label: "tasks", Nav: "tasks"},
 	}
 }
 
 func (scheduleResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
+	case "n":
+		if _, err := svc.ScheduleCreate(ctx, org, service.ScheduleCreateOpts{
+			Name:     args["name"],
+			Cron:     args["cron"],
+			Timezone: args["timezone"],
+			Enabled:  args["enabled"] == "yes",
+		}); err != nil {
+			return "", err
+		}
+		return "created schedule " + args["name"], nil
 	case "e":
 		if _, err := svc.ScheduleSetEnabled(ctx, org, id, true); err != nil {
 			return "", err
@@ -79,6 +96,17 @@ func (scheduleResource) Execute(ctx context.Context, svc *service.Service, org, 
 		return "deleted " + id, nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
+}
+
+// Navigate implements registry.Navigator: drilling into a schedule's "tasks"
+// pushes the scheduled-task list scoped to that schedule name.
+func (scheduleResource) Navigate(org, id, nav string) (registry.Resource, bool) {
+	switch nav {
+	case "tasks":
+		return ScheduledTaskResource{Schedule: id}, true
+	default:
+		return nil, false
+	}
 }
 
 // Describe implements registry.Describer.

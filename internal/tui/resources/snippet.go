@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
@@ -48,13 +49,63 @@ func (snippetResource) Fetch(ctx context.Context, svc *service.Service, org stri
 
 func (snippetResource) Actions() []registry.Action {
 	return []registry.Action{
+		{Key: "n", Label: "create", TargetsAll: true, Form: []registry.FormField{
+			{Key: "name", Label: "Name", Required: true},
+			{Key: "type", Label: "Type", Default: "USER", Options: []string{
+				"USER", "GROUP", "ALIAS", "RULE",
+				"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD",
+				"UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
+				"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
+			}},
+			{Key: "content", Label: "Content", Required: true},
+			{Key: "priority", Label: "Priority", Default: "1000"},
+		}},
 		{Key: "e", Label: "edit", Shell: []string{"snippet", "edit", "{id}", "-o", "{org}"}},
+		{Key: "m", Label: "rename", Form: []registry.FormField{
+			{Key: "new_name", Label: "New name", Required: true},
+		}},
+		{Key: "p", Label: "priority", Form: []registry.FormField{
+			{Key: "priority", Label: "Priority", Required: true, Placeholder: "1-60000"},
+		}},
 		{Key: "x", Label: "delete", Destructive: true, Prompt: "Delete snippet {id}?"},
 	}
 }
 
 func (snippetResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
+	case "n":
+		prio := 0
+		if p := args["priority"]; p != "" {
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				return "", fmt.Errorf("invalid priority %q: %w", p, err)
+			}
+			prio = n
+		}
+		if _, err := svc.SnippetCreate(ctx, org, service.SnippetCreateOpts{
+			Name:     args["name"],
+			Type:     args["type"],
+			Content:  args["content"],
+			Priority: prio,
+		}); err != nil {
+			return "", err
+		}
+		return "created snippet " + args["name"], nil
+	case "m":
+		newName := args["new_name"]
+		if err := svc.SnippetRename(ctx, org, id, newName); err != nil {
+			return "", err
+		}
+		return "renamed " + id + " to " + newName, nil
+	case "p":
+		prio, err := strconv.Atoi(args["priority"])
+		if err != nil {
+			return "", fmt.Errorf("invalid priority %q: %w", args["priority"], err)
+		}
+		if err := svc.SnippetSetPriority(ctx, org, id, prio); err != nil {
+			return "", err
+		}
+		return "set priority of " + id + " to " + args["priority"], nil
 	case "x":
 		if err := svc.SnippetDelete(ctx, org, id); err != nil {
 			return "", err

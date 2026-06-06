@@ -52,7 +52,23 @@ func (softwareResource) Fetch(ctx context.Context, svc *service.Service, org str
 
 func (softwareResource) Actions() []registry.Action {
 	return []registry.Action{
+		{Key: "n", Label: "create", TargetsAll: true, Form: []registry.FormField{
+			{Key: "name", Label: "Name", Required: true},
+			{Key: "content", Label: "Content", Placeholder: `{"present":[],"absent":[]}`},
+		}},
 		{Key: "e", Label: "edit", Shell: []string{"software", "edit", "{id}", "-o", "{org}"}},
+		{Key: "m", Label: "rename", Form: []registry.FormField{
+			{Key: "new_name", Label: "New name", Required: true},
+		}},
+		{Key: "R", Label: "require-pkg", Form: []registry.FormField{
+			{Key: "packages", Label: "Packages", Required: true, Placeholder: "pkg1 pkg2"},
+		}},
+		{Key: "B", Label: "block-pkg", Form: []registry.FormField{
+			{Key: "packages", Label: "Packages", Required: true, Placeholder: "pkg1 pkg2"},
+		}},
+		{Key: "W", Label: "waive-pkg", Form: []registry.FormField{
+			{Key: "packages", Label: "Packages", Required: true, Placeholder: "pkg1 pkg2"},
+		}},
 		{Key: "x", Label: "delete", Destructive: true,
 			Prompt: "Delete software policy {id}?"},
 	}
@@ -60,6 +76,51 @@ func (softwareResource) Actions() []registry.Action {
 
 func (softwareResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
+	case "n":
+		content := args["content"]
+		if content == "" {
+			content = `{"present":[],"absent":[]}`
+		}
+		if _, err := svc.SoftwarePolicyCreate(ctx, org, service.SoftwarePolicyCreateOpts{
+			Name:    args["name"],
+			Content: content,
+		}); err != nil {
+			return "", err
+		}
+		return "created policy " + args["name"], nil
+	case "m":
+		newName := args["new_name"]
+		if err := svc.SoftwarePolicyRename(ctx, org, id, newName); err != nil {
+			return "", err
+		}
+		return "renamed " + id + " to " + newName, nil
+	case "R":
+		pkgs := strings.Fields(strings.ReplaceAll(args["packages"], ",", " "))
+		if len(pkgs) == 0 {
+			return "", fmt.Errorf("at least one package is required")
+		}
+		if _, err := svc.SoftwarePolicyRequirePackages(ctx, org, id, pkgs); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("required %d package(s) on %s", len(pkgs), id), nil
+	case "B":
+		pkgs := strings.Fields(strings.ReplaceAll(args["packages"], ",", " "))
+		if len(pkgs) == 0 {
+			return "", fmt.Errorf("at least one package is required")
+		}
+		if _, err := svc.SoftwarePolicyBlockPackages(ctx, org, id, pkgs); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("blocked %d package(s) on %s", len(pkgs), id), nil
+	case "W":
+		pkgs := strings.Fields(strings.ReplaceAll(args["packages"], ",", " "))
+		if len(pkgs) == 0 {
+			return "", fmt.Errorf("at least one package is required")
+		}
+		if _, err := svc.SoftwarePolicyWaivePackages(ctx, org, id, pkgs); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("waived %d package(s) on %s", len(pkgs), id), nil
 	case "x":
 		if err := svc.SoftwarePolicyDelete(ctx, org, id); err != nil {
 			return "", err

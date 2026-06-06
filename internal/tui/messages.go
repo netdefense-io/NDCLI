@@ -66,6 +66,23 @@ type actionResultMsg struct {
 	text string
 }
 
+// formReadyMsg is emitted after a Form action's dynamic select options
+// (FormField.OptionsFrom) have been resolved, carrying the action with its
+// Options populated. emptyField names a dynamic field that resolved to no
+// candidates (the app aborts with "no <field> available"); err carries a fetch
+// failure. When both are empty the app opens the form. kind/org stamp the
+// originating resource + org so a result arriving after the user navigated
+// elsewhere (palette, back, org-switch) is dropped instead of opening a form
+// over — and dispatching against — the wrong resource.
+type formReadyMsg struct {
+	kind       string
+	org        string
+	act        registry.Action
+	target     string
+	emptyField string
+	err        error
+}
+
 // --- navigation ---------------------------------------------------------
 
 // pushScreenMsg asks the app to push a new screen onto the back-stack.

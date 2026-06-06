@@ -121,6 +121,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
+	case formReadyMsg:
+		a.toastText = ""
+		// Drop a late result if the user navigated to a different resource or
+		// switched org while the options were resolving — otherwise the form
+		// would open over, and submit against, the now-active screen (mirrors
+		// the kind/id staleness guards on listLoadedMsg/detailLoadedMsg).
+		act, ok := a.active().(actionable)
+		if !ok || act.resource().Kind() != msg.kind || a.ctx.Org != msg.org {
+			return a, nil
+		}
+		switch {
+		case msg.err != nil:
+			a.setToast(msg.err.Error(), true)
+			return a, a.toastExpiryCmd()
+		case msg.emptyField != "":
+			a.setToast("no "+strings.ToLower(msg.emptyField)+" available", true)
+			return a, a.toastExpiryCmd()
+		}
+		a.form = newForm(msg.act, msg.target)
+		return a, nil
+
 	case errMsg:
 		a.status = msg.err.Error()
 		// The org switcher loads its list asynchronously; surface a failure in
@@ -289,6 +310,8 @@ func (a *App) triggerAction(act registry.Action) (tea.Model, tea.Cmd) {
 		return a, a.toastExpiryCmd()
 	}
 	switch {
+	case act.Nav != "":
+		return a.navigate(actor, act, target)
 	case len(act.Shell) > 0:
 		return a, a.shellOutCmd(act, target)
 	case len(act.Form) > 0:
@@ -297,6 +320,12 @@ func (a *App) triggerAction(act registry.Action) (tea.Model, tea.Cmd) {
 		formTarget := target
 		if act.TargetsAll {
 			formTarget = ""
+		}
+		// Dynamic selects are resolved against the API before the modal opens;
+		// the form appears once formReadyMsg arrives.
+		if formHasDynamicOptions(act) {
+			a.setToast("loading…", false)
+			return a, a.loadFormOptionsCmd(actor.resource(), act, formTarget)
 		}
 		a.form = newForm(act, formTarget)
 		return a, nil
@@ -311,6 +340,68 @@ func (a *App) triggerAction(act registry.Action) (tea.Model, tea.Cmd) {
 		}
 		a.confirm = newConfirm(act, confirmTarget)
 		return a, nil
+	}
+}
+
+// navigate pushes a child list screen for a Nav action (a network's members, a
+// schedule's tasks, …). The resource builds the parameterised child Resource;
+// the app wraps it in a generic list screen on the back-stack.
+func (a *App) navigate(actor actionable, act registry.Action, target string) (tea.Model, tea.Cmd) {
+	nav, ok := actor.resource().(registry.Navigator)
+	if ok {
+		if child, found := nav.Navigate(a.ctx.Org, target, act.Nav); found {
+			ls := newListScreen(a.ctx, child)
+			ls.SetSize(a.contentWidth(), a.contentHeight())
+			a.stack = append(a.stack, ls)
+			return a, ls.Init()
+		}
+	}
+	a.setToast("cannot open "+act.Label, true)
+	return a, a.toastExpiryCmd()
+}
+
+// formHasDynamicOptions reports whether any of the action's form fields needs
+// its option list resolved against the API before the modal can open.
+func formHasDynamicOptions(act registry.Action) bool {
+	for _, f := range act.Form {
+		if f.OptionsFrom != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// loadFormOptionsCmd resolves every dynamic select field's options via the
+// resource's FormOptions, returning a formReadyMsg that carries the action with
+// its Options populated (or an error / empty-field marker). The form modal is
+// opened from the formReadyMsg handler so the fetch never blocks the UI loop.
+func (a *App) loadFormOptionsCmd(res registry.Resource, act registry.Action, target string) tea.Cmd {
+	opt, ok := res.(registry.FormOptioner)
+	svc, org, key, kind := a.ctx.Svc, a.ctx.Org, act.Key, res.Kind()
+	return func() tea.Msg {
+		form := make([]registry.FormField, len(act.Form))
+		copy(form, act.Form)
+		if ok {
+			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			for i := range form {
+				if form[i].OptionsFrom == "" {
+					continue
+				}
+				opts, err := opt.FormOptions(c, svc, org, target, key, form[i].OptionsFrom)
+				if err != nil {
+					return formReadyMsg{kind: kind, org: org, err: err}
+				}
+				if len(opts) == 0 {
+					return formReadyMsg{kind: kind, org: org, emptyField: form[i].Label}
+				}
+				form[i].Options = opts
+				form[i].OptionsFrom = ""
+			}
+		}
+		ready := act
+		ready.Form = form
+		return formReadyMsg{kind: kind, org: org, act: ready, target: target}
 	}
 }
 

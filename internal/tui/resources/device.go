@@ -75,6 +75,10 @@ func (deviceResource) Actions() []registry.Action {
 			{Key: "dry_run", Label: "Dry run", Options: []string{"no", "yes"}},
 		}},
 		{Key: "c", Label: "connect", Shell: []string{"device", "connect", "{id}", "-o", "{org}"}},
+		{Key: "n", Label: "rename", Form: []registry.FormField{
+			{Key: "new_name", Label: "New name", Required: true},
+		}},
+		{Key: "t", Label: "rebind-token", Shell: []string{"device", "rebind-token", "{id}", "-o", "{org}"}},
 		{Key: "s", Label: "sync", Prompt: "Sync (apply the rendered config) to {id}?"},
 		{Key: "x", Label: "remove", Destructive: true,
 			Prompt: "Remove device {id} from management? This cannot be undone."},
@@ -122,6 +126,15 @@ func (deviceResource) Execute(ctx context.Context, svc *service.Service, org, id
 		return devicePing(ctx, svc, org, id, args)
 	case "f":
 		return deviceFirmware(ctx, svc, org, id, args)
+	case "n":
+		newName := args["new_name"]
+		if newName == "" {
+			return "", fmt.Errorf("new name is required")
+		}
+		if err := svc.DeviceRename(ctx, org, id, newName); err != nil {
+			return "", err
+		}
+		return "renamed " + id + " to " + newName, nil
 	case "s":
 		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org, Device: id}, false)
 		if err != nil {

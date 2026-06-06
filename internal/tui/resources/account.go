@@ -54,6 +54,9 @@ func (accountResource) Actions() []registry.Action {
 		{Key: "e", Label: "enable"},
 		{Key: "d", Label: "disable", Destructive: true,
 			Prompt: "Disable account {id}?"},
+		{Key: "R", Label: "role", Form: []registry.FormField{
+			{Key: "role", Label: "Role", Options: []string{"RO", "RW", "SU"}, Default: "RO"},
+		}},
 	}
 }
 
@@ -69,6 +72,12 @@ func (accountResource) Execute(ctx context.Context, svc *service.Service, org, i
 			return "", err
 		}
 		return "disabled " + id, nil
+	case "R":
+		role := args["role"]
+		if err := svc.OrgAccountSetRole(ctx, org, id, role); err != nil {
+			return "", err
+		}
+		return "set role of " + id + " to " + role, nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
 }

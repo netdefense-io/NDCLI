@@ -3,15 +3,17 @@ package resources
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
 )
 
-// networkResource surfaces the org's VPN networks. It is read-only in the TUI
-// for v1 — creating, editing and wiring members/links stays on the cli surface.
-// Describe powers the generic detail fallback.
+// networkResource surfaces the org's VPN networks (id is the network NAME).
+// It supports create/update/delete here, and drills into a network's members
+// and links via Nav actions. Describe powers the generic detail fallback.
 type networkResource struct{}
 
 func (networkResource) Kind() string  { return "network" }
@@ -50,6 +52,25 @@ func (networkResource) Fetch(ctx context.Context, svc *service.Service, org stri
 
 func (networkResource) Actions() []registry.Action {
 	return []registry.Action{
+		{Key: "n", Label: "create", TargetsAll: true, Form: []registry.FormField{
+			{Key: "name", Label: "Name", Required: true},
+			{Key: "cidr", Label: "Overlay CIDR", Placeholder: "10.100.0.0/24", Required: true},
+			{Key: "auto_connect_hubs", Label: "Auto-connect", Options: []string{"(default)", "yes", "no"}, Default: "(default)"},
+			{Key: "auto_firewall_rules", Label: "Auto-fw", Options: []string{"(default)", "yes", "no"}, Default: "(default)"},
+			{Key: "listen_port", Label: "Listen port"},
+			{Key: "mtu", Label: "MTU"},
+			{Key: "keepalive", Label: "Keepalive"},
+		}},
+		{Key: "u", Label: "update", Form: []registry.FormField{
+			{Key: "name", Label: "New name", Placeholder: "(blank=keep)"},
+			{Key: "auto_connect_hubs", Label: "Auto-connect", Options: []string{"(unchanged)", "yes", "no"}, Default: "(unchanged)"},
+			{Key: "auto_firewall_rules", Label: "Auto-fw", Options: []string{"(unchanged)", "yes", "no"}, Default: "(unchanged)"},
+			{Key: "listen_port", Label: "Listen port"},
+			{Key: "mtu", Label: "MTU"},
+			{Key: "keepalive", Label: "Keepalive"},
+		}},
+		{Key: "m", Label: "members", Nav: "members"},
+		{Key: "l", Label: "links", Nav: "links"},
 		{Key: "x", Label: "delete", Destructive: true,
 			Prompt: "Delete network {id}?"},
 	}
@@ -57,6 +78,63 @@ func (networkResource) Actions() []registry.Action {
 
 func (networkResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
+	case "n":
+		listenPort, err := netOptIntPtr(args["listen_port"])
+		if err != nil {
+			return "", err
+		}
+		mtu, err := netOptIntPtr(args["mtu"])
+		if err != nil {
+			return "", err
+		}
+		keepalive, err := netOptIntPtr(args["keepalive"])
+		if err != nil {
+			return "", err
+		}
+		opts := service.NetworkCreateOpts{
+			Name:              args["name"],
+			OverlayCIDRv4:     args["cidr"],
+			AutoConnectHubs:   netCreateBoolPtr(args["auto_connect_hubs"]),
+			AutoFirewallRules: netCreateBoolPtr(args["auto_firewall_rules"]),
+			ListenPortDefault: listenPort,
+			MTUDefault:        mtu,
+			KeepaliveDefault:  keepalive,
+		}
+		if _, err := svc.NetworkCreate(ctx, org, opts); err != nil {
+			return "", err
+		}
+		return "created network " + args["name"], nil
+	case "u":
+		listenPort, err := netOptIntPtr(args["listen_port"])
+		if err != nil {
+			return "", err
+		}
+		mtu, err := netOptIntPtr(args["mtu"])
+		if err != nil {
+			return "", err
+		}
+		keepalive, err := netOptIntPtr(args["keepalive"])
+		if err != nil {
+			return "", err
+		}
+		opts := service.NetworkUpdateOpts{
+			AutoConnectHubs:   netUnchangedBoolPtr(args["auto_connect_hubs"]),
+			AutoFirewallRules: netUnchangedBoolPtr(args["auto_firewall_rules"]),
+			ListenPortDefault: listenPort,
+			MTUDefault:        mtu,
+			KeepaliveDefault:  keepalive,
+		}
+		if v := args["name"]; v != "" {
+			opts.Name = &v
+		}
+		if opts.Name == nil && opts.AutoConnectHubs == nil && opts.AutoFirewallRules == nil &&
+			opts.ListenPortDefault == nil && opts.MTUDefault == nil && opts.KeepaliveDefault == nil {
+			return "", fmt.Errorf("no updates specified")
+		}
+		if _, err := svc.NetworkUpdate(ctx, org, id, opts); err != nil {
+			return "", err
+		}
+		return "updated " + id, nil
 	case "x":
 		if err := svc.NetworkDelete(ctx, org, id); err != nil {
 			return "", err
@@ -64,6 +142,18 @@ func (networkResource) Execute(ctx context.Context, svc *service.Service, org, i
 		return "deleted " + id, nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
+}
+
+// Navigate implements registry.Navigator: drill from a network row into its
+// members or links child screens.
+func (networkResource) Navigate(org, id, nav string) (registry.Resource, bool) {
+	switch nav {
+	case "members":
+		return NetworkMemberResource{Network: id}, true
+	case "links":
+		return NetworkLinkResource{Network: id}, true
+	}
+	return nil, false
 }
 
 // Describe implements registry.Describer.
@@ -102,4 +192,70 @@ func intPtrLabel(p *int) string {
 		return "—"
 	}
 	return fmt.Sprintf("%d", *p)
+}
+
+// =============================================================================
+// Shared file-private helpers for the network/* resources (members, links,
+// prefixes share this package, so each helper is defined exactly once here).
+// =============================================================================
+
+// yesNo renders a bool as "yes"/"no" for list cells.
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// boolPtr returns a pointer to the given bool.
+func boolPtr(b bool) *bool { return &b }
+
+// netCreateBoolPtr maps a create-form select to *bool: "(default)" => nil (skip,
+// let the server default apply), "yes" => true, "no" => false.
+func netCreateBoolPtr(v string) *bool {
+	switch v {
+	case "yes":
+		return boolPtr(true)
+	case "no":
+		return boolPtr(false)
+	}
+	return nil
+}
+
+// netUnchangedBoolPtr maps an update-form tri-state select to *bool:
+// "(unchanged)" => nil (do not send), "yes" => true, "no" => false.
+func netUnchangedBoolPtr(v string) *bool {
+	switch v {
+	case "yes":
+		return boolPtr(true)
+	case "no":
+		return boolPtr(false)
+	}
+	return nil
+}
+
+// netOptIntPtr parses an optional int form field into a *int: blank => nil,
+// otherwise strconv.Atoi with a clear error on bad input.
+func netOptIntPtr(v string) (*int, error) {
+	if strings.TrimSpace(v) == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return nil, fmt.Errorf("invalid number %q", v)
+	}
+	return &n, nil
+}
+
+// netOptInt parses an optional int form field into a plain int: blank => 0,
+// otherwise strconv.Atoi with a clear error on bad input.
+func netOptInt(v string) (int, error) {
+	if strings.TrimSpace(v) == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 0, fmt.Errorf("invalid number %q", v)
+	}
+	return n, nil
 }

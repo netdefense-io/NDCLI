@@ -54,6 +54,20 @@ func (backupResource) Actions() []registry.Action {
 		{Key: "e", Label: "enable"},
 		{Key: "d", Label: "disable", Destructive: true,
 			Prompt: "Disable backups for {id}?"},
+		// Org-level backup-config actions (TargetsAll — they operate on the org's
+		// single backup config, not the selected device row). "config" shells out
+		// so the interactive s3-access-key / encryption-key prompts run in the
+		// terminal; encryption-key get/remove stay CLI-only (sensitive).
+		{Key: "c", Label: "config", TargetsAll: true, Shell: []string{"backup", "config", "set", "-o", "{org}"}},
+		{Key: "E", Label: "cfg-enable", TargetsAll: true,
+			Prompt: "Enable backup config for the org?"},
+		{Key: "D", Label: "cfg-disable", TargetsAll: true,
+			Prompt: "Disable backup config for the org?"},
+		{Key: "t", Label: "cfg-test", TargetsAll: true,
+			Prompt: "Test backup config connectivity?"},
+		{Key: "X", Label: "cfg-delete", TargetsAll: true, Destructive: true,
+			BlastRadius: "this disables backup for EVERY device in the org",
+			Prompt:      "Delete the org backup configuration?"},
 	}
 }
 
@@ -69,6 +83,34 @@ func (backupResource) Execute(ctx context.Context, svc *service.Service, org, id
 			return "", err
 		}
 		return "backups disabled for " + id, nil
+	case "E":
+		if err := svc.BackupConfigSetStatus(ctx, org, true); err != nil {
+			return "", err
+		}
+		return "backup config enabled", nil
+	case "D":
+		if err := svc.BackupConfigSetStatus(ctx, org, false); err != nil {
+			return "", err
+		}
+		return "backup config disabled", nil
+	case "t":
+		res, err := svc.BackupConfigTest(ctx, org)
+		if err != nil {
+			return "", err
+		}
+		if res.Success {
+			msg := "backup config test succeeded"
+			if res.Message != "" {
+				msg += ": " + res.Message
+			}
+			return msg, nil
+		}
+		return "", fmt.Errorf("backup config test failed: %s", uihelp.Default(res.Message, "no detail"))
+	case "X":
+		if err := svc.BackupConfigDelete(ctx, org); err != nil {
+			return "", err
+		}
+		return "backup config deleted", nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
 }
