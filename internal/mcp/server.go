@@ -74,7 +74,7 @@ func NewServer() (*Server, error) {
 	s.registerNetworkTools()
 	s.registerVariableTools()
 	s.registerBackupTools()
-	s.registerDashboardTools()
+	s.registerDeviceHealthTool()
 	s.registerScheduleTools()
 
 	// Register all resources
