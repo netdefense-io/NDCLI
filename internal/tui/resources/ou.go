@@ -131,13 +131,26 @@ func (ouResource) FormOptions(ctx context.Context, svc *service.Service, org, id
 		}
 		return names, nil
 	case "addable-templates":
+		// All org templates minus the ones already on this OU (re-adding an
+		// attached template would just fail with a duplicate error). PerPage 100
+		// is the NDManager cap for the templates endpoint.
 		res, err := svc.TemplateList(ctx, org, service.TemplateListOpts{PerPage: 100})
 		if err != nil {
 			return nil, err
 		}
+		attached, err := svc.OUTemplateList(ctx, org, id)
+		if err != nil {
+			return nil, err
+		}
+		have := make(map[string]bool, len(attached.Items))
+		for _, t := range attached.Items {
+			have[t.Name] = true
+		}
 		names := make([]string, 0, len(res.Templates))
 		for _, t := range res.Templates {
-			names = append(names, t.Name)
+			if !have[t.Name] {
+				names = append(names, t.Name)
+			}
 		}
 		return names, nil
 	case "ou-templates":

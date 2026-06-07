@@ -94,8 +94,8 @@ func (networkResource) Execute(ctx context.Context, svc *service.Service, org, i
 		opts := service.NetworkCreateOpts{
 			Name:              args["name"],
 			OverlayCIDRv4:     args["cidr"],
-			AutoConnectHubs:   netCreateBoolPtr(args["auto_connect_hubs"]),
-			AutoFirewallRules: netCreateBoolPtr(args["auto_firewall_rules"]),
+			AutoConnectHubs:   netSelBoolPtr(args["auto_connect_hubs"]),
+			AutoFirewallRules: netSelBoolPtr(args["auto_firewall_rules"]),
 			ListenPortDefault: listenPort,
 			MTUDefault:        mtu,
 			KeepaliveDefault:  keepalive,
@@ -118,8 +118,8 @@ func (networkResource) Execute(ctx context.Context, svc *service.Service, org, i
 			return "", err
 		}
 		opts := service.NetworkUpdateOpts{
-			AutoConnectHubs:   netUnchangedBoolPtr(args["auto_connect_hubs"]),
-			AutoFirewallRules: netUnchangedBoolPtr(args["auto_firewall_rules"]),
+			AutoConnectHubs:   netSelBoolPtr(args["auto_connect_hubs"]),
+			AutoFirewallRules: netSelBoolPtr(args["auto_firewall_rules"]),
 			ListenPortDefault: listenPort,
 			MTUDefault:        mtu,
 			KeepaliveDefault:  keepalive,
@@ -210,21 +210,10 @@ func yesNo(b bool) string {
 // boolPtr returns a pointer to the given bool.
 func boolPtr(b bool) *bool { return &b }
 
-// netCreateBoolPtr maps a create-form select to *bool: "(default)" => nil (skip,
-// let the server default apply), "yes" => true, "no" => false.
-func netCreateBoolPtr(v string) *bool {
-	switch v {
-	case "yes":
-		return boolPtr(true)
-	case "no":
-		return boolPtr(false)
-	}
-	return nil
-}
-
-// netUnchangedBoolPtr maps an update-form tri-state select to *bool:
-// "(unchanged)" => nil (do not send), "yes" => true, "no" => false.
-func netUnchangedBoolPtr(v string) *bool {
+// netSelBoolPtr maps a form select to *bool: "yes" => true, "no" => false, and
+// any sentinel ("(default)" on create / "(unchanged)" on update) => nil, so the
+// field is left to the server default or left unchanged.
+func netSelBoolPtr(v string) *bool {
 	switch v {
 	case "yes":
 		return boolPtr(true)

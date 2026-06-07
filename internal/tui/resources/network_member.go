@@ -110,7 +110,7 @@ func (r NetworkMemberResource) Execute(ctx context.Context, svc *service.Service
 		return "added member " + args["device"], nil
 	case "u":
 		opts := service.NetworkMemberUpdateOpts{
-			Enabled: netUnchangedBoolPtr(args["enabled"]),
+			Enabled: netSelBoolPtr(args["enabled"]),
 		}
 		if role := args["role"]; role != "(unchanged)" {
 			opts.Role = &role

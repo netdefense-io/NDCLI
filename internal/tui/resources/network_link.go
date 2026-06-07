@@ -81,7 +81,7 @@ func (r NetworkLinkResource) Execute(ctx context.Context, svc *service.Service, 
 	case "u":
 		a, b := splitLinkID(id)
 		opts := service.NetworkLinkUpdateOpts{
-			Enabled: netUnchangedBoolPtr(args["enabled"]),
+			Enabled: netSelBoolPtr(args["enabled"]),
 		}
 		if args["regenerate_psk"] == "yes" {
 			opts.RegeneratePSK = boolPtr(true)

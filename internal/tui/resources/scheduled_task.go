@@ -42,12 +42,14 @@ func (r ScheduledTaskResource) Fetch(ctx context.Context, svc *service.Service, 
 			Cells: []string{
 				t.Code,
 				t.Kind,
-				schedYesNo(t.Enabled),
+				yesNo(t.Enabled),
 				agoPtr(t.LastFiredAt),
 				uihelp.Default(t.CreatedBy, "—"),
 			},
 		})
 	}
+	// ScheduleTaskList is unpaginated — it returns every task spec for the
+	// schedule in one call — so len(tasks) is the true total.
 	return rows, len(tasks), nil
 }
 
@@ -80,12 +82,4 @@ func (ScheduledTaskResource) Execute(ctx context.Context, svc *service.Service, 
 		return "removed " + id, nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
-}
-
-// schedYesNo renders a scheduled task's enabled flag as a compact yes/no cell.
-func schedYesNo(enabled bool) string {
-	if enabled {
-		return "yes"
-	}
-	return "no"
 }

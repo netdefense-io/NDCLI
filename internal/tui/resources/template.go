@@ -3,8 +3,11 @@ package resources
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
@@ -133,23 +136,42 @@ func (templateResource) Execute(ctx context.Context, svc *service.Service, org, 
 func (templateResource) FormOptions(ctx context.Context, svc *service.Service, org, id, actionKey, optionsFrom string) ([]string, error) {
 	switch optionsFrom {
 	case "addable-snippets":
+		// Only snippets not already attached — adding an attached one would just
+		// fail with a duplicate error at the API.
 		res, err := svc.SnippetList(ctx, org, service.SnippetListOpts{PerPage: 100})
 		if err != nil {
 			return nil, err
 		}
+		t, err := svc.TemplateGet(ctx, org, id)
+		if err != nil {
+			return nil, err
+		}
+		attached := make(map[string]bool, len(t.Snippets))
+		for _, s := range t.Snippets {
+			attached[s.Name] = true
+		}
 		names := make([]string, 0, len(res.Snippets))
 		for _, s := range res.Snippets {
-			names = append(names, s.Name)
+			if !attached[s.Name] {
+				names = append(names, s.Name)
+			}
 		}
 		return names, nil
 	case "addable-software":
+		// Only policies not already attached (see addable-snippets).
 		res, err := svc.SoftwarePolicyList(ctx, org, service.SoftwarePolicyListOpts{PerPage: 100})
+		if err != nil {
+			return nil, err
+		}
+		attached, err := templateAttachedPolicySet(ctx, svc, org, id, res.Policies)
 		if err != nil {
 			return nil, err
 		}
 		names := make([]string, 0, len(res.Policies))
 		for _, p := range res.Policies {
-			names = append(names, p.Name)
+			if !attached[p.Name] {
+				names = append(names, p.Name)
+			}
 		}
 		return names, nil
 	case "template-snippets":
@@ -163,29 +185,67 @@ func (templateResource) FormOptions(ctx context.Context, svc *service.Service, o
 		}
 		return names, nil
 	case "template-software":
-		// models.Template doesn't carry its attached software policies, so the
-		// attachment is read from the reverse mapping: each software policy's
-		// single-policy GET populates TemplateNames (the list endpoint omits it).
 		list, err := svc.SoftwarePolicyList(ctx, org, service.SoftwarePolicyListOpts{PerPage: 100})
 		if err != nil {
 			return nil, err
 		}
-		names := make([]string, 0, len(list.Policies))
-		for _, p := range list.Policies {
-			pol, err := svc.SoftwarePolicyGet(ctx, org, p.Name)
-			if err != nil {
-				return nil, err
-			}
-			for _, tn := range pol.TemplateNames {
-				if tn == id {
-					names = append(names, pol.Name)
-					break
-				}
-			}
+		attached, err := templateAttachedPolicySet(ctx, svc, org, id, list.Policies)
+		if err != nil {
+			return nil, err
 		}
+		names := make([]string, 0, len(attached))
+		for n := range attached {
+			names = append(names, n)
+		}
+		sort.Strings(names)
 		return names, nil
 	}
 	return nil, fmt.Errorf("unknown options source %q", optionsFrom)
+}
+
+// templateAttachedPolicySet returns the set of software-policy names (from the
+// given list) attached to the template. models.Template doesn't carry its
+// attached policies, so attachment is read from the reverse mapping: each
+// policy's single-policy GET populates TemplateNames (the list endpoint omits
+// it). The per-policy GETs run concurrently (bounded) so the picker stays
+// responsive even with many policies.
+func templateAttachedPolicySet(ctx context.Context, svc *service.Service, org, template string, policies []models.SoftwarePolicy) (map[string]bool, error) {
+	var (
+		mu       sync.Mutex
+		attached = make(map[string]bool)
+		firstErr error
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, 8)
+	)
+	for _, p := range policies {
+		name := p.Name
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			pol, err := svc.SoftwarePolicyGet(ctx, org, name)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				return
+			}
+			for _, tn := range pol.TemplateNames {
+				if tn == template {
+					attached[name] = true
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return attached, nil
 }
 
 // Navigate implements registry.Navigator: drill into the template's scoped

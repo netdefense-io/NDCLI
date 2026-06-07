@@ -416,6 +416,35 @@ func TestBackupConfigIsOrgScoped(t *testing.T) {
 	t.Fatal("backup config action (c) not found")
 }
 
+// TestNavActionsHaveNavigator asserts every Nav action is declared on a resource
+// that implements registry.Navigator and actually handles the Nav token — so a
+// drill-in can never silently fall through to a "cannot open" toast because a
+// developer added a Nav action but forgot the Navigator method.
+func TestNavActionsHaveNavigator(t *testing.T) {
+	all := []registry.Resource{
+		resources.NetworkMemberResource{}, resources.NetworkLinkResource{},
+		resources.NetworkPrefixResource{}, resources.ScheduledTaskResource{},
+	}
+	reg := registry.New()
+	resources.RegisterAll(reg)
+	all = append(all, reg.All()...)
+	for _, res := range all {
+		for _, ac := range res.Actions() {
+			if ac.Nav == "" {
+				continue
+			}
+			nav, ok := res.(registry.Navigator)
+			if !ok {
+				t.Errorf("%s: action %q has Nav=%q but the resource does not implement registry.Navigator", res.Kind(), ac.Label, ac.Nav)
+				continue
+			}
+			if _, found := nav.Navigate("org", "row", ac.Nav); !found {
+				t.Errorf("%s: Navigate does not handle Nav token %q (action %q)", res.Kind(), ac.Nav, ac.Label)
+			}
+		}
+	}
+}
+
 func mustRender(t *testing.T, a *App, label string) {
 	t.Helper()
 	out := a.View()

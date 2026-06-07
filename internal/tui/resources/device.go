@@ -127,10 +127,9 @@ func (deviceResource) Execute(ctx context.Context, svc *service.Service, org, id
 	case "f":
 		return deviceFirmware(ctx, svc, org, id, args)
 	case "n":
+		// new_name is enforced by the form's Required field (matching the other
+		// rename actions, which rely on form validation rather than re-checking).
 		newName := args["new_name"]
-		if newName == "" {
-			return "", fmt.Errorf("new name is required")
-		}
 		if err := svc.DeviceRename(ctx, org, id, newName); err != nil {
 			return "", err
 		}
