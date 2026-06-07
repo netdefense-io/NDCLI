@@ -187,8 +187,8 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 	body := map[string]interface{}{
 		"type": taskType,
 		"targets": map[string]interface{}{
-			"devices": opts.Devices,
-			"ous":     opts.OUs,
+			"devices": nonNilStrings(opts.Devices),
+			"ous":     nonNilStrings(opts.OUs),
 			"all":     opts.AllDevices,
 		},
 	}
@@ -239,8 +239,8 @@ func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts)
 	body := map[string]interface{}{
 		"type": taskType,
 		"targets": map[string]interface{}{
-			"devices": opts.Devices,
-			"ous":     opts.OUs,
+			"devices": nonNilStrings(opts.Devices),
+			"ous":     nonNilStrings(opts.OUs),
 			"all":     opts.AllDevices,
 		},
 		"schedule": opts.Schedule,
@@ -259,4 +259,16 @@ func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts)
 		return nil, wrapAPI("%v", err)
 	}
 	return &result, nil
+}
+
+// nonNilStrings returns an empty (non-nil) slice for a nil input so JSON-encoded
+// task targets serialize as [] rather than null. NDManager validates
+// targets.devices / targets.ous as lists and rejects null with
+// "Input should be a valid list" — this bit callers (e.g. the TUI device
+// actions) that target by device only and leave OUs nil.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
