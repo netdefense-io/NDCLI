@@ -16,12 +16,13 @@ import (
 
 // Server is the MCP server for NDCLI
 type Server struct {
-	mcpServer   *mcp.Server
-	authManager *auth.Manager
-	apiClient   *api.Client
-	svc         *service.Service
-	config      *config.Config
-	logger      *log.Logger
+	mcpServer      *mcp.Server
+	authManager    *auth.Manager
+	apiClient      *api.Client
+	svc            *service.Service
+	config         *config.Config
+	logger         *log.Logger
+	consoleSessions *ConsoleSessionManager
 }
 
 // NewServer creates a new MCP server
@@ -51,12 +52,13 @@ func NewServer() (*Server, error) {
 
 	cfg := config.Get()
 	s := &Server{
-		mcpServer:   mcpServer,
-		authManager: authMgr,
-		apiClient:   apiClient,
-		svc:         service.New(apiClient, authMgr, cfg),
-		config:      cfg,
-		logger:      logger,
+		mcpServer:       mcpServer,
+		authManager:     authMgr,
+		apiClient:       apiClient,
+		svc:             service.New(apiClient, authMgr, cfg),
+		config:          cfg,
+		logger:          logger,
+		consoleSessions: newConsoleSessionManager(),
 	}
 
 	// Register all tools
@@ -76,6 +78,7 @@ func NewServer() (*Server, error) {
 	s.registerBackupTools()
 	s.registerDeviceHealthTool()
 	s.registerScheduleTools()
+	s.registerConsoleTools()
 
 	// Register all resources
 	s.registerResources()
@@ -83,9 +86,11 @@ func NewServer() (*Server, error) {
 	return s, nil
 }
 
-// Serve starts the MCP server on stdio transport
+// Serve starts the MCP server on stdio transport.
+// It closes all console sessions on exit to prevent relay leaks.
 func (s *Server) Serve() error {
 	s.logger.Println("Starting MCP server...")
+	defer s.consoleSessions.CloseAll()
 	return s.mcpServer.Run(context.Background(), &mcp.StdioTransport{})
 }
 
