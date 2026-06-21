@@ -46,6 +46,13 @@ const (
 	CtlMsgClose  byte = 0xFF
 )
 
+// shellProbeTimeout bounds how long StartShellSession waits for the first
+// byte of terminal output before deciding the shell was refused. The agent
+// either streams a prompt almost immediately or (on a read-only session)
+// closes the shell stream with zero bytes; this window only needs to absorb
+// relay latency.
+const shellProbeTimeout = 3 * time.Second
+
 // ShellSession manages an interactive shell session over a stream
 type ShellSession struct {
 	streamManager *StreamManager
@@ -55,8 +62,13 @@ type ShellSession struct {
 	fd            int
 }
 
-// StartShellSession starts an interactive shell session
-func StartShellSession(streamManager *StreamManager) error {
+// StartShellSession starts an interactive shell session. The returned
+// ShellOutcome reports whether the remote ever delivered any terminal
+// output. When Refused is true the shell stream was closed by the agent
+// before producing any data (the read-only enforcement path), and the
+// caller should fall back to webadmin-only keep-alive instead of treating
+// the empty session as a normal terminal exit.
+func StartShellSession(streamManager *StreamManager) (ShellOutcome, error) {
 	session := &ShellSession{
 		streamManager: streamManager,
 		fd:            int(os.Stdin.Fd()),
@@ -64,11 +76,11 @@ func StartShellSession(streamManager *StreamManager) error {
 	return session.run()
 }
 
-func (s *ShellSession) run() error {
+func (s *ShellSession) run() (ShellOutcome, error) {
 	// Open shell stream for PTY I/O
 	shellStream, err := s.streamManager.OpenStream("shell")
 	if err != nil {
-		return err
+		return ShellOutcome{}, err
 	}
 	s.shellStream = shellStream
 
@@ -76,16 +88,50 @@ func (s *ShellSession) run() error {
 	ctlStream, err := s.streamManager.OpenStream("shell-ctl")
 	if err != nil {
 		shellStream.Close()
-		return err
+		return ShellOutcome{}, err
 	}
 	s.ctlStream = ctlStream
+
+	// Probe for the first byte BEFORE touching the terminal. On a read-only
+	// session the agent refuses the shell service and closes the stream with
+	// zero bytes; detecting that here lets us bail out as Refused without ever
+	// flipping the terminal into raw mode (no visible flicker) so the caller
+	// can fall back to webadmin-only keep-alive.
+	firstChunk := make([]byte, 4096)
+	type readResult struct {
+		n   int
+		err error
+	}
+	probeCh := make(chan readResult, 1)
+	go func() {
+		n, rerr := s.shellStream.Read(firstChunk)
+		probeCh <- readResult{n: n, err: rerr}
+	}()
+
+	var first []byte
+	select {
+	case res := <-probeCh:
+		if res.n == 0 || res.err != nil {
+			// Stream closed (or errored) before any output: refused.
+			s.shellStream.Close()
+			s.ctlStream.Close()
+			return ShellOutcome{Refused: true}, nil
+		}
+		first = append(first, firstChunk[:res.n]...)
+	case <-time.After(shellProbeTimeout):
+		// No data within the probe window. Treat as refused rather than
+		// hang the UI; the caller falls back to webadmin-only keep-alive.
+		s.shellStream.Close()
+		s.ctlStream.Close()
+		return ShellOutcome{Refused: true}, nil
+	}
 
 	// Put terminal in raw mode so Ctrl+C sends 0x03 instead of killing the client
 	oldState, err := term.MakeRaw(s.fd)
 	if err != nil {
 		shellStream.Close()
 		ctlStream.Close()
-		return err
+		return ShellOutcome{}, err
 	}
 	s.oldState = oldState
 
@@ -123,6 +169,10 @@ func (s *ShellSession) run() error {
 	// Use retryWriter to handle EAGAIN when stdout is affected by stdin's non-blocking mode
 	go func() {
 		stdout := &retryWriter{w: os.Stdout}
+		// Flush the byte(s) consumed by the refusal probe before resuming the copy.
+		if len(first) > 0 {
+			stdout.Write(first)
+		}
 		n, err := io.Copy(stdout, s.shellStream)
 		// Remote closed, cancel everything
 		debugLog("io.Copy exited: bytes=%d, err=%v", n, err)
@@ -183,7 +233,9 @@ func (s *ShellSession) run() error {
 	s.shellStream.Close()
 	s.ctlStream.Close()
 
-	return nil
+	// We received terminal output, so this was a real (now-ended) session,
+	// not a refusal.
+	return ShellOutcome{Refused: false}, nil
 }
 
 func (s *ShellSession) sendResize() {

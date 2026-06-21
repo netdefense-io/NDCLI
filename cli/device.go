@@ -137,6 +137,7 @@ func init() {
 	deviceConnectCmd.Flags().Duration("timeout", 5*time.Minute, "Connection timeout")
 	deviceConnectCmd.Flags().Int("webadmin-port", 0, "Local port for webadmin tunnel (default: auto-assign)")
 	deviceConnectCmd.Flags().Bool("no-webadmin", false, "Disable webadmin tunnel")
+	deviceConnectCmd.Flags().Bool("webadmin-only", false, "Skip the interactive terminal and keep the webadmin tunnel open until you quit (Ctrl-C). Auto-enabled when the device refuses a terminal, e.g. read-only sessions.")
 
 	// Rebind-token flags
 	deviceRebindTokenCmd.Flags().Duration("ttl", 24*time.Hour, "Token validity window (max 7d)")
@@ -298,6 +299,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	webadminPort, _ := cmd.Flags().GetInt("webadmin-port")
 	noWebadmin, _ := cmd.Flags().GetBool("no-webadmin")
+	webadminOnly, _ := cmd.Flags().GetBool("webadmin-only")
 
 	ctx := context.Background()
 
@@ -366,6 +368,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 				SessionID:       payload.PathfinderSession,
 				WebAdminEnabled: !noWebadmin,
 				WebAdminPort:    webadminPort,
+				WebAdminOnly:    webadminOnly,
 				OnProgress:      spinner.UpdateMessage,
 				IsTTY:           spinner.IsTTY(),
 			})
