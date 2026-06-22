@@ -243,6 +243,13 @@ func (s *Stream) ServiceName() string {
 	return s.serviceName
 }
 
+// Closed returns a channel that is closed when the stream is closed (locally
+// via Close/closeInternal or remotely via a received CLOSE frame). Callers can
+// select on it to react to a peer-initiated close without reading the stream.
+func (s *Stream) Closed() <-chan struct{} {
+	return s.closed
+}
+
 // Read reads data from the stream
 func (s *Stream) Read(p []byte) (int, error) {
 	// First check if there's buffered data, even if stream is closed

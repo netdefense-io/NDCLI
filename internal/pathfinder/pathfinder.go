@@ -140,13 +140,22 @@ func (c *Client) Connect() error {
 		defer tunnel.Stop()
 	}
 
+	// Show the WebAdmin link up front — while the terminal (if any) is still
+	// active — so the user knows where to connect before interacting with the
+	// shell. The keep-alive wait below repeats only a short reminder.
+	if c.isTTY && webAdminURL != "" {
+		output.WebAdminBox(webAdminURL)
+	}
+
 	// Whether we can/should run an interactive shell. A non-TTY (piped) stdin
 	// has no terminal, and --webadmin-only opts out explicitly.
 	tryShell := c.isTTY && !c.webAdminOnly
 
 	if tryShell {
 		c.progress("Starting shell...")
+		stage("Connect: StartShellSession begin")
 		outcome, shellErr := StartShellSession(streamMgr)
+		stage("Connect: StartShellSession returned")
 		if shellErr != nil {
 			// Hard error opening the shell streams. Fall through to webadmin
 			// keep-alive if a tunnel is up; otherwise surface the error.
@@ -160,6 +169,13 @@ func (c *Client) Connect() error {
 			if c.isTTY {
 				fmt.Println("Read-only session — terminal disabled by the device.")
 			}
+		} else if c.isTTY {
+			// A real terminal session ended. The remote shell's final output
+			// (e.g. the OPNsense menu's "Enter an option:" prompt) leaves the
+			// cursor at an inconsistent column with 0, 1, or 2 trailing
+			// newlines. Normalize to a single fresh line so the keep-alive
+			// message below always prints cleanly on its own line.
+			fmt.Println()
 		}
 		// On a normal terminal exit we also fall through: the user closing the
 		// shell must not tear the webadmin tunnel down.
@@ -170,6 +186,7 @@ func (c *Client) Connect() error {
 		return nil
 	}
 
+	stage("Connect: entering waitForQuit")
 	c.waitForQuit(relay, webAdminURL)
 	return nil
 }
@@ -178,10 +195,13 @@ func (c *Client) Connect() error {
 // connection drops. While it blocks, the local webadmin tunnel keeps serving
 // requests with zero persistent streams open — the agent keeps the session
 // alive for the lifetime of the relay connection.
+//
+// The WebAdmin link box is printed by Connect before the shell runs, so here
+// we only show a short reminder (with the URL repeated for convenience) once
+// the foreground shell has exited or for terminal-less sessions.
 func (c *Client) waitForQuit(relay *RelayClient, webAdminURL string) {
 	if c.isTTY && webAdminURL != "" {
-		output.WebAdminBox(webAdminURL)
-		fmt.Println("WebAdmin tunnel active. Press Ctrl-C to close.")
+		fmt.Printf("WebAdmin tunnel still active at %s — press Ctrl-C to close.\n", webAdminURL)
 	}
 
 	sigCh := make(chan os.Signal, 1)
