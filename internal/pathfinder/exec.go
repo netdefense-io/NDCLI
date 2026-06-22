@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+// ErrReadOnlySession carries the clear, self-explanatory message shown when a
+// read-only caller is denied terminal/console exec access. The authoritative
+// read-only decision is made server-side: NDManager derives read_only from the
+// caller's role and returns it in the connect-status response, and the MCP
+// console_open handler fails early with this message when that flag is true.
+// (The agent's server-side chokepoint remains the security guarantee; this is
+// purely the clarity layer.)
+var ErrReadOnlySession = &PathfinderError{
+	Message: "Terminal/console access is disabled for this session: your role on " +
+		"this organization is read-only (RO). Running commands on devices requires " +
+		"read-write (RW) access. Read-only WebAdmin browsing is still available via " +
+		"the device connect / webadmin flow.",
+}
+
 // execRequest is the JSON object sent to the agent on the exec stream.
 type execRequest struct {
 	ID             string `json:"id"`
@@ -121,6 +135,11 @@ func (c *Client) ConnectExec() (*ExecHandle, error) {
 	// Start the single persistent reader goroutine. It exits when the exec
 	// stream returns an error (EOF on Close, relay drop, etc.) or when
 	// closedCh is closed, whichever comes first.
+	//
+	// Read-only enforcement is NOT done here: NDManager returns the
+	// authoritative read_only flag in the connect-status response, and the
+	// console_open handler fails early on it before this point is reached. The
+	// agent's server-side chokepoint remains the security backstop.
 	go h.readerLoop()
 
 	return h, nil

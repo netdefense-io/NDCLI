@@ -122,6 +122,11 @@ type ConnectStatusResponse struct {
 	Status  string `json:"status"`
 	Payload string `json:"payload,omitempty"`
 	Message string `json:"message,omitempty"`
+	// ReadOnly is the authoritative read-only flag NDManager derives from the
+	// caller's role on the organization. A pointer so an older NDManager that
+	// omits the field (nil) is distinguishable from an explicit false: nil means
+	// "unknown, proceed as before"; *true means terminal/exec is not allowed.
+	ReadOnly *bool `json:"read_only,omitempty"`
 }
 
 // ConnectPayload is the parsed payload from a completed connect task

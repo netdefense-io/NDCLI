@@ -18,6 +18,11 @@ type ConsoleConnectResult struct {
 	PathfinderSession string
 	// DeviceName is the resolved device name, echoed for the caller's records.
 	DeviceName string
+	// ReadOnly is the authoritative read-only flag from the connect-status
+	// response, derived by NDManager from the caller's role. nil when an older
+	// NDManager omits the field — callers then proceed as before and rely on
+	// the agent's server-side enforcement.
+	ReadOnly *bool
 }
 
 // ConsoleConnect runs the control-plane connect flow for a device:
@@ -101,6 +106,9 @@ func (s *Service) ConsoleConnect(ctx context.Context, org, deviceName string, co
 			return &ConsoleConnectResult{
 				PathfinderSession: payload.PathfinderSession,
 				DeviceName:        deviceName,
+				// Authoritative read-only flag from NDManager (nil on older
+				// servers that omit it).
+				ReadOnly: status.ReadOnly,
 			}, nil
 
 		case models.TaskStatusFailed:

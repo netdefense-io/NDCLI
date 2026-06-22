@@ -141,6 +141,21 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 		return s.errorResult(connErr)
 	}
 
+	// Authoritative read-only gate. NDManager derives read_only from the
+	// caller's role and returns it in the connect-status response. When it is
+	// explicitly true, terminal/console exec is not permitted for this session,
+	// so fail console_open EARLY with a clear, self-explanatory message — before
+	// opening any exec stream. A nil flag (older NDManager that omits the field)
+	// means "unknown": proceed as before and rely on the agent's server-side
+	// enforcement. The agent block remains the authoritative guarantee; this is
+	// the clarity layer.
+	if connResult.ReadOnly != nil && *connResult.ReadOnly {
+		return s.errorResult(&ToolError{
+			Code:    "READ_ONLY_SESSION",
+			Message: pathfinder.ErrReadOnlySession.Message,
+		})
+	}
+
 	// Dial the Pathfinder relay (non-blocking; opens exec stream, no PTY).
 	pfClient, pfErr := pathfinder.NewClient(pathfinder.ClientConfig{
 		SessionID:       connResult.PathfinderSession,
