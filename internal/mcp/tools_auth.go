@@ -57,10 +57,11 @@ func (s *Server) handleAuthStatus(ctx context.Context, req *mcp.CallToolRequest)
 	authenticated := s.svc.AuthIsAuthenticated()
 	status := "not_authenticated"
 	if authenticated {
-		// A successful RequireAuth means the token is valid (or was just
-		// refreshed). Surface the distinction in the response.
+		// RequireAuth calls GetAccessToken, which attempts a transparent refresh
+		// when the stored access token is expired. A nil return means a valid
+		// token is now available; an error means the refresh also failed.
 		if err := s.svc.RequireAuth(); err != nil {
-			status = "token_expired"
+			status = "auth_failed"
 		} else {
 			status = "authenticated"
 		}

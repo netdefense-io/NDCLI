@@ -8,21 +8,44 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
+
+// authManager is the minimal interface required from the auth package.
+// Defined here so unit tests can supply a lightweight stub without pulling in
+// the concrete *auth.Manager (which requires storage backends and an OAuth2
+// provider). *auth.Manager satisfies this interface; the conversion in New
+// guards the nil-pointer-in-interface footgun.
+type authManager interface {
+	IsAuthenticated() bool
+	GetAccessToken() (string, error)
+	ForceRefresh() error
+	GetUserInfo() (*models.UserInfo, error)
+	GetTokenSummary() map[string]interface{}
+	GetStorageName() string
+	Logout() error
+}
 
 // Service is the entry point for all domain operations.
 type Service struct {
 	api  *api.Client
-	auth *auth.Manager
+	auth authManager
 	cfg  *config.Config
 }
 
 // New constructs a Service from already-initialised dependencies. Callers own
 // the lifetime of the auth manager.
 func New(apiClient *api.Client, authMgr *auth.Manager, cfg *config.Config) *Service {
+	// Assign via the interface only when non-nil: a nil *auth.Manager stored
+	// inside an interface value is not equal to nil, which would break the
+	// s.auth == nil guards throughout the package.
+	var am authManager
+	if authMgr != nil {
+		am = authMgr
+	}
 	return &Service{
 		api:  apiClient,
-		auth: authMgr,
+		auth: am,
 		cfg:  cfg,
 	}
 }
@@ -36,15 +59,18 @@ func (s *Service) API() *api.Client { return s.api }
 func (s *Service) Config() *config.Config { return s.cfg }
 
 // RequireAuth verifies that a valid access token is available, refreshing it
-// if necessary. Returns a typed *Error so callers can map it to their own
+// transparently when the stored access token is expired but a refresh token
+// is still valid. Returns a typed *Error so callers can map it to their own
 // surface (CLI message, MCP error code).
 func (s *Service) RequireAuth() error {
-	if s.auth == nil || !s.auth.IsAuthenticated() {
+	if s.auth == nil {
 		return &Error{
 			Code:    CodeNotAuthenticated,
 			Message: "Not authenticated. Please run 'ndcli auth login' first.",
 		}
 	}
+	// GetAccessToken attempts a refresh when the access token is expired, so
+	// an error here means the refresh also failed (or no tokens exist at all).
 	if _, err := s.auth.GetAccessToken(); err != nil {
 		return &Error{
 			Code:    CodeAuthFailed,

@@ -94,16 +94,11 @@ func (s *Server) Serve() error {
 	return s.mcpServer.Run(context.Background(), &mcp.StdioTransport{})
 }
 
-// checkAuth verifies the user is authenticated
+// checkAuth verifies the user is authenticated, refreshing an expired access
+// token transparently when a refresh token is still available.
 func (s *Server) checkAuth() error {
-	if !s.authManager.IsAuthenticated() {
-		return &ToolError{
-			Code:    "NOT_AUTHENTICATED",
-			Message: "Not authenticated. Please run 'ndcli auth login' first.",
-		}
-	}
-
-	// Verify token is valid
+	// GetAccessToken attempts a refresh when the access token is expired, so
+	// an error here means the refresh also failed (or no tokens exist at all).
 	_, err := s.authManager.GetAccessToken()
 	if err != nil {
 		return &ToolError{
@@ -111,7 +106,6 @@ func (s *Server) checkAuth() error {
 			Message: fmt.Sprintf("Authentication failed: %v. Please run 'ndcli auth login' to re-authenticate.", err),
 		}
 	}
-
 	return nil
 }
 

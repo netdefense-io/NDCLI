@@ -58,9 +58,10 @@ func (s *Service) AuthMe(ctx context.Context) (*models.AuthMe, error) {
 	return &me, nil
 }
 
-// AuthRefresh forces a token refresh.
+// AuthRefresh forces a token refresh. Works even when the access token is
+// already expired — the only precondition is that a refresh token exists.
 func (s *Service) AuthRefresh() error {
-	if s.auth == nil || !s.auth.IsAuthenticated() {
+	if s.auth == nil {
 		return &Error{Code: CodeNotAuthenticated, Message: "not authenticated"}
 	}
 	if err := s.auth.ForceRefresh(); err != nil {
