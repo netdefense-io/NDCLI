@@ -67,16 +67,32 @@ var deviceApproveAllCmd = &cobra.Command{
 }
 
 var deviceConnectCmd = &cobra.Command{
-	Use:               "connect [device]",
-	Short:             "Connect to a device via Pathfinder",
+	Use:   "connect [device]",
+	Short: "Connect to a device via Pathfinder",
+	Long: `Connect to a device via the NetDefense Pathfinder relay.
+
+Opens an interactive PTY shell to the remote device and (unless --no-webadmin
+is set) starts a local WebAdmin tunnel on an automatically assigned port.
+
+In-session key bindings:
+  Ctrl-C   Interrupt the foreground command on the remote device (does NOT
+           close the session — the remote shell handles it normally).
+  ~.       Force-quit the session. Type tilde then dot at the start of a new
+           line (immediately after pressing Enter). Use this if the session is
+           wedged and Ctrl-C has no effect.
+  ~~       Send a literal ~ character (escape the escape).
+
+The WebAdmin tunnel remains active after the shell exits until you press
+Ctrl-C at the keep-alive prompt (or run with --webadmin-only to skip the
+shell entirely).`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
 	RunE:              runDeviceConnect,
 }
 
 var deviceRebindTokenCmd = &cobra.Command{
-	Use:               "rebind-token [device]",
-	Short:             "Issue a one-time re-bind token for the device's signing key",
+	Use:   "rebind-token [device]",
+	Short: "Issue a one-time re-bind token for the device's signing key",
 	Long: `Issue a one-time Re-bind Token authorising a fresh signing-key binding for a device.
 
 Use this when:

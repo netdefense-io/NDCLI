@@ -4,6 +4,7 @@ package pathfinder
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -192,6 +193,10 @@ func (s *ShellSession) run() (ShellOutcome, error) {
 	// Send initial terminal size
 	s.sendResize()
 
+	// One-line hint printed to stderr so it doesn't land in the shell's stdout
+	// stream. Raw mode is active, so \r\n is required for correct rendering.
+	fmt.Fprintf(os.Stderr, "remote session — press ~. on a new line to force-quit\r\n")
+
 	// Watch for SIGWINCH (terminal resize)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
@@ -225,17 +230,17 @@ func (s *ShellSession) run() (ShellOutcome, error) {
 		close(done)
 	}()
 
-	// interrupt is closed by forwardInput when the user presses Ctrl-C (0x03).
-	// In raw mode Ctrl-C is delivered as a literal byte, not SIGINT, so it is
-	// the only reliable in-band "I want out" signal — and it is what the
-	// operator was pressing to no effect during the hang.
-	interrupt := make(chan struct{})
+	// forceQuit is closed by forwardInput when the user types the ~. escape
+	// sequence at line start (SSH-style force-quit). This gives the operator a
+	// way to tear down a wedged session when every remote CLOSE frame is lost
+	// AND ctlStream.Closed() hasn't fired.
+	forceQuit := make(chan struct{})
 
 	// Local input → remote PTY. forwardInput parks in poll(2) on the terminal
 	// fd plus a self-pipe, so cancellation always wakes it promptly (it never
 	// sits in an uninterruptible blocking read) and closes inputDone — the join
 	// signal the deferred terminal restore waits on.
-	go s.forwardInput(ctx, s.fd, inputDone, interrupt)
+	go s.forwardInput(ctx, s.fd, inputDone, forceQuit)
 
 	// End the session robustly. The clean ending is `done` (io.Copy returned
 	// because the remote closed the shell stream). But io.Copy only returns on
@@ -256,7 +261,7 @@ func (s *ShellSession) run() (ShellOutcome, error) {
 	//     races/loses, the shell-ctl CLOSE still arrives — so this ends the
 	//     session automatically on Logout WITHOUT needing the user to do
 	//     anything. This is the primary no-remote-shell-CLOSE trigger.
-	//   - interrupt: the user pressed Ctrl-C (0x03). Always-available manual
+	//   - forceQuit: the user typed ~. at line start. Always-available manual
 	//     escape, even if every remote CLOSE is lost.
 	//   - inputDone: local stdin reached EOF.
 	//   - ctx.Done(): parent/relay cancellation.
@@ -266,8 +271,8 @@ func (s *ShellSession) run() (ShellOutcome, error) {
 		case <-s.ctlStream.Closed():
 			stage("run(): shell-ctl stream closed by peer — forcing shell stream close")
 			s.shellStream.Close()
-		case <-interrupt:
-			stage("run(): Ctrl-C — forcing shell stream close")
+		case <-forceQuit:
+			stage("run(): ~. escape — forcing shell stream close")
 			s.shellStream.Close()
 		case <-inputDone:
 			stage("run(): input ended — forcing shell stream close")
@@ -309,16 +314,27 @@ func (s *ShellSession) run() (ShellOutcome, error) {
 //
 // inputDone is closed on every return path, and the fd is left in blocking mode
 // (its normal state), so the restore that joins on inputDone sees a clean fd.
-func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan struct{}, interrupt chan struct{}) {
+//
+// In-band escape: the SSH-style ~. sequence (tilde then dot, only when tilde
+// appears at the start of a line) closes forceQuit, which run() uses to tear
+// down a wedged session. Ctrl-C (0x03) is forwarded transparently so it
+// interrupts the remote foreground command without killing the session.
+func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan struct{}, forceQuit chan struct{}) {
 	defer close(inputDone)
 
-	// Close interrupt at most once, when we see Ctrl-C (0x03) in the raw input.
-	var interruptOnce sync.Once
-	signalInterrupt := func() {
-		if interrupt != nil {
-			interruptOnce.Do(func() { close(interrupt) })
+	// Close forceQuit at most once, when the user types the ~. escape.
+	var forceQuitOnce sync.Once
+	signalForceQuit := func() {
+		if forceQuit != nil {
+			forceQuitOnce.Do(func() { close(forceQuit) })
 		}
 	}
+
+	// Escape state machine persists across read calls (tilde can straddle reads).
+	// atLineStart: true at session open and immediately after \r or \n.
+	// escapePending: a leading ~ was seen and held; not yet forwarded.
+	atLineStart := true
+	escapePending := false
 
 	// Self-pipe used purely to interrupt poll(2) on cancel.
 	var cancelPipe [2]int
@@ -394,13 +410,48 @@ func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan 
 			return
 		}
 
-		// Surface a Ctrl-C (ETX, 0x03) as an interrupt so run() can end a
-		// wedged session even if the remote never sent a CLOSE frame. We still
-		// forward the byte to the shell (a live remote may want to handle it),
-		// but the interrupt guarantees the user always has a way out — the
-		// behavior the operator expected when "Ctrl-C did nothing".
-		if containsByte(buf[:nr], 0x03) {
-			signalInterrupt()
+		// Process the read buffer through the SSH-style escape state machine
+		// before forwarding. The escape character is '~'; it is only recognised
+		// at the start of a line (immediately after \r or \n, or at the very
+		// beginning of the session).
+		//
+		// Rules:
+		//   escapePending + '.' → signal force-quit; consume both bytes (no fwd)
+		//   escapePending + '~' → forward one literal '~'; clear pending
+		//   escapePending + other → forward '~' then that byte; update atLineStart
+		//   not pending + atLineStart + '~' → hold '~' (set escapePending); no fwd
+		//   otherwise → forward the byte; update atLineStart from \r/\n
+		//
+		// Ctrl-C (0x03) reaches this path unmodified and is forwarded to the
+		// remote shell, where it interrupts the foreground command without
+		// killing the session (the original correct behavior, before 616cffa).
+		out := buf[:0] // reuse the read buffer as output; we only shrink or equal
+		for _, b := range buf[:nr] {
+			if escapePending {
+				escapePending = false
+				switch b {
+				case '.':
+					// ~. at line start: force-quit.
+					signalForceQuit()
+					atLineStart = false
+					// consume both the held '~' and this '.'; do not forward
+				case '~':
+					// ~~ → emit a single literal '~'
+					out = append(out, '~')
+					atLineStart = false
+				default:
+					// unrecognised escape: pass '~' then the byte through
+					out = append(out, '~', b)
+					atLineStart = (b == '\r' || b == '\n')
+				}
+			} else if atLineStart && b == '~' {
+				// Hold the tilde; resolution depends on the next byte.
+				escapePending = true
+				// do not forward yet
+			} else {
+				out = append(out, b)
+				atLineStart = (b == '\r' || b == '\n')
+			}
 		}
 
 		// Don't push input to a stream we're tearing down.
@@ -410,21 +461,13 @@ func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan 
 		default:
 		}
 
-		if _, werr := s.shellStream.Write(buf[:nr]); werr != nil {
-			debugLog("shellStream.Write error: %v", werr)
-			return
+		if len(out) > 0 {
+			if _, werr := s.shellStream.Write(out); werr != nil {
+				debugLog("shellStream.Write error: %v", werr)
+				return
+			}
 		}
 	}
-}
-
-// containsByte reports whether b appears in p.
-func containsByte(p []byte, b byte) bool {
-	for _, c := range p {
-		if c == b {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *ShellSession) sendResize() {

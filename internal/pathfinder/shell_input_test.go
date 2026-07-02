@@ -116,40 +116,232 @@ func TestForwardInput_EOFReturns(t *testing.T) {
 	}
 }
 
-// TestForwardInput_CtrlCSignalsInterrupt verifies that a Ctrl-C (0x03) byte in
-// the input closes the interrupt channel, which run() uses to force-close a
-// wedged shell stream when the remote never sent a CLOSE frame. This is the
-// fix for the live "Logout immediately → hang, Ctrl-C does nothing" deadlock.
-func TestForwardInput_CtrlCSignalsInterrupt(t *testing.T) {
-	readFD, writeFD := newInputPipe(t)
-	defer syscall.Close(readFD)
-	defer syscall.Close(writeFD)
-
-	// A paired relay + open shell stream so forwardInput can forward the byte
-	// without panicking on a nil stream.
+// newStreamForTest returns a ShellSession wired to a real paired relay and an
+// open shell stream, plus a channel that drains bytes written to that stream.
+// This lets escape-sequence tests observe what was (or wasn't) forwarded.
+func newStreamForTest(t *testing.T, readFD int) (*ShellSession, <-chan []byte) {
+	t.Helper()
 	relay := newPairedRelay()
 	streamMgr := NewStreamManager(relay)
 	shellStream, err := streamMgr.OpenStream("shell")
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
 	}
+	forwarded := make(chan []byte, 64)
+	// Drain the relay's binaryChan so shellStream.Write never blocks and we can
+	// inspect the raw frames that were sent.
+	go func() {
+		for frame := range relay.binaryChan {
+			forwarded <- frame
+		}
+	}()
 	s := &ShellSession{streamManager: streamMgr, shellStream: shellStream, fd: readFD}
+	return s, forwarded
+}
+
+// TestForwardInput_CtrlCIsForwarded verifies that pressing Ctrl-C (0x03) in
+// raw mode is forwarded to the remote shell stream and does NOT trigger the
+// force-quit channel. This is the correct behavior: Ctrl-C interrupts the
+// remote foreground command; it must not kill the session.
+func TestForwardInput_CtrlCIsForwarded(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, forwarded := newStreamForTest(t, readFD)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	inputDone := make(chan struct{})
-	interrupt := make(chan struct{})
-	go s.forwardInput(ctx, readFD, inputDone, interrupt)
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
 
 	time.Sleep(50 * time.Millisecond)
-	// Simulate the user pressing Ctrl-C.
 	if _, werr := syscall.Write(writeFD, []byte{0x03}); werr != nil {
 		t.Fatalf("write ctrl-c: %v", werr)
 	}
 
+	// forceQuit must NOT fire.
 	select {
-	case <-interrupt:
+	case <-forceQuit:
+		t.Fatal("forwardInput closed forceQuit on Ctrl-C (0x03) — this kills the session instead of interrupting the remote command")
+	case <-time.After(300 * time.Millisecond):
+		// Good — no force-quit.
+	}
+
+	// The byte must have been forwarded.
+	select {
+	case <-forwarded:
+		// Good — something was sent to the stream (the 0x03 byte).
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Ctrl-C (0x03) was not forwarded to the shell stream")
+	}
+}
+
+// TestForwardInput_TildeDotAtLineStartForcequits verifies that \r~. triggers
+// force-quit without forwarding the escape bytes.
+func TestForwardInput_TildeDotAtLineStartForcequits(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, _ := newStreamForTest(t, readFD)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputDone := make(chan struct{})
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
+
+	time.Sleep(50 * time.Millisecond)
+	// \r moves to line start, then ~. triggers force-quit.
+	if _, werr := syscall.Write(writeFD, []byte{'\r', '~', '.'}); werr != nil {
+		t.Fatalf("write ~.: %v", werr)
+	}
+
+	select {
+	case <-forceQuit:
+		// Good.
 	case <-time.After(2 * time.Second):
-		t.Fatal("forwardInput did not close interrupt on Ctrl-C (0x03) — a wedged session could not be ended by the user")
+		t.Fatal("forwardInput did not close forceQuit on \\r~. — wedged session cannot be escaped")
+	}
+}
+
+// TestForwardInput_TildeDotAtSessionStartForcequits verifies that ~. at the
+// very start of the session (before any \r/\n has been seen) also triggers
+// force-quit, because the state machine initialises atLineStart=true.
+func TestForwardInput_TildeDotAtSessionStartForcequits(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, _ := newStreamForTest(t, readFD)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputDone := make(chan struct{})
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
+
+	time.Sleep(50 * time.Millisecond)
+	if _, werr := syscall.Write(writeFD, []byte{'~', '.'}); werr != nil {
+		t.Fatalf("write ~.: %v", werr)
+	}
+
+	select {
+	case <-forceQuit:
+		// Good.
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardInput did not close forceQuit on ~. at session start")
+	}
+}
+
+// TestForwardInput_TildeMidLineIsForwarded verifies that a tilde that is NOT
+// at the start of a line is forwarded normally without triggering force-quit.
+func TestForwardInput_TildeMidLineIsForwarded(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, forwarded := newStreamForTest(t, readFD)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputDone := make(chan struct{})
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
+
+	time.Sleep(50 * time.Millisecond)
+	// 'a' moves us off line-start, then '~' should be forwarded normally.
+	if _, werr := syscall.Write(writeFD, []byte{'a', '~', '.'}); werr != nil {
+		t.Fatalf("write: %v", werr)
+	}
+
+	// forceQuit must NOT fire.
+	select {
+	case <-forceQuit:
+		t.Fatal("forwardInput triggered force-quit on mid-line ~. — only line-start tildes should be escape candidates")
+	case <-time.After(300 * time.Millisecond):
+		// Good.
+	}
+
+	// Something should have been forwarded (at least 'a' and '~').
+	select {
+	case <-forwarded:
+		// Good.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("nothing was forwarded for mid-line input")
+	}
+}
+
+// TestForwardInput_TildeTildeForwardsOneLiteral verifies that \r~~ at line
+// start forwards exactly one '~' byte and does not trigger force-quit.
+func TestForwardInput_TildeTildeForwardsOneLiteral(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, forwarded := newStreamForTest(t, readFD)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputDone := make(chan struct{})
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
+
+	time.Sleep(50 * time.Millisecond)
+	if _, werr := syscall.Write(writeFD, []byte{'\r', '~', '~'}); werr != nil {
+		t.Fatalf("write ~~: %v", werr)
+	}
+
+	select {
+	case <-forceQuit:
+		t.Fatal("forwardInput triggered force-quit on ~~ escape")
+	case <-time.After(300 * time.Millisecond):
+		// Good.
+	}
+
+	select {
+	case <-forwarded:
+		// Good — the literal ~ (and possibly the \r) was forwarded.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("~~ did not forward a literal ~")
+	}
+}
+
+// TestForwardInput_EscapeSplitAcrossReads verifies that when the '~' ends one
+// read and the '.' starts the next read, the force-quit still fires. The
+// escape state machine must survive the read boundary.
+func TestForwardInput_EscapeSplitAcrossReads(t *testing.T) {
+	readFD, writeFD := newInputPipe(t)
+	defer syscall.Close(readFD)
+	defer syscall.Close(writeFD)
+
+	s, _ := newStreamForTest(t, readFD)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputDone := make(chan struct{})
+	forceQuit := make(chan struct{})
+	go s.forwardInput(ctx, readFD, inputDone, forceQuit)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Write \r~ in one syscall (tilde ends the read buffer).
+	if _, werr := syscall.Write(writeFD, []byte{'\r', '~'}); werr != nil {
+		t.Fatalf("write \\r~: %v", werr)
+	}
+	// Small pause so poll(2) returns on the first write before the second arrives.
+	time.Sleep(20 * time.Millisecond)
+	// Write . in a separate syscall (next read).
+	if _, werr := syscall.Write(writeFD, []byte{'.'}); werr != nil {
+		t.Fatalf("write .: %v", werr)
+	}
+
+	select {
+	case <-forceQuit:
+		// Good — escape survived the read boundary.
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardInput did not close forceQuit when ~. was split across two reads")
 	}
 }
