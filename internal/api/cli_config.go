@@ -3,13 +3,12 @@ package api
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // CLIConfigResponse represents the response from /api/v1/cli/config
@@ -52,12 +51,18 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch CLI config (HTTP %d): %s", resp.StatusCode, string(body))
+		// This call runs unauthenticated, before login, so a hostile or
+		// misbehaving NDManager can respond with an arbitrary body here.
+		// Cobra doesn't SilenceErrors, so this string reaches the
+		// operator's terminal verbatim — scrub terminal control bytes
+		// before splicing the body into the error message, matching
+		// ParseError's handling of APIError fields.
+		body, _ := ReadBody(resp.Body)
+		return nil, fmt.Errorf("failed to fetch CLI config (HTTP %d): %s", resp.StatusCode, sanitize.String(string(body)))
 	}
 
 	var cliConfig CLIConfigResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cliConfig); err != nil {
+	if err := DecodeJSON(resp.Body, &cliConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse CLI config response: %w", err)
 	}
 

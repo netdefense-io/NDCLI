@@ -348,6 +348,7 @@ func pickStorage(storageType, path string, keyringAvailable bool, warn io.Writer
 		fmt.Fprintln(warn, "  This is risky on headless servers and CI runners. Either:")
 		fmt.Fprintln(warn, "    - install/unlock the system keyring (libsecret on Linux, Keychain on macOS), or")
 		fmt.Fprintln(warn, "    - set 'auth.storage: file' in config to acknowledge plaintext storage and suppress this warning.")
+		fmt.Fprintln(warn, "  Once a keyring is available, run 'ndcli auth migrate' to move stored tokens out of the plaintext file.")
 		return NewFileStorage(path)
 	default:
 		fmt.Fprintf(warn, "Warning: unknown auth.storage value %q; falling back to plaintext file storage.\n", storageType)

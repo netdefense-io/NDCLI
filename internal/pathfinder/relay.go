@@ -323,7 +323,7 @@ func (c *RelayClient) readPump() {
 	defer c.setConnected(false)
 	defer c.closeAllStreams() // Close all streams when connection dies
 
-	c.conn.SetReadLimit(10 * 1024 * 1024) // 10MB limit for binary frames
+	c.conn.SetReadLimit(maxFrameDataLen) // matches DecodeFrame's cap on a single frame payload
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	// Handle pongs from server (response to our pings)

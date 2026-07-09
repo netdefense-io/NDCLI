@@ -1,10 +1,15 @@
 package pathfinder
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
 )
+
+// maxConcurrentStreams bounds the goroutines/buffers a peer-initiated
+// FrameTypeOpen flood can force onto this process.
+const maxConcurrentStreams = 64
 
 // StreamManager manages multiplexed streams over a relay client connection
 type StreamManager struct {
@@ -84,11 +89,16 @@ func (m *StreamManager) handleMessage(data []byte) {
 }
 
 func (m *StreamManager) handleOpen(frame *Frame) {
-	serviceName := string(frame.Data)
-
-	stream := newStream(frame.StreamID, m, serviceName)
-
 	m.streamsMu.Lock()
+	if m.onNewStream == nil || len(m.streams) >= maxConcurrentStreams {
+		m.streamsMu.Unlock()
+		debugLog("rejecting FrameTypeOpen for stream %d: no consumer registered or max concurrent streams (%d) reached", frame.StreamID, maxConcurrentStreams)
+		m.send(&Frame{Type: FrameTypeClose, StreamID: frame.StreamID})
+		return
+	}
+
+	serviceName := string(frame.Data)
+	stream := newStream(frame.StreamID, m, serviceName)
 	m.streams[frame.StreamID] = stream
 	m.streamsMu.Unlock()
 
@@ -99,9 +109,7 @@ func (m *StreamManager) handleOpen(frame *Frame) {
 	}
 	m.send(ack)
 
-	if m.onNewStream != nil {
-		m.onNewStream(stream)
-	}
+	m.onNewStream(stream)
 }
 
 func (m *StreamManager) handleData(frame *Frame) {
@@ -119,9 +127,12 @@ func (m *StreamManager) handleData(frame *Frame) {
 	case stream.pendingData <- frame.Data:
 	case <-stream.closed:
 	default:
-		// Pending buffer full - this should be rare with 100k buffer
-		// Drop the frame to keep read pump alive for ping/pong
-		debugLog("WARNING: pendingData full for stream %d, frame dropped (%d bytes)", frame.StreamID, len(frame.Data))
+		// Pending buffer full (should be rare with a 100k buffer). Rather than
+		// silently dropping the frame and letting the consumer desync, close
+		// the stream with an error so the loss is surfaced immediately.
+		debugLog("pendingData full for stream %d, closing stream (frame dropped, %d bytes)", frame.StreamID, len(frame.Data))
+		stream.closeWithError(fmt.Errorf("stream %d: pendingData buffer overflow, frame dropped", frame.StreamID))
+		m.removeStream(frame.StreamID)
 	}
 }
 
@@ -179,6 +190,12 @@ type Stream struct {
 	closed     chan struct{}
 	closeOnce  sync.Once
 	closedOnce sync.Once
+
+	// closeErr is set (once, before closed is closed) when the stream is torn
+	// down abnormally (e.g. pendingData overflow). Read() surfaces it instead
+	// of a plain io.EOF so callers can tell "peer closed cleanly" from "we
+	// lost data and gave up".
+	closeErr error
 }
 
 // newStream creates a new stream and starts its worker goroutine
@@ -281,6 +298,9 @@ func (s *Stream) Read(p []byte) (int, error) {
 			}
 		default:
 		}
+		if s.closeErr != nil {
+			return 0, s.closeErr
+		}
 		return 0, io.EOF
 	}
 }
@@ -324,6 +344,17 @@ func (s *Stream) Close() error {
 
 func (s *Stream) closeInternal() {
 	s.closedOnce.Do(func() {
+		close(s.closed)
+	})
+}
+
+// closeWithError tears the stream down abnormally, recording err so Read()
+// can surface it instead of a plain io.EOF. Used when we detect data loss
+// (e.g. pendingData overflow) rather than a clean peer-initiated or local
+// close; callers are responsible for removing the stream from its manager.
+func (s *Stream) closeWithError(err error) {
+	s.closedOnce.Do(func() {
+		s.closeErr = err
 		close(s.closed)
 	})
 }

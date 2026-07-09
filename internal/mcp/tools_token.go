@@ -9,6 +9,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -21,6 +22,7 @@ type TokenCreateInput struct {
 	Scope     string `json:"scope"`
 	Org       string `json:"org,omitempty"`
 	ExpiresIn string `json:"expires_in,omitempty"`
+	Confirm   bool   `json:"confirm,omitempty"`
 }
 
 // TokenRevokeInput is the input for ndcli.auth.token_revoke
@@ -42,14 +44,15 @@ func (s *Server) registerTokenTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.auth.token_create",
-		Description: "Create a new personal access token. The raw token value is returned once — capture it immediately.",
+		Description: "Create a new personal access token. The raw token value is returned once — capture it immediately. Set confirm=true to execute; without it returns a preview.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"name":       stringProperty("Token name (unique identifier)"),
 				"scope":      stringEnumProperty("Token scope", []string{"RW", "RO"}),
 				"org":        stringProperty("Restrict token to a specific organization (optional)"),
-				"expires_in": stringEnumProperty("Token lifetime", []string{"30d", "60d", "90d", "180d", "365d", "never"}),
+				"expires_in": stringEnumProperty("Token lifetime. Never-expiring tokens can only be created via the CLI (ndcli auth token create --expiry never).", []string{"30d", "60d", "90d", "180d", "365d"}),
+				"confirm":    confirmProperty(),
 			},
 			"required": []string{"name", "scope"},
 		},
@@ -93,9 +96,31 @@ func (s *Server) handleTokenCreate(ctx context.Context, req *mcp.CallToolRequest
 		return s.errorResult(err)
 	}
 
+	return s.createToken(ctx, input)
+}
+
+// createToken holds the confirm-gated token-creation logic, split out from
+// handleTokenCreate so it can be exercised directly in tests against a
+// service pointed at a stub API server, without needing a live authenticated
+// Service (RequireAuth needs a real *auth.Manager, which can't be faked from
+// this package).
+func (s *Server) createToken(ctx context.Context, input *TokenCreateInput) (*mcp.CallToolResult, error) {
 	expiresIn := input.ExpiresIn
 	if expiresIn == "" {
 		expiresIn = "90d"
+	}
+	// Never-expiring tokens are minted only via the interactive CLI path —
+	// an MCP caller (potentially an automated/injected agent) must not be
+	// able to create a permanent credential.
+	if expiresIn == "never" {
+		return s.errorResult(&service.Error{
+			Code:    service.CodeInvalidInput,
+			Message: "never-expiring tokens can only be created via 'ndcli auth token create --expiry never'",
+		})
+	}
+
+	if !input.Confirm {
+		return s.previewResult(fmt.Sprintf("create a %s personal access token (name=%s, expires_in=%s)", input.Scope, input.Name, expiresIn), input.Org)
 	}
 
 	opts := service.TokenCreateOpts{

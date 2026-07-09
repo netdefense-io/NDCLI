@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
+
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // VariableConflict represents a variable conflict from sync operations
@@ -68,8 +71,8 @@ func ParseError(resp *http.Response) *APIError {
 		StatusCode: resp.StatusCode,
 	}
 
-	// Read body once
-	body, err := io.ReadAll(resp.Body)
+	// Read body once, bounded to guard against an oversized error response
+	body, err := io.ReadAll(capBody(resp.Body))
 	if err != nil {
 		apiErr.Message = statusMessage(resp.StatusCode)
 		return apiErr
@@ -163,6 +166,15 @@ func ParseError(resp *http.Response) *APIError {
 	if apiErr.Message == "" {
 		apiErr.Message = statusMessage(resp.StatusCode)
 	}
+
+	// Every field populated above (Message, Detail, Code,
+	// BlockingResources, Conflicts[].Variable/Message,
+	// UndefinedVariables) came straight from the response body and is
+	// printed verbatim by Error() — Cobra does not SilenceErrors, so this
+	// reaches the operator's terminal on every non-2xx request. Scrub
+	// terminal control bytes the same way the 2xx decode path does before
+	// wiring the error back to the caller.
+	sanitize.Struct(reflect.ValueOf(apiErr))
 
 	return apiErr
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -100,6 +101,8 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	warnIfTLSVerifyDisabled(os.Stderr)
+
 	// Perform login
 	ctx := context.Background()
 	_, err := authManager.Login(ctx, scopes, force)
@@ -129,6 +132,19 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	recordLoginAndShowInvites(ctx, userInfo)
 
 	return nil
+}
+
+// warnIfTLSVerifyDisabled prints a stderr warning when controlplane TLS
+// verification is disabled. This is the point where the OAuth2 issuer
+// domain — and thus where credentials subsequently flow — gets determined,
+// so an operator running with ssl_verify=false should see the MITM risk
+// surfaced right before authenticating.
+func warnIfTLSVerifyDisabled(w io.Writer) {
+	if config.Get().Controlplane.SSLVerify {
+		return
+	}
+	color.New(color.FgYellow).Fprintln(w, "Warning: TLS certificate verification is disabled (controlplane.ssl_verify=false). "+
+		"Authentication traffic to the control plane is not protected against interception.")
 }
 
 // recordLoginAndShowInvites calls POST /api/v1/auth/me to record login and display pending invites

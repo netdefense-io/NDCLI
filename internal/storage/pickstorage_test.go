@@ -31,6 +31,7 @@ func TestPickStorage(t *testing.T) {
 				"system keyring is not available",
 				"plaintext file",
 				"auth.storage: file",
+				"ndcli auth migrate",
 			},
 		},
 		{
@@ -45,7 +46,7 @@ func TestPickStorage(t *testing.T) {
 			storageType:      "keyring",
 			keyringAvailable: false,
 			wantBackend:      "file",
-			wantWarn:         []string{"system keyring is not available"},
+			wantWarn:         []string{"system keyring is not available", "ndcli auth migrate"},
 		},
 		{
 			name:             "explicit file, no warning",

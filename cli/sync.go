@@ -99,16 +99,10 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// When --schedule is set, register a recurring spec — skip the confirm
-	// prompt (no immediate side-effects) and return the spec descriptor.
-	if filter.Schedule != "" {
-		spec, err := svc.SyncRegisterSpec(ctx, org, filter, force)
-		if err != nil {
-			return err
-		}
-		return formatter.FormatScheduledTaskRegisterResult(spec)
-	}
-
+	// The confirm prompt gates both the immediate-apply path and --schedule
+	// registration: planting a persistent recurring spec deserves the same
+	// device-list review as an immediate sync, and --yes still short-circuits
+	// it for automation.
 	if !skipConfirm {
 		status, err := svc.SyncStatus(ctx, org, filter)
 		if err != nil {
@@ -135,10 +129,22 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 		table.Render()
 		fmt.Println()
 
-		if !helpers.Confirm(fmt.Sprintf("Trigger sync for %d device(s)?", len(status.Items))) {
+		prompt := fmt.Sprintf("Trigger sync for %d device(s)?", len(status.Items))
+		if filter.Schedule != "" {
+			prompt = fmt.Sprintf("Register a recurring sync spec on schedule %q for %d device(s)?", filter.Schedule, len(status.Items))
+		}
+		if !helpers.Confirm(prompt) {
 			fmt.Println("Cancelled")
 			return nil
 		}
+	}
+
+	if filter.Schedule != "" {
+		spec, err := svc.SyncRegisterSpec(ctx, org, filter, force)
+		if err != nil {
+			return err
+		}
+		return formatter.FormatScheduledTaskRegisterResult(spec)
 	}
 
 	applied, err := svc.SyncApply(ctx, org, filter, force)

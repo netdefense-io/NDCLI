@@ -2,10 +2,10 @@ package helpers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
@@ -33,8 +33,12 @@ func FindDeviceByName(ctx context.Context, client DeviceResolver, org, name stri
 		return "", fmt.Errorf("failed to search for device: status %d", resp.StatusCode)
 	}
 
+	// Device names decoded here are compared against/returned to the
+	// caller and can end up on the terminal, so cap+sanitize the same way
+	// the rest of the API decode paths do (this helper currently has no
+	// callers, but it's live code and shares the same defect class).
 	var result models.DeviceListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := api.DecodeJSON(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("failed to parse device list: %w", err)
 	}
 

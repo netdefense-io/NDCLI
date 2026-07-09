@@ -1,10 +1,110 @@
 package mcp
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
+
+// unauthenticatedTestServer builds a Server whose Service has no auth
+// manager, so RequireAuth() always fails with CodeNotAuthenticated —
+// exactly what console_list/console_close must reject.
+func unauthenticatedTestServer() *Server {
+	return &Server{
+		svc:             service.New(nil, nil, nil),
+		consoleSessions: newConsoleSessionManager(),
+	}
+}
+
+// TestHandleConsoleList_RequiresAuth verifies that console_list rejects an
+// unauthenticated caller instead of returning session metadata. Fails
+// against pre-fix code, which has no RequireAuth() call and returns the
+// session list regardless of auth state.
+func TestHandleConsoleList_RequiresAuth(t *testing.T) {
+	s := unauthenticatedTestServer()
+	defer s.consoleSessions.CloseAll()
+	s.consoleSessions.Add(makeStubSession("sess-1", "acme", "fw-01"))
+
+	result, err := s.handleConsoleList(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for an unauthenticated console_list call")
+	}
+
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	if resp.Success {
+		t.Error("expected Success=false for an unauthenticated console_list call")
+	}
+	if resp.Error == nil || resp.Error.Code != service.CodeNotAuthenticated {
+		t.Errorf("expected CodeNotAuthenticated, got %+v", resp.Error)
+	}
+}
+
+// TestHandleConsoleClose_RequiresAuth verifies that console_close rejects an
+// unauthenticated caller instead of tearing down the session. Fails against
+// pre-fix code, which has no RequireAuth() call and closes the session
+// unconditionally.
+func TestHandleConsoleClose_RequiresAuth(t *testing.T) {
+	s := unauthenticatedTestServer()
+	defer s.consoleSessions.CloseAll()
+	s.consoleSessions.Add(makeStubSession("sess-1", "acme", "fw-01"))
+
+	result, err := s.handleConsoleClose(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"session_id":"sess-1"}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for an unauthenticated console_close call")
+	}
+
+	if _, getErr := s.consoleSessions.Get("sess-1"); getErr != nil {
+		t.Errorf("session should NOT have been removed by an unauthenticated close, but Get failed: %v", getErr)
+	}
+}
+
+// TestResolveConnectTimeout verifies connect_timeout is clamped into a safe
+// range before being multiplied into a time.Duration. Fails against pre-fix
+// code (no resolveConnectTimeout function; the inline conversion overflows
+// for large inputs like the 9999999999 case below).
+func TestResolveConnectTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		seconds int
+		want    time.Duration
+	}{
+		{"zero uses default", 0, 5 * time.Minute},
+		{"negative uses default", -5, 5 * time.Minute},
+		{"typical value passes through", 60, 60 * time.Second},
+		{"exactly max is unchanged", maxConsoleConnectTimeoutSeconds, maxConsoleConnectTimeoutSeconds * time.Second},
+		{"large value clamped to max", 999999999, maxConsoleConnectTimeoutSeconds * time.Second},
+		{"overflow-triggering value clamped to max", 9999999999, maxConsoleConnectTimeoutSeconds * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveConnectTimeout(tc.seconds)
+			if got != tc.want {
+				t.Errorf("resolveConnectTimeout(%d) = %v, want %v", tc.seconds, got, tc.want)
+			}
+			if got < 0 {
+				t.Errorf("resolveConnectTimeout(%d) returned a negative duration %v", tc.seconds, got)
+			}
+		})
+	}
+}
 
 // TestConsoleExecInput_BinaryParsing verifies that the binary flag round-trips
 // through JSON correctly in the consoleExecInput struct.

@@ -15,8 +15,13 @@ type TokenManager struct {
 	storage storage.Storage
 }
 
-// NewTokenManager creates a new token manager
+// NewTokenManager creates a new token manager. A non-empty customPath uses
+// isolated file storage at that path (for tests); an empty path uses the
+// configured global storage backend (keyring, with file fallback).
 func NewTokenManager(customPath string) *TokenManager {
+	if customPath != "" {
+		return &TokenManager{storage: storage.NewFileStorage(customPath)}
+	}
 	return &TokenManager{storage: storage.GetStorage()}
 }
 

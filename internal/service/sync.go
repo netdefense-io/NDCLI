@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
@@ -66,9 +65,12 @@ func (s *Service) SyncApply(ctx context.Context, defaultOrg string, filter SyncF
 	defer resp.Body.Close()
 
 	// 200 / 207 / 400 all return the same body shape; decode directly so
-	// non-2xx doesn't get folded into an error.
+	// non-2xx doesn't get folded into an error. DeviceName/Error strings in
+	// the response reach the terminal via formatter.FormatSyncApply, so
+	// route through api.DecodeJSON for the same cap+sanitize treatment
+	// ParseResponse gives every other decode path.
 	var body models.SyncApplyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := api.DecodeJSON(resp.Body, &body); err != nil {
 		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", err), err)
 	}
 	return &SyncApplyResult{Response: &body, StatusCode: resp.StatusCode}, nil
@@ -116,8 +118,10 @@ func (s *Service) SyncRegisterSpec(ctx context.Context, defaultOrg string, filte
 	}
 	defer resp.Body.Close()
 
+	// Same dual-shape decode as SyncApply above (ScheduleName/CreatedBy are
+	// server-supplied and formatter-rendered) — cap+sanitize via DecodeJSON.
 	var result models.ScheduledTaskRegisterResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := api.DecodeJSON(resp.Body, &result); err != nil {
 		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", err), err)
 	}
 	return &result, nil

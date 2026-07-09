@@ -70,7 +70,7 @@ func (s *Server) handleAuthStatus(ctx context.Context, req *mcp.CallToolRequest)
 		"authenticated": authenticated,
 		"status":        status,
 		"storage":       s.svc.AuthStorageName(),
-		"token_info":    s.svc.AuthTokenSummary(),
+		"token_info":    mcpTokenSummary(s.svc.AuthTokenSummary()),
 	}, "")
 }
 
@@ -110,8 +110,27 @@ func (s *Server) handleAuthRefresh(ctx context.Context, req *mcp.CallToolRequest
 	}
 	return s.successResult(map[string]interface{}{
 		"refreshed":  true,
-		"token_info": s.svc.AuthTokenSummary(),
+		"token_info": mcpTokenSummary(s.svc.AuthTokenSummary()),
 	}, "Access token refreshed")
+}
+
+// mcpTokenSummary strips the OAuth2 subject claim from a token summary
+// before it crosses the MCP boundary. Email/name/expiry are sufficient for
+// agent auth-checking; the subject claim is an opaque, correlatable PII
+// identifier that shouldn't enter LLM/agent context — unlike the CLI's local
+// `auth show` terminal output, which is unaffected.
+func mcpTokenSummary(summary map[string]interface{}) map[string]interface{} {
+	if summary == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(summary))
+	for k, v := range summary {
+		if k == "subject" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Server) handleConfigShow(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -112,6 +112,14 @@ func (s *Server) handleSyncApply(ctx context.Context, req *mcp.CallToolRequest) 
 	if err != nil {
 		return s.errorResult(err)
 	}
+	return s.syncApply(ctx, input)
+}
+
+// syncApply holds the confirm-gated sync/schedule-registration logic for
+// ndcli.sync.apply, split out from handleSyncApply so it can be exercised
+// directly in tests without a live authenticated Service (RequireAuth needs
+// a real *auth.Manager, which can't be faked from this package).
+func (s *Server) syncApply(ctx context.Context, input *syncApplyInput) (*mcp.CallToolResult, error) {
 	defaultOrg, err := s.svc.ResolveOrg("")
 	if err != nil && input.Organization == "" {
 		return s.errorResult(err)
@@ -123,21 +131,14 @@ func (s *Server) handleSyncApply(ctx context.Context, req *mcp.CallToolRequest) 
 		OU:           input.OU,
 		DriftStatus:  input.DriftStatus,
 		Template:     input.Template,
-		Schedule:     input.Schedule,
 	}
 
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	// When schedule is set, register a recurring spec (no confirm required).
-	if input.Schedule != "" {
-		spec, err := s.svc.SyncRegisterSpec(apiCtx, defaultOrg, filter, input.Force)
-		if err != nil {
-			return s.errorResult(err)
-		}
-		return s.successResult(spec, fmt.Sprintf("Registered SYNC spec %s on schedule %q", spec.Code, spec.ScheduleName))
-	}
-
+	// The confirm gate covers both immediate apply and schedule
+	// registration — planting a persistent recurring spec deserves the same
+	// device-list preview as an immediate sync.
 	if !input.Confirm {
 		status, err := s.svc.SyncStatus(apiCtx, defaultOrg, filter)
 		if err != nil {
@@ -147,7 +148,20 @@ func (s *Server) handleSyncApply(ctx context.Context, req *mcp.CallToolRequest) 
 		for _, it := range status.Items {
 			names = append(names, it.DeviceName)
 		}
-		return s.previewResult("sync", fmt.Sprintf("%d device(s): %v", len(names), names))
+		action := "sync"
+		if input.Schedule != "" {
+			action = fmt.Sprintf("register a SYNC spec on schedule %q for", input.Schedule)
+		}
+		return s.previewResult(action, fmt.Sprintf("%d device(s): %v", len(names), names))
+	}
+
+	filter.Schedule = input.Schedule
+	if input.Schedule != "" {
+		spec, err := s.svc.SyncRegisterSpec(apiCtx, defaultOrg, filter, input.Force)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		return s.successResult(spec, fmt.Sprintf("Registered SYNC spec %s on schedule %q", spec.Code, spec.ScheduleName))
 	}
 
 	applied, err := s.svc.SyncApply(apiCtx, defaultOrg, filter, input.Force)

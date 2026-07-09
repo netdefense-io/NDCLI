@@ -13,6 +13,12 @@ const (
 	FrameTypeAck   byte = 0x04
 )
 
+// maxFrameDataLen caps a single frame payload, matching the relay WebSocket
+// read limit (see RelayClient.readPump's SetReadLimit). Rejecting any length
+// above this before computing 9+length keeps that arithmetic well below the
+// range where a uint32 sum could wrap.
+const maxFrameDataLen = 10 * 1024 * 1024
+
 // Frame represents a multiplexed data frame
 type Frame struct {
 	Type     byte
@@ -43,10 +49,15 @@ func DecodeFrame(data []byte) (*Frame, error) {
 	}
 
 	length := binary.BigEndian.Uint32(data[5:9])
-	if len(data) < int(9+length) {
-		return nil, fmt.Errorf("frame data incomplete: expected %d, got %d", 9+length, len(data))
+	if length > maxFrameDataLen {
+		return nil, fmt.Errorf("frame data too large: %d bytes (max %d)", length, maxFrameDataLen)
 	}
 
-	f.Data = data[9 : 9+length]
+	end := 9 + int(length)
+	if len(data) < end {
+		return nil, fmt.Errorf("frame data incomplete: expected %d, got %d", end, len(data))
+	}
+
+	f.Data = data[9:end]
 	return f, nil
 }

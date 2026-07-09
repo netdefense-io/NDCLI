@@ -155,7 +155,15 @@ func (s *Server) handleFirmwareUpgrade(ctx context.Context, req *mcp.CallToolReq
 	if err != nil {
 		return s.errorResult(err)
 	}
+	return s.firmwareUpgrade(ctx, input)
+}
 
+// firmwareUpgrade holds the validation + confirm-gated execution logic for
+// ndcli.run.firmware_upgrade, split out from handleFirmwareUpgrade so it can
+// be exercised directly in tests without a live authenticated Service
+// (RequireAuth needs a real *auth.Manager, which can't be faked from this
+// package).
+func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.CallToolResult, error) {
 	// Client-side validation: mode must be minor or major.
 	if input.Mode != "minor" && input.Mode != "major" {
 		return s.errorResult(fmt.Errorf(`mode must be "minor" or "major", got %q`, input.Mode))
@@ -199,18 +207,24 @@ func (s *Server) handleFirmwareUpgrade(ctx context.Context, req *mcp.CallToolReq
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	// When --schedule is set, register a recurring spec. No confirm gate needed.
+	// The confirm gate covers both immediate execution and schedule
+	// registration — planting a persistent recurring spec deserves the same
+	// preview as an immediate run.
+	if !input.Confirm {
+		scope := runScopeDescription(input)
+		action := "run firmware-upgrade on"
+		if input.Schedule != "" {
+			action = fmt.Sprintf("register a %s spec on schedule %q for", models.TaskTypeFirmwareUpgrade, input.Schedule)
+		}
+		return s.previewResult(action, scope)
+	}
+
 	if input.Schedule != "" {
 		spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
 		if err != nil {
 			return s.errorResult(err)
 		}
 		return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", models.TaskTypeFirmwareUpgrade, spec.Code, spec.ScheduleName))
-	}
-
-	if !input.Confirm {
-		scope := runScopeDescription(input)
-		return s.previewResult("run firmware-upgrade on", scope)
 	}
 
 	result, err := s.svc.Run(apiCtx, org, opts)
@@ -267,67 +281,80 @@ func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runIn
 		if err != nil {
 			return s.errorResult(err)
 		}
-		org, err := s.svc.ResolveOrg(input.Organization)
-		if err != nil {
-			return s.errorResult(err)
-		}
-		opts := service.RunOpts{
-			Type:        taskType,
-			Devices:     input.Devices,
-			OUs:         input.OUs,
-			AllDevices:  input.Org,
-			ScheduledAt: input.At,
-			Schedule:    input.Schedule,
-		}
-		if payloadFn != nil {
-			opts.Payload = payloadFn(input)
-		}
-
-		apiCtx, cancel := contextWithTimeout()
-		defer cancel()
-
-		// When --schedule is set, register a recurring spec. No confirm gate
-		// needed (no immediate side-effects).
-		if input.Schedule != "" {
-			spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
-			if err != nil {
-				return s.errorResult(err)
-			}
-			return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", taskType, spec.Code, spec.ScheduleName))
-		}
-
-		if !input.Confirm {
-			scope := runScopeDescription(input)
-			return s.previewResult(fmt.Sprintf("run %s on", friendly), scope)
-		}
-
-		result, err := s.svc.Run(apiCtx, org, opts)
-		if err != nil {
-			return s.errorResult(err)
-		}
-
-		tasks := make([]map[string]interface{}, 0, len(result.Tasks))
-		for _, t := range result.Tasks {
-			tasks = append(tasks, map[string]interface{}{
-				"task":        t.Task,
-				"device":      t.DeviceName,
-				"device_uuid": t.DeviceUUID,
-				"status":      t.Status,
-				"expires_at":  t.ExpiresAt,
-			})
-		}
-		summary := fmt.Sprintf("%d %s task(s) created", result.Total, taskType)
-		if result.ScheduledAt != "" {
-			summary = fmt.Sprintf("%d %s task(s) scheduled for %s", result.Total, taskType, result.ScheduledAt)
-		}
-		return s.successResult(map[string]interface{}{
-			"type":         result.Type,
-			"organization": result.Organization,
-			"scheduled_at": result.ScheduledAt,
-			"total":        result.Total,
-			"tasks":        tasks,
-		}, summary)
+		return s.runCommand(ctx, friendly, taskType, payloadFn, input)
 	}
+}
+
+// runCommand holds the confirm-gated execution logic shared by every
+// ndcli.run.* tool, split out from makeRunHandler so it can be exercised
+// directly in tests without a live authenticated Service (RequireAuth needs
+// a real *auth.Manager, which can't be faked from this package).
+func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payloadFn func(*runInput) map[string]interface{}, input *runInput) (*mcp.CallToolResult, error) {
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	opts := service.RunOpts{
+		Type:        taskType,
+		Devices:     input.Devices,
+		OUs:         input.OUs,
+		AllDevices:  input.Org,
+		ScheduledAt: input.At,
+		Schedule:    input.Schedule,
+	}
+	if payloadFn != nil {
+		opts.Payload = payloadFn(input)
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	// The confirm gate covers both immediate execution and schedule
+	// registration — planting a persistent recurring spec deserves the same
+	// preview as an immediate run.
+	if !input.Confirm {
+		scope := runScopeDescription(input)
+		action := fmt.Sprintf("run %s on", friendly)
+		if input.Schedule != "" {
+			action = fmt.Sprintf("register a %s spec on schedule %q for", taskType, input.Schedule)
+		}
+		return s.previewResult(action, scope)
+	}
+
+	if input.Schedule != "" {
+		spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", taskType, spec.Code, spec.ScheduleName))
+	}
+
+	result, err := s.svc.Run(apiCtx, org, opts)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
+	for _, t := range result.Tasks {
+		tasks = append(tasks, map[string]interface{}{
+			"task":        t.Task,
+			"device":      t.DeviceName,
+			"device_uuid": t.DeviceUUID,
+			"status":      t.Status,
+			"expires_at":  t.ExpiresAt,
+		})
+	}
+	summary := fmt.Sprintf("%d %s task(s) created", result.Total, taskType)
+	if result.ScheduledAt != "" {
+		summary = fmt.Sprintf("%d %s task(s) scheduled for %s", result.Total, taskType, result.ScheduledAt)
+	}
+	return s.successResult(map[string]interface{}{
+		"type":         result.Type,
+		"organization": result.Organization,
+		"scheduled_at": result.ScheduledAt,
+		"total":        result.Total,
+		"tasks":        tasks,
+	}, summary)
 }
 
 func runScopeDescription(in *runInput) string {

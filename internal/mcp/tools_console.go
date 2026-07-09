@@ -14,6 +14,25 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
+// maxConsoleConnectTimeoutSeconds bounds connect_timeout so the derived
+// time.Duration can never overflow int64 when multiplied by time.Second.
+const maxConsoleConnectTimeoutSeconds = 1800 // 30 minutes
+
+// resolveConnectTimeout converts a connect_timeout input (seconds) into a
+// bounded duration: non-positive values fall back to the 5-minute default,
+// and values above the max are clamped before multiplying by time.Second so
+// an absurdly large input can't overflow the resulting duration.
+func resolveConnectTimeout(seconds int) time.Duration {
+	switch {
+	case seconds <= 0:
+		return 5 * time.Minute
+	case seconds > maxConsoleConnectTimeoutSeconds:
+		return maxConsoleConnectTimeoutSeconds * time.Second
+	default:
+		return time.Duration(seconds) * time.Second
+	}
+}
+
 // registerConsoleTools registers the persistent device console MCP tools.
 //
 // These four tools implement the MCP-driven device console:
@@ -39,7 +58,7 @@ func (s *Server) registerConsoleTools() {
 			"properties": map[string]interface{}{
 				"organization":    organizationProperty(),
 				"device":          stringProperty("Device name to open a console session to"),
-				"connect_timeout": intProperty("Seconds to wait for the device to come online (default 300)", 300),
+				"connect_timeout": intProperty("Seconds to wait for the device to come online (default 300, max 1800)", 300),
 			},
 			"required": []string{"device"},
 		},
@@ -126,10 +145,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 		return s.errorResult(err)
 	}
 
-	connectTimeout := time.Duration(input.ConnectTimeout) * time.Second
-	if input.ConnectTimeout <= 0 {
-		connectTimeout = 5 * time.Minute
-	}
+	connectTimeout := resolveConnectTimeout(input.ConnectTimeout)
 
 	// Run the control-plane connect flow (POST + poll) to get the pathfinder session key.
 	// Use a slightly larger context timeout to allow the full poll window to complete.
@@ -264,6 +280,10 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func (s *Server) handleConsoleClose(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+
 	argsJSON, _ := json.Marshal(req.Params.Arguments)
 	input, err := parseInput[consoleCloseInput](argsJSON)
 	if err != nil {
@@ -290,6 +310,10 @@ func (s *Server) handleConsoleClose(ctx context.Context, req *mcp.CallToolReques
 }
 
 func (s *Server) handleConsoleList(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+
 	sessions := s.consoleSessions.List()
 
 	list := make([]map[string]interface{}, 0, len(sessions))
@@ -299,7 +323,7 @@ func (s *Server) handleConsoleList(ctx context.Context, req *mcp.CallToolRequest
 			"device":        sess.device,
 			"org":           sess.org,
 			"opened_at":     sess.openedAt.Format(time.RFC3339),
-			"last_activity": sess.lastActivity.Format(time.RFC3339),
+			"last_activity": sess.getLastActivity().Format(time.RFC3339),
 		})
 	}
 

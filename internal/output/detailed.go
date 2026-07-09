@@ -64,11 +64,17 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, d.Name)
 	// padding = width - 1(│) - 2(spaces) - name_len - 1(space) - 1(│)
 	padding := width - 5 - len(d.Name)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	if d.UUID != "" {
 		ColorDim.Fprintf(f.Writer, "%s  UUID: %s", BoxVertical, d.UUID)
 		// "UUID: " is 6 chars, so: width - 1 - 2 - 6 - uuid_len - 1 - 1 = width - 11 - uuid_len
 		padding = width - 11 - len(d.UUID)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	}
 	fmt.Fprintln(f.Writer, box.BottomLine())
@@ -76,7 +82,11 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 
 	// Status row
 	fmt.Fprintf(f.Writer, "  %-12s %s", "Status", StatusIndicator(d.Status)+" "+ColoredStatus(d.Status))
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(d.Status)))
+	statusPad := 10 - len(d.Status)
+	if statusPad < 0 {
+		statusPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", statusPad))
 	autoSyncStr := "No"
 	if d.AutoSync {
 		autoSyncStr = "Yes"
@@ -162,9 +172,15 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Task"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, task.ID)
 	padding := width - 5 - len(task.ID)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	ColorDim.Fprintf(f.Writer, "%s  %s", BoxVertical, task.Type)
 	padding = width - 5 - len(task.Type)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -241,6 +257,9 @@ func (f *DetailedFormatter) FormatRunResult(result *models.RunResult) error {
 		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Device"))
 		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, t.DeviceName)
 		padding := width - 5 - len(t.DeviceName)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 		fmt.Fprintln(f.Writer, box.BottomLine())
 		fmt.Fprintln(f.Writer)
@@ -280,6 +299,9 @@ func (f *DetailedFormatter) formatOrganizationRich(o *models.Organization) {
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, o.Name)
 	// padding = width - 1(│) - 2(spaces) - name_len - 1(space) - 1(│)
 	padding := width - 5 - len(o.Name)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -287,7 +309,11 @@ func (f *DetailedFormatter) formatOrganizationRich(o *models.Organization) {
 	// Status row
 	role := o.GetRole()
 	fmt.Fprintf(f.Writer, "  %-12s %s", "Status", ColoredStatus(o.Status))
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 14-len(o.Status)))
+	statusPad := 14 - len(o.Status)
+	if statusPad < 0 {
+		statusPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", statusPad))
 	fmt.Fprintf(f.Writer, "%-12s %s\n", "Your Role", ColoredRole(role))
 
 	// Default OU
@@ -447,6 +473,9 @@ func (f *DetailedFormatter) FormatTemplate(template *models.Template) error {
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Template"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, template.Name)
 	padding := width - 5 - len(template.Name)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -644,6 +673,9 @@ func (f *DetailedFormatter) FormatAuthMe(authMe *models.AuthMe) error {
 	// Email as main identifier
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, authMe.Email)
 	padding := width - 5 - len(authMe.Email)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 
 	// Name if available
@@ -651,6 +683,9 @@ func (f *DetailedFormatter) FormatAuthMe(authMe *models.AuthMe) error {
 	if name != "" {
 		ColorDim.Fprintf(f.Writer, "%s  %s", BoxVertical, name)
 		padding = width - 5 - len(name)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	}
 	fmt.Fprintln(f.Writer, box.BottomLine())
@@ -723,6 +758,9 @@ func (f *DetailedFormatter) FormatSyncStatus(items []models.SyncStatusItem, tota
 		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Device"))
 		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, item.DeviceName)
 		padding := width - 5 - len(item.DeviceName)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 		fmt.Fprintln(f.Writer, box.BottomLine())
 		fmt.Fprintln(f.Writer)
@@ -983,6 +1021,9 @@ func (f *DetailedFormatter) FormatBackupConfig(config *models.BackupConfig) erro
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Backup Configuration"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, config.Organization)
 	padding := width - 5 - len(config.Organization)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1044,6 +1085,9 @@ func (f *DetailedFormatter) FormatDeviceBackupStatuses(statuses []models.DeviceB
 		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Device Backup"))
 		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, s.DeviceName)
 		padding := width - 5 - len(s.DeviceName)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 		fmt.Fprintln(f.Writer, box.BottomLine())
 		fmt.Fprintln(f.Writer)
@@ -1077,9 +1121,15 @@ func (f *DetailedFormatter) FormatDeviceBackupStatus(status *models.DeviceBackup
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Device Backup Status"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, status.DeviceName)
 	padding := width - 5 - len(status.DeviceName)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	ColorDim.Fprintf(f.Writer, "%s  %s", BoxVertical, status.Organization)
 	padding = width - 5 - len(status.Organization)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1153,6 +1203,9 @@ func (f *DetailedFormatter) FormatOrgQuota(quota *models.OrgQuota) error {
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Organization Quota"))
 	titleLine := fmt.Sprintf("%s  %s", BoxVertical, quota.Organization)
 	padding := width - 5 - len(quota.Organization)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s%s %s\n", titleLine, strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1197,9 +1250,15 @@ func (f *DetailedFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("VPN Network"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, network.Name)
 	padding := width - 5 - len(network.Name)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	ColorDim.Fprintf(f.Writer, "%s  CIDR: %s", BoxVertical, network.OverlayCIDRv4)
 	padding = width - 11 - len(network.OverlayCIDRv4)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1213,7 +1272,11 @@ func (f *DetailedFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 		autoFW = "Yes"
 	}
 	fmt.Fprintf(f.Writer, "  %-14s %s", "Auto-Hubs", autoHubs)
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(autoHubs)))
+	hubsPad := 10 - len(autoHubs)
+	if hubsPad < 0 {
+		hubsPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", hubsPad))
 	fmt.Fprintf(f.Writer, "%-14s %d\n", "Listen Port", network.ListenPortDefault)
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Auto-FW Rules", autoFW)
 
@@ -1226,7 +1289,11 @@ func (f *DetailedFormatter) FormatVpnNetwork(network *models.VpnNetwork) error {
 		keepalive = fmt.Sprintf("%d", *network.KeepaliveDefault)
 	}
 	fmt.Fprintf(f.Writer, "  %-14s %s", "MTU", mtu)
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(mtu)))
+	mtuPad := 10 - len(mtu)
+	if mtuPad < 0 {
+		mtuPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", mtuPad))
 	fmt.Fprintf(f.Writer, "%-14s %s\n", "Keepalive", keepalive)
 
 	if network.Organization != "" {
@@ -1290,10 +1357,16 @@ func (f *DetailedFormatter) FormatVpnMember(member *models.VpnMember) error {
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("VPN Member"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, member.DeviceName)
 	padding := width - 5 - len(member.DeviceName)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	ColorDim.Fprintf(f.Writer, "%s  %s / %s", BoxVertical, member.VpnNetwork, member.Role)
 	infoStr := member.VpnNetwork + " / " + member.Role
 	padding = width - 5 - len(infoStr)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1303,7 +1376,11 @@ func (f *DetailedFormatter) FormatVpnMember(member *models.VpnMember) error {
 		enabled = "No"
 	}
 	fmt.Fprintf(f.Writer, "  %-14s %s", "Enabled", enabled)
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(enabled)))
+	enabledPad := 10 - len(enabled)
+	if enabledPad < 0 {
+		enabledPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", enabledPad))
 	fmt.Fprintf(f.Writer, "%-14s %s\n", "Overlay IP", member.OverlayIPv4)
 
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Public Key", member.WgPublicKey)
@@ -1371,9 +1448,15 @@ func (f *DetailedFormatter) FormatVpnLink(link *models.VpnLink) error {
 	title := link.DeviceAName + " <-> " + link.DeviceBName
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, title)
 	padding := width - 5 - len(title)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	ColorDim.Fprintf(f.Writer, "%s  %s", BoxVertical, link.VpnNetwork)
 	padding = width - 5 - len(link.VpnNetwork)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1387,7 +1470,11 @@ func (f *DetailedFormatter) FormatVpnLink(link *models.VpnLink) error {
 		psk = "Yes"
 	}
 	fmt.Fprintf(f.Writer, "  %-14s %s", "Enabled", enabled)
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(enabled)))
+	enabledPad := 10 - len(enabled)
+	if enabledPad < 0 {
+		enabledPad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", enabledPad))
 	fmt.Fprintf(f.Writer, "%-14s %s\n", "PSK", psk)
 	fmt.Fprintln(f.Writer)
 
@@ -1427,10 +1514,16 @@ func (f *DetailedFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) erro
 	fmt.Fprintln(f.Writer, box.TopLineWithTitle("VPN Prefix"))
 	ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, prefix.VariableName)
 	padding := width - 5 - len(prefix.VariableName)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	info := prefix.DeviceName + " @ " + prefix.VpnNetwork
 	ColorDim.Fprintf(f.Writer, "%s  %s", BoxVertical, info)
 	padding = width - 5 - len(info)
+	if padding < 0 {
+		padding = 0
+	}
 	fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 	fmt.Fprintln(f.Writer, box.BottomLine())
 	fmt.Fprintln(f.Writer)
@@ -1513,7 +1606,11 @@ func (f *DetailedFormatter) FormatVpnConnection(connection *models.EffectiveConn
 
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Type", typeVal)
 	fmt.Fprintf(f.Writer, "  %-14s %s", "Active", active)
-	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", 10-len(active)))
+	activePad := 10 - len(active)
+	if activePad < 0 {
+		activePad = 0
+	}
+	fmt.Fprintf(f.Writer, "%s", strings.Repeat(" ", activePad))
 	fmt.Fprintf(f.Writer, "%-14s %s\n", "PSK", psk)
 	fmt.Fprintln(f.Writer)
 
@@ -1540,6 +1637,9 @@ func (f *DetailedFormatter) FormatPersonalAccessTokens(tokens []models.PersonalA
 		fmt.Fprintln(f.Writer, box.TopLineWithTitle("Personal Access Token"))
 		ColorHeader.Fprintf(f.Writer, "%s  %s", BoxVertical, t.Name)
 		padding := width - 5 - len(t.Name)
+		if padding < 0 {
+			padding = 0
+		}
 		fmt.Fprintf(f.Writer, "%s %s\n", strings.Repeat(" ", padding), BoxVertical)
 		fmt.Fprintln(f.Writer, box.BottomLine())
 		fmt.Fprintln(f.Writer)

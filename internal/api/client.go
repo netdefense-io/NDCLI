@@ -9,10 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 	"github.com/netdefense-io/NDCLI/internal/update"
 )
 
@@ -20,6 +22,47 @@ import (
 type AuthProvider interface {
 	GetAccessToken() (string, error)
 	ForceRefresh() error
+}
+
+// maxResponseBodyBytes caps how much of an HTTP response body is read/decoded.
+// A var (not const) so tests can lower it to exercise the cap.
+var maxResponseBodyBytes int64 = 32 << 20 // 32 MiB
+
+// capBody wraps r so reads never exceed maxResponseBodyBytes, protecting
+// against a malicious or misbehaving server streaming an oversized body.
+func capBody(r io.Reader) io.Reader {
+	return io.LimitReader(r, maxResponseBodyBytes)
+}
+
+// DecodeJSON decodes r into target, bounding the read to
+// maxResponseBodyBytes and then scrubbing every string reachable from
+// target via sanitize.Struct. It is the shared cap+sanitize primitive
+// behind ParseResponse/ParseResponseWithStatus and ParseError, exported so
+// callers that must decode a response body without going through those
+// entry points still get the same two protections — a same-shape 2xx/4xx
+// body decoded directly by the caller (SyncApply's 200/207/400 envelope),
+// a helper decoding outside the *Client type (device name resolution), or
+// an entirely separate HTTP client talking to a different trust boundary
+// (the OAuth2 provider's calls to Auth0). Any of those, left unrouted
+// through this helper, would let a malicious/misbehaving server stream an
+// unbounded body or smuggle terminal escape sequences into decoded
+// strings that are later printed verbatim.
+func DecodeJSON(r io.Reader, target interface{}) error {
+	if err := json.NewDecoder(capBody(r)).Decode(target); err != nil {
+		return err
+	}
+	sanitize.Struct(reflect.ValueOf(target))
+	return nil
+}
+
+// ReadBody reads r fully, bounded to maxResponseBodyBytes. It is the raw-
+// bytes counterpart to DecodeJSON for callers that need the body itself
+// rather than (or in addition to) a decoded struct — e.g. embedding a
+// snippet of a non-JSON or error-shaped body in a message (run the result
+// through sanitize.String first — ReadBody itself does not sanitize), or
+// trying more than one JSON shape against the same bytes.
+func ReadBody(r io.Reader) ([]byte, error) {
+	return io.ReadAll(capBody(r))
 }
 
 // Client is the API client for NDManager
@@ -195,7 +238,10 @@ func (c *Client) Delete(ctx context.Context, path string) (*http.Response, error
 	return c.Request(ctx, http.MethodDelete, path, nil)
 }
 
-// ParseResponse parses a JSON response into the given target
+// ParseResponse parses a JSON response into the given target. Every
+// string reachable from target is scrubbed of terminal control bytes
+// (sanitize.Struct) so server-supplied names/messages/etc. can never
+// inject ANSI/OSC escape sequences into the operator's terminal.
 func ParseResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
@@ -207,10 +253,11 @@ func ParseResponse(resp *http.Response, target interface{}) error {
 		return nil
 	}
 
-	return json.NewDecoder(resp.Body).Decode(target)
+	return DecodeJSON(resp.Body, target)
 }
 
-// ParseResponseWithStatus parses a JSON response and also returns the status code
+// ParseResponseWithStatus parses a JSON response and also returns the
+// status code. See ParseResponse for the sanitize.Struct pass.
 func ParseResponseWithStatus(resp *http.Response, target interface{}) (int, error) {
 	defer resp.Body.Close()
 
@@ -222,5 +269,8 @@ func ParseResponseWithStatus(resp *http.Response, target interface{}) (int, erro
 		return resp.StatusCode, nil
 	}
 
-	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(target)
+	if err := DecodeJSON(resp.Body, target); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
 }

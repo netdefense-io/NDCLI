@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth/oauth2"
+	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
@@ -40,6 +42,9 @@ func (m *Manager) Login(ctx context.Context, scopes string, forceNew bool) (*mod
 	cliConfig, err := api.FetchCLIConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch auth configuration from server: %w", err)
+	}
+	if err := validateOAuth2Domain(cliConfig.OAuth2.Domain); err != nil {
+		return nil, err
 	}
 
 	// Create a new client with the fetched OAuth2 config
@@ -98,13 +103,32 @@ func (m *Manager) GetStorageName() string {
 	return m.client.GetStorageName()
 }
 
-// Global manager instance
-var globalManager *Manager
-
-// GetManager returns the global authentication manager
-func GetManager() *Manager {
-	if globalManager == nil {
-		globalManager = NewManager()
+// validateOAuth2Domain rejects an OAuth2 domain returned by NDManager that
+// doesn't match the locally configured/default identity provider. NDManager
+// is untrusted for this purpose: a compromised or rogue control plane could
+// otherwise redirect the device-code login flow to a phishing domain.
+func validateOAuth2Domain(serverDomain string) error {
+	expected := config.Get().OAuth2.Domain
+	if expected == "" {
+		expected = config.DefaultOAuth2Domain
 	}
+	if serverDomain != expected {
+		return fmt.Errorf("refusing to authenticate: NDManager returned OAuth2 domain %q, expected %q — this may indicate a compromised control plane; if this is an intentional self-hosted deployment, set oauth2.domain in config.yaml to match", serverDomain, expected)
+	}
+	return nil
+}
+
+// Global manager instance
+var (
+	globalManager     *Manager
+	globalManagerOnce sync.Once
+)
+
+// GetManager returns the global authentication manager, lazily initialized
+// exactly once even if called from multiple goroutines.
+func GetManager() *Manager {
+	globalManagerOnce.Do(func() {
+		globalManager = NewManager()
+	})
 	return globalManager
 }

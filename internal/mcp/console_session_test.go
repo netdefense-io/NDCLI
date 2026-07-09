@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -179,10 +180,59 @@ func TestNewConsoleSessionID(t *testing.T) {
 // the lastActivity timestamp.
 func TestConsoleSession_UpdateActivity(t *testing.T) {
 	sess := makeStubSession("s", "org", "dev")
-	before := sess.lastActivity
+	before := sess.getLastActivity()
 	time.Sleep(time.Millisecond)
 	sess.updateActivity()
-	if !sess.lastActivity.After(before) {
+	if !sess.getLastActivity().After(before) {
 		t.Error("lastActivity did not advance after updateActivity")
 	}
+}
+
+// TestConsoleSession_ConcurrentActivityAccess exercises the data race
+// between exec-path activity updates and the idle reaper's scan: one
+// goroutine repeatedly calls updateActivity under sess.mu (as
+// handleConsoleExec does), a second repeatedly calls reapIdle (which reads
+// lastActivity under the manager's map lock — a different lock entirely),
+// and a third mirrors handleConsoleList's unlocked read via
+// getLastActivity() after List() has already released its lock. Run under
+// `go test -race`: pre-fix (lastActivity read/written under two independent
+// locks, with no lock at all on the console_list site) this reliably trips
+// the race detector; post-fix (actMu-guarded accessor) it is race-clean.
+func TestConsoleSession_ConcurrentActivityAccess(t *testing.T) {
+	m := newConsoleSessionManager()
+	defer m.CloseAll()
+
+	sess := makeStubSession("race-session", "acme", "fw-race")
+	m.Add(sess)
+
+	const iterations = 1000
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			sess.mu.Lock()
+			sess.updateActivity()
+			sess.mu.Unlock()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			m.reapIdle()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			for _, s := range m.List() {
+				_ = s.getLastActivity()
+			}
+		}
+	}()
+
+	wg.Wait()
 }

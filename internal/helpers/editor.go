@@ -30,7 +30,7 @@ func EditContent(content, extension string) (string, error) {
 	}
 
 	// Resolve the editor to an absolute path to validate it exists
-	editorPath, err := resolveEditor(editor)
+	editorPath, editorArgs, err := resolveEditor(editor)
 	if err != nil {
 		return "", err
 	}
@@ -55,7 +55,7 @@ func EditContent(content, extension string) (string, error) {
 	tmpFile.Close()
 
 	// Open editor
-	cmd := exec.Command(editorPath, tmpPath)
+	cmd := exec.Command(editorPath, append(editorArgs, tmpPath)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -87,35 +87,38 @@ func EditContent(content, extension string) (string, error) {
 }
 
 // resolveEditor validates the editor command and resolves it to an absolute path.
-// It supports editors specified with arguments (e.g., "code --wait").
-func resolveEditor(editor string) (string, error) {
+// It supports editors specified with arguments (e.g., "code --wait"), returning
+// the trailing arguments alongside the resolved binary so callers can pass them
+// through to the subprocess.
+func resolveEditor(editor string) (string, []string, error) {
 	// Handle editors with arguments (e.g., "code --wait")
 	parts := strings.Fields(editor)
 	if len(parts) == 0 {
-		return "", fmt.Errorf("empty editor command")
+		return "", nil, fmt.Errorf("empty editor command")
 	}
 
 	binary := parts[0]
+	args := parts[1:]
 
 	// If already an absolute path, verify it exists and is executable
 	if filepath.IsAbs(binary) {
 		info, err := os.Stat(binary)
 		if err != nil {
-			return "", fmt.Errorf("editor %q not found: %w", binary, err)
+			return "", nil, fmt.Errorf("editor %q not found: %w", binary, err)
 		}
 		if info.IsDir() {
-			return "", fmt.Errorf("editor %q is a directory, not an executable", binary)
+			return "", nil, fmt.Errorf("editor %q is a directory, not an executable", binary)
 		}
-		return binary, nil
+		return binary, args, nil
 	}
 
 	// Resolve via PATH lookup
 	resolved, err := exec.LookPath(binary)
 	if err != nil {
-		return "", fmt.Errorf("editor %q not found in PATH: %w", binary, err)
+		return "", nil, fmt.Errorf("editor %q not found in PATH: %w", binary, err)
 	}
 
-	return resolved, nil
+	return resolved, args, nil
 }
 
 // ensureTmpDir creates a secure temporary directory under the NDCLI config directory

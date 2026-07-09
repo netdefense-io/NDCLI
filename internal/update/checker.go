@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 	"github.com/netdefense-io/NDCLI/internal/version"
 
 	"golang.org/x/term"
@@ -15,15 +16,15 @@ import (
 
 // Header names for version information from NDManager
 const (
-	HeaderMinVersion       = "X-NDCLI-Min-Version"
-	HeaderLatestVersion    = "X-NDCLI-Latest-Version"
-	HeaderDeprecationDate  = "X-NDCLI-Deprecation-Date"
+	HeaderMinVersion      = "X-NDCLI-Min-Version"
+	HeaderLatestVersion   = "X-NDCLI-Latest-Version"
+	HeaderDeprecationDate = "X-NDCLI-Deprecation-Date"
 )
 
 // Environment variables
 const (
-	EnvNoUpdateCheck     = "NDCLI_NO_UPDATE_CHECK"
-	EnvIgnoreMinVersion  = "NDCLI_IGNORE_MIN_VERSION"
+	EnvNoUpdateCheck    = "NDCLI_NO_UPDATE_CHECK"
+	EnvIgnoreMinVersion = "NDCLI_IGNORE_MIN_VERSION"
 )
 
 // CI environment variables to detect
@@ -44,13 +45,13 @@ var ciEnvVars = []string{
 
 // VersionInfo contains the result of a version check
 type VersionInfo struct {
-	CurrentVersion   string
-	MinVersion       string
-	LatestVersion    string
-	DeprecationDate  string
-	IsCompatible     bool
-	HasUpdate        bool
-	IsDeprecated     bool
+	CurrentVersion  string
+	MinVersion      string
+	LatestVersion   string
+	DeprecationDate string
+	IsCompatible    bool
+	HasUpdate       bool
+	IsDeprecated    bool
 }
 
 // Checker handles version checking logic
@@ -106,15 +107,18 @@ func ShouldCheck() bool {
 }
 
 // ProcessHeaders extracts version information from API response headers
-// and updates the cached state
+// and updates the cached state. These headers never go through the JSON
+// body decode path (internal/api's sanitize.Struct pass), so they're
+// scrubbed of terminal control bytes here before being cached/rendered
+// in the update banner.
 func (c *Checker) ProcessHeaders(headers http.Header) {
 	if c.disabled {
 		return
 	}
 
-	minVersion := headers.Get(HeaderMinVersion)
-	latestVersion := headers.Get(HeaderLatestVersion)
-	deprecationDate := headers.Get(HeaderDeprecationDate)
+	minVersion := sanitize.String(headers.Get(HeaderMinVersion))
+	latestVersion := sanitize.String(headers.Get(HeaderLatestVersion))
+	deprecationDate := sanitize.String(headers.Get(HeaderDeprecationDate))
 
 	// Only update state if we received version headers
 	if minVersion != "" || latestVersion != "" {

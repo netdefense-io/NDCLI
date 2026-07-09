@@ -42,6 +42,12 @@ type execResponse struct {
 	Truncated bool   `json:"truncated"` // absent when false
 }
 
+// maxExecOutputBytes caps combined stdout+stderr accumulated by a single
+// Exec() call before the result frame arrives, guarding against a hostile
+// relay/agent that never sends result. var (not const) so tests can lower
+// it without sending real megabytes of data.
+var maxExecOutputBytes = 64 * 1024 * 1024
+
 // frameMsg is a decoded frame delivered from the persistent reader goroutine.
 type frameMsg struct {
 	resp execResponse
@@ -210,6 +216,8 @@ func (h *ExecHandle) readerLoop() {
 //   - omitempty on agent side: treat missing fields as zero values.
 //   - exit_code 124 = timeout; 128+signal = signal kill; -1 = pre-exec failure.
 //   - Malformed request: agent replies with id:"" result (exit_code -1).
+//   - Combined stdout+stderr accumulated before the result frame is capped at
+//     maxExecOutputBytes; exceeding it aborts with an error.
 //
 // Exec must be called serially (never concurrently for the same session). The
 // MCP layer enforces this with consoleSession.mu.
@@ -282,12 +290,18 @@ func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Dura
 				if decErr != nil {
 					return "", "", -1, false, fmt.Errorf("base64 decode stdout: %w", decErr)
 				}
+				if len(stdoutBuf)+len(stderrBuf)+len(decoded) > maxExecOutputBytes {
+					return "", "", -1, false, fmt.Errorf("exec output exceeded %d byte cap before result frame", maxExecOutputBytes)
+				}
 				stdoutBuf = append(stdoutBuf, decoded...)
 
 			case "stderr":
 				decoded, decErr := base64.StdEncoding.DecodeString(resp.Data)
 				if decErr != nil {
 					return "", "", -1, false, fmt.Errorf("base64 decode stderr: %w", decErr)
+				}
+				if len(stdoutBuf)+len(stderrBuf)+len(decoded) > maxExecOutputBytes {
+					return "", "", -1, false, fmt.Errorf("exec output exceeded %d byte cap before result frame", maxExecOutputBytes)
 				}
 				stderrBuf = append(stderrBuf, decoded...)
 

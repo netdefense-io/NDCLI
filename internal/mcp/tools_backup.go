@@ -11,37 +11,28 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// NOTE: Encryption-key tools are intentionally NOT registered here. The
-// underlying service methods (BackupEncryptionKeySet / Remove) exist for
-// the CLI but exposing them via MCP would let an LLM-driven flow plant or
-// rotate per-device backup keys, which is exactly the kind of secret
-// material we don't want in the LLM tool surface.
+// NOTE: Encryption-key tools, org backup bootstrap (config_create), and the
+// secret fields of config_update (s3_access_key / encryption_key) are
+// intentionally NOT exposed via MCP. The underlying service methods
+// (BackupEncryptionKeySet/Remove, BackupConfigCreate) exist for the CLI, but
+// letting an LLM-driven flow plant or rotate S3/encryption secrets is
+// exactly the kind of secret material we don't want in the LLM tool
+// surface. Initial provisioning and secret rotation are CLI-only
+// (`ndcli backup config set`); config_update below covers only the
+// non-secret S3 endpoint/bucket/key-ID/folder fields.
 
 type backupOrgInput struct {
 	Organization string `json:"organization,omitempty"`
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
-type backupConfigCreateInput struct {
-	Organization  string `json:"organization,omitempty"`
-	S3Endpoint    string `json:"s3_endpoint"`
-	S3Bucket      string `json:"s3_bucket"`
-	S3KeyID       string `json:"s3_key_id"`
-	S3AccessKey   string `json:"s3_access_key"`
-	S3Folder      string `json:"s3_folder,omitempty"`
-	EncryptionKey string `json:"encryption_key"`
-	Confirm       bool   `json:"confirm,omitempty"`
-}
-
 type backupConfigUpdateInput struct {
-	Organization  string `json:"organization,omitempty"`
-	S3Endpoint    string `json:"s3_endpoint,omitempty"`
-	S3Bucket      string `json:"s3_bucket,omitempty"`
-	S3KeyID       string `json:"s3_key_id,omitempty"`
-	S3AccessKey   string `json:"s3_access_key,omitempty"`
-	S3Folder      string `json:"s3_folder,omitempty"`
-	EncryptionKey string `json:"encryption_key,omitempty"`
-	Confirm       bool   `json:"confirm,omitempty"`
+	Organization string `json:"organization,omitempty"`
+	S3Endpoint   string `json:"s3_endpoint,omitempty"`
+	S3Bucket     string `json:"s3_bucket,omitempty"`
+	S3KeyID      string `json:"s3_key_id,omitempty"`
+	S3Folder     string `json:"s3_folder,omitempty"`
+	Confirm      bool   `json:"confirm,omitempty"`
 }
 
 // backupConfigSetScheduleInput is the input for the dedicated schedule
@@ -80,38 +71,17 @@ func (s *Server) registerBackupTools() {
 	}, s.handleBackupConfigShow)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.backup.config_create",
-		Description: "Create the org's backup configuration. Carries S3 secrets and the org-default backup encryption key — only invoke this when the user has explicitly authorised exposing those values to MCP. Requires confirm=true. Attach a schedule separately with ndcli.backup.config_set_schedule.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"organization":   organizationProperty(),
-				"s3_endpoint":    stringProperty("S3 endpoint URL"),
-				"s3_bucket":      stringProperty("S3 bucket name"),
-				"s3_key_id":      stringProperty("S3 access key ID"),
-				"s3_access_key":  stringProperty("S3 secret access key (sensitive)"),
-				"s3_folder":      stringProperty("Optional folder prefix within the bucket"),
-				"encryption_key": stringProperty("Org-default backup encryption key (sensitive)"),
-				"confirm":        confirmProperty(),
-			},
-			"required": []string{"s3_endpoint", "s3_bucket", "s3_key_id", "s3_access_key", "encryption_key"},
-		},
-	}, s.handleBackupConfigCreate)
-
-	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.backup.config_update",
-		Description: "Update the org's S3/key backup configuration. At least one field must be set. Requires confirm=true. To change the attached schedule use ndcli.backup.config_set_schedule.",
+		Description: "Update the org's S3 backup configuration (endpoint/bucket/key ID/folder). At least one field must be set. Requires confirm=true. Rotating the S3 secret key or the org-default encryption key is CLI-only (`ndcli backup config set`) — this tool never carries secret material. To change the attached schedule use ndcli.backup.config_set_schedule.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization":   organizationProperty(),
-				"s3_endpoint":    stringProperty("New S3 endpoint URL"),
-				"s3_bucket":      stringProperty("New S3 bucket"),
-				"s3_key_id":      stringProperty("New S3 access key ID"),
-				"s3_access_key":  stringProperty("New S3 secret access key (sensitive)"),
-				"s3_folder":      stringProperty("New folder prefix"),
-				"encryption_key": stringProperty("New org-default encryption key (sensitive)"),
-				"confirm":        confirmProperty(),
+				"organization": organizationProperty(),
+				"s3_endpoint":  stringProperty("New S3 endpoint URL"),
+				"s3_bucket":    stringProperty("New S3 bucket"),
+				"s3_key_id":    stringProperty("New S3 access key ID"),
+				"s3_folder":    stringProperty("New folder prefix"),
+				"confirm":      confirmProperty(),
 			},
 		},
 	}, s.handleBackupConfigUpdate)
@@ -255,42 +225,6 @@ func (s *Server) handleBackupConfigShow(ctx context.Context, req *mcp.CallToolRe
 	}, "")
 }
 
-func (s *Server) handleBackupConfigCreate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if err := s.svc.RequireAuth(); err != nil {
-		return s.errorResult(err)
-	}
-	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[backupConfigCreateInput](argsJSON)
-	if err != nil {
-		return s.errorResult(err)
-	}
-	org, err := s.svc.ResolveOrg(input.Organization)
-	if err != nil {
-		return s.errorResult(err)
-	}
-	if !input.Confirm {
-		return s.previewResult("create backup configuration (sensitive secrets will be sent)", org)
-	}
-	apiCtx, cancel := contextWithTimeout()
-	defer cancel()
-
-	cfg, err := s.svc.BackupConfigCreate(apiCtx, org, service.BackupConfigCreateOpts{
-		S3Endpoint:    input.S3Endpoint,
-		S3Bucket:      input.S3Bucket,
-		S3KeyID:       input.S3KeyID,
-		S3AccessKey:   input.S3AccessKey,
-		S3Folder:      input.S3Folder,
-		EncryptionKey: input.EncryptionKey,
-	})
-	if err != nil {
-		return s.errorResult(err)
-	}
-	return s.successResult(map[string]interface{}{
-		"config": backupConfigSummary(cfg),
-		"action": "created",
-	}, "Backup configuration created")
-}
-
 func (s *Server) handleBackupConfigUpdate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err := s.svc.RequireAuth(); err != nil {
 		return s.errorResult(err)
@@ -311,12 +245,10 @@ func (s *Server) handleBackupConfigUpdate(ctx context.Context, req *mcp.CallTool
 	defer cancel()
 
 	cfg, err := s.svc.BackupConfigUpdate(apiCtx, org, service.BackupConfigUpdateOpts{
-		S3Endpoint:    input.S3Endpoint,
-		S3Bucket:      input.S3Bucket,
-		S3KeyID:       input.S3KeyID,
-		S3AccessKey:   input.S3AccessKey,
-		S3Folder:      input.S3Folder,
-		EncryptionKey: input.EncryptionKey,
+		S3Endpoint: input.S3Endpoint,
+		S3Bucket:   input.S3Bucket,
+		S3KeyID:    input.S3KeyID,
+		S3Folder:   input.S3Folder,
 	})
 	if err != nil {
 		return s.errorResult(err)

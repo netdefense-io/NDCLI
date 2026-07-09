@@ -9,34 +9,40 @@ import (
 )
 
 func TestResolveEditorWithAbsolutePath(t *testing.T) {
-	resolved, err := resolveEditor("/bin/sh")
+	resolved, args, err := resolveEditor("/bin/sh")
 	if err != nil {
 		t.Fatalf("resolveEditor(/bin/sh) failed: %v", err)
 	}
 	if resolved != "/bin/sh" {
 		t.Errorf("expected /bin/sh, got %q", resolved)
 	}
+	if len(args) != 0 {
+		t.Errorf("expected no args, got %v", args)
+	}
 }
 
 func TestResolveEditorWithPathLookup(t *testing.T) {
-	resolved, err := resolveEditor("sh")
+	resolved, args, err := resolveEditor("sh")
 	if err != nil {
 		t.Fatalf("resolveEditor(sh) failed: %v", err)
 	}
 	if !filepath.IsAbs(resolved) {
 		t.Errorf("expected absolute path, got %q", resolved)
 	}
+	if len(args) != 0 {
+		t.Errorf("expected no args, got %v", args)
+	}
 }
 
 func TestResolveEditorRejectsNonexistent(t *testing.T) {
-	_, err := resolveEditor("nonexistent-editor-binary-xyz")
+	_, _, err := resolveEditor("nonexistent-editor-binary-xyz")
 	if err == nil {
 		t.Error("expected error for nonexistent editor, got nil")
 	}
 }
 
 func TestResolveEditorRejectsNonexistentAbsolutePath(t *testing.T) {
-	_, err := resolveEditor("/nonexistent/path/to/editor")
+	_, _, err := resolveEditor("/nonexistent/path/to/editor")
 	if err == nil {
 		t.Error("expected error for nonexistent absolute path editor, got nil")
 	}
@@ -44,26 +50,29 @@ func TestResolveEditorRejectsNonexistentAbsolutePath(t *testing.T) {
 
 func TestResolveEditorRejectsDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, err := resolveEditor(tmpDir)
+	_, _, err := resolveEditor(tmpDir)
 	if err == nil {
 		t.Error("expected error when editor is a directory, got nil")
 	}
 }
 
 func TestResolveEditorRejectsEmptyString(t *testing.T) {
-	_, err := resolveEditor("")
+	_, _, err := resolveEditor("")
 	if err == nil {
 		t.Error("expected error for empty editor string, got nil")
 	}
 }
 
 func TestResolveEditorHandlesEditorWithArgs(t *testing.T) {
-	resolved, err := resolveEditor("sh -c")
+	resolved, args, err := resolveEditor("sh -c")
 	if err != nil {
 		t.Fatalf("resolveEditor('sh -c') failed: %v", err)
 	}
 	if !filepath.IsAbs(resolved) {
 		t.Errorf("expected absolute path, got %q", resolved)
+	}
+	if len(args) != 1 || args[0] != "-c" {
+		t.Errorf("expected args [-c], got %v", args)
 	}
 }
 
@@ -147,6 +156,37 @@ func TestEditContentPreservesContent(t *testing.T) {
 	// Content should be unchanged since 'true' doesn't modify the file
 	if result != "hello world" {
 		t.Errorf("expected 'hello world', got %q", result)
+	}
+}
+
+func TestEditContentPassesEditorArgsToSubprocess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Script writes its first argument to a capture file so the test can
+	// verify what argv EditContent actually invoked it with.
+	captureFile := filepath.Join(tmpDir, "captured.txt")
+	scriptPath := filepath.Join(tmpDir, "capture-arg-editor.sh")
+	script := `#!/bin/sh
+echo "$1" > "` + captureFile + `"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create editor script: %v", err)
+	}
+
+	origEditor := os.Getenv("EDITOR")
+	os.Setenv("EDITOR", scriptPath+" --marker")
+	defer os.Setenv("EDITOR", origEditor)
+
+	if _, err := EditContent("content", ".txt"); err != nil {
+		t.Fatalf("EditContent failed: %v", err)
+	}
+
+	captured, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("failed to read capture file: %v", err)
+	}
+	if got := strings.TrimSpace(string(captured)); got != "--marker" {
+		t.Errorf("expected editor arg %q to reach the subprocess, got %q", "--marker", got)
 	}
 }
 

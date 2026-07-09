@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,48 @@ func TestProcessHeaders(t *testing.T) {
 	}
 	if state.GetLatestVersion() != "1.1.0" {
 		t.Errorf("LatestVersion = %q, want %q", state.GetLatestVersion(), "1.1.0")
+	}
+}
+
+// TestProcessHeaders_StripsEscapeSequences verifies that version headers
+// containing terminal escape sequences are sanitized before being cached
+// in state — these headers are attacker-controlled by the same NDManager
+// the CLI trusts, and they render unsanitized into a banner shown on
+// every subsequent invocation, bypassing the JSON-body sanitize pass in
+// internal/api entirely.
+func TestProcessHeaders_StripsEscapeSequences(t *testing.T) {
+	tmpDir := t.TempDir()
+	origXDGConfig := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	defer os.Setenv("XDG_CONFIG_HOME", origXDGConfig)
+
+	os.MkdirAll(filepath.Join(tmpDir, "ndcli"), 0700)
+	ResetState()
+	ResetChecker()
+
+	checker := &Checker{
+		currentVersion: "1.0.0",
+		state:          GetState(),
+		disabled:       false,
+	}
+
+	headers := http.Header{}
+	headers.Set(HeaderMinVersion, "0.9.0\x1b[31m")
+	headers.Set(HeaderLatestVersion, "\x1b]0;pwned\x071.1.0")
+	headers.Set(HeaderDeprecationDate, "2025-01-01\x1b[0m")
+
+	checker.ProcessHeaders(headers)
+	time.Sleep(50 * time.Millisecond)
+
+	state := GetState()
+	if strings.ContainsRune(state.GetMinVersion(), '\x1b') {
+		t.Errorf("MinVersion still contains ESC byte: %q", state.GetMinVersion())
+	}
+	if strings.ContainsRune(state.GetLatestVersion(), '\x1b') || strings.ContainsRune(state.GetLatestVersion(), '\x07') {
+		t.Errorf("LatestVersion still contains control byte: %q", state.GetLatestVersion())
+	}
+	if strings.ContainsRune(state.GetDeprecationDate(), '\x1b') {
+		t.Errorf("DeprecationDate still contains ESC byte: %q", state.GetDeprecationDate())
 	}
 }
 

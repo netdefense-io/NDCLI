@@ -568,6 +568,42 @@ func TestExec_SequentialCommands(t *testing.T) {
 	}
 }
 
+// TestExec_OutputCapAborts is revert-sensitive: pre-fix, Exec() appends every
+// stdout/stderr frame to stdoutBuf/stderrBuf with no cumulative size check,
+// so a single frame exceeding the (temporarily lowered) cap is silently
+// accumulated and the call blocks waiting for a result frame that never
+// comes, until the context deadline fires. Post-fix, Exec() detects the
+// overflow on the offending frame and returns an error immediately.
+func TestExec_OutputCapAborts(t *testing.T) {
+	orig := maxExecOutputBytes
+	maxExecOutputBytes = 16
+	defer func() { maxExecOutputBytes = orig }()
+
+	clientStream, agentStream := newFakeStreamPair()
+
+	go func() {
+		req := agentReadRequest(t, agentStream)
+		// Decoded payload (32 bytes) exceeds the 16-byte cap in one frame.
+		agentSend(t, agentStream, execResponse{ID: req.ID, Type: "stdout", Data: b64("this payload is over the cap!!!")})
+		// No result frame is ever sent: a real bug would hang here until ctx
+		// timeout instead of returning the cap error below.
+	}()
+
+	h := newTestExecHandleViaOverride(clientStream)
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, _, _, _, err := h.Exec(ctx, "cmd", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected an error once accumulated output exceeds the cap, got nil")
+	}
+	if err == context.DeadlineExceeded {
+		t.Fatal("Exec() hung until context deadline instead of detecting the output cap overflow")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UUID helper test
 // ---------------------------------------------------------------------------

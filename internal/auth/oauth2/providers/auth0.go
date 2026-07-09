@@ -4,14 +4,16 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // Auth0Provider implements the Provider interface for Auth0
@@ -68,12 +70,16 @@ func (p *Auth0Provider) RequestDeviceAuthorization(scopes string) (*models.Devic
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("device authorization failed: %s", string(body))
+		body, _ := api.ReadBody(resp.Body)
+		return nil, fmt.Errorf("device authorization failed: %s", sanitize.String(string(body)))
 	}
 
+	// VerificationURIComplete/UserCode are printed to the terminal during
+	// the interactive login flow (internal/auth/oauth2/interactive.go) —
+	// cap+sanitize this Auth0 response the same way NDManager responses
+	// are handled.
 	var authResp models.DeviceAuthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+	if err := api.DecodeJSON(resp.Body, &authResp); err != nil {
 		return nil, fmt.Errorf("failed to parse device authorization response: %w", err)
 	}
 
@@ -101,7 +107,9 @@ func (p *Auth0Provider) PollForToken(deviceCode string, interval int) (*models.T
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Read once, bounded, so both the error-shape probe below and the
+	// success decode work from the same capped bytes.
+	body, err := api.ReadBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -112,6 +120,7 @@ func (p *Auth0Provider) PollForToken(deviceCode string, interval int) (*models.T
 		ErrorDescription string `json:"error_description"`
 	}
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != "" {
+		sanitize.Struct(reflect.ValueOf(&errResp))
 		switch errResp.Error {
 		case "authorization_pending":
 			return nil, ErrAuthorizationPending
@@ -127,13 +136,14 @@ func (p *Auth0Provider) PollForToken(deviceCode string, interval int) (*models.T
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token request failed: %s", string(body))
+		return nil, fmt.Errorf("token request failed: %s", sanitize.String(string(body)))
 	}
 
 	var tokenResp models.TokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
+	sanitize.Struct(reflect.ValueOf(&tokenResp))
 
 	return &tokenResp, nil
 }
@@ -160,12 +170,12 @@ func (p *Auth0Provider) RefreshToken(refreshToken string) (*models.TokenResponse
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("token refresh failed: %s", string(body))
+		body, _ := api.ReadBody(resp.Body)
+		return nil, fmt.Errorf("token refresh failed: %s", sanitize.String(string(body)))
 	}
 
 	var tokenResp models.TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := api.DecodeJSON(resp.Body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
 
@@ -197,8 +207,8 @@ func (p *Auth0Provider) RevokeToken(token, tokenTypeHint string) error {
 
 	// Auth0 returns 200 even if token is invalid (by design)
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("token revocation failed: %s", string(respBody))
+		respBody, _ := api.ReadBody(resp.Body)
+		return fmt.Errorf("token revocation failed: %s", sanitize.String(string(respBody)))
 	}
 
 	return nil
@@ -221,12 +231,14 @@ func (p *Auth0Provider) GetUserInfo(accessToken string) (*models.UserInfo, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get user info: %s", string(body))
+		body, _ := api.ReadBody(resp.Body)
+		return nil, fmt.Errorf("failed to get user info: %s", sanitize.String(string(body)))
 	}
 
+	// Name/Email are printed raw in cli/auth.go's login/delete flows —
+	// cap+sanitize this Auth0 response.
 	var userInfo models.UserInfo
-	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+	if err := api.DecodeJSON(resp.Body, &userInfo); err != nil {
 		return nil, fmt.Errorf("failed to parse user info: %w", err)
 	}
 

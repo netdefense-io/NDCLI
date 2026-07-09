@@ -22,22 +22,38 @@ const (
 // The mu field serialises Exec calls so the exec stream never has two
 // in-flight commands simultaneously (wire-contract requirement).
 type consoleSession struct {
-	sessionID    string
-	org          string
-	device       string
-	openedAt     time.Time
-	lastActivity time.Time
+	sessionID string
+	org       string
+	device    string
+	openedAt  time.Time
 
 	handle *pathfinder.ExecHandle
 
 	// mu serialises Exec calls for this session.
 	mu sync.Mutex
+
+	// actMu guards lastActivity independently of mu (and of the manager's
+	// map lock) so the idle reaper and console_list can read the timestamp
+	// without blocking on, or racing with, an in-flight Exec call.
+	actMu        sync.Mutex
+	lastActivity time.Time
 }
 
-// updateActivity must be called (under the session mu) after each successful
-// command so the idle reaper does not cull the session prematurely.
+// updateActivity records the current time as the session's last-activity
+// timestamp. Safe to call concurrently with reapIdle / getLastActivity —
+// guarded by actMu, independent of the Exec-serialising mu.
 func (s *consoleSession) updateActivity() {
+	s.actMu.Lock()
 	s.lastActivity = time.Now()
+	s.actMu.Unlock()
+}
+
+// getLastActivity returns the session's last-activity timestamp, guarded by
+// actMu so it never races with a concurrent updateActivity.
+func (s *consoleSession) getLastActivity() time.Time {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return s.lastActivity
 }
 
 // ConsoleSessionManager keeps all live console sessions for the lifetime of
@@ -149,7 +165,7 @@ func (m *ConsoleSessionManager) reapIdle() {
 	m.mu.RLock()
 	var idle []string
 	for id, sess := range m.sessions {
-		if sess.lastActivity.Before(cutoff) {
+		if sess.getLastActivity().Before(cutoff) {
 			idle = append(idle, id)
 		}
 	}

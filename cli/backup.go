@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"syscall"
 
 	"github.com/fatih/color"
@@ -114,6 +116,12 @@ func init() {
 	backupStatusCmd.Flags().Int("per-page", 30, "Items per page (1-100)")
 }
 
+// warnPlaintextSecretFlag warns that a secret was passed inline on the
+// command line, where it is visible in process listings and shell history.
+func warnPlaintextSecretFlag(w io.Writer, flagName string) {
+	color.New(color.FgYellow).Fprintf(w, "Warning: --%s was passed on the command line; its value is visible in process listings and shell history. Omit the flag to be prompted securely.\n", flagName)
+}
+
 // promptSecret reads a single line of secret input from the terminal.
 func promptSecret(prompt string) (string, error) {
 	fmt.Print(prompt)
@@ -147,6 +155,13 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 	scheduleName, _ := cmd.Flags().GetString("schedule")
 	noSchedule, _ := cmd.Flags().GetBool("no-schedule")
 	encryptionKey, _ := cmd.Flags().GetString("encryption-key")
+
+	if cmd.Flags().Changed("s3-access-key") && s3AccessKey != "" {
+		warnPlaintextSecretFlag(os.Stderr, "s3-access-key")
+	}
+	if cmd.Flags().Changed("encryption-key") && encryptionKey != "" {
+		warnPlaintextSecretFlag(os.Stderr, "encryption-key")
+	}
 
 	scheduleChanged := cmd.Flags().Changed("schedule") || noSchedule
 	// Effective schedule target: empty string means detach.

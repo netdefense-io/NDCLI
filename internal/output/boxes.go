@@ -144,10 +144,18 @@ func Header(w io.Writer, title string, subtitle string, width int) {
 	fmt.Fprintln(w, box.TopLine())
 	ColorHeader.Fprintf(w, "%s  %s", BoxVertical, title)
 	// padding = width - 1(│) - 2(spaces) - title_len - 1(space) - 1(│)
-	fmt.Fprintf(w, "%s %s\n", strings.Repeat(" ", width-5-len(title)), BoxVertical)
+	titlePad := width - 5 - len(title)
+	if titlePad < 0 {
+		titlePad = 0
+	}
+	fmt.Fprintf(w, "%s %s\n", strings.Repeat(" ", titlePad), BoxVertical)
 	if subtitle != "" {
 		ColorDim.Fprintf(w, "%s  %s", BoxVertical, subtitle)
-		fmt.Fprintf(w, "%s %s\n", strings.Repeat(" ", width-5-len(subtitle)), BoxVertical)
+		subtitlePad := width - 5 - len(subtitle)
+		if subtitlePad < 0 {
+			subtitlePad = 0
+		}
+		fmt.Fprintf(w, "%s %s\n", strings.Repeat(" ", subtitlePad), BoxVertical)
 	}
 	fmt.Fprintln(w, box.BottomLine())
 }
