@@ -2,11 +2,14 @@ package pathfinder
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/fatih/color"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/output"
@@ -45,12 +48,17 @@ type ShellOutcome struct {
 	Refused bool
 }
 
-// NewClient creates a new Pathfinder client with the given configuration
+// NewClient creates a new Pathfinder client with the given configuration.
+// This is the single point both relay entry points funnel through — the
+// interactive `device connect` CLI command (Client.Connect) and the MCP
+// console_open tool (Client.ConnectExec) — so the TLS warning below fires
+// once for both.
 func NewClient(cfg ClientConfig) (*Client, error) {
 	appCfg := config.Get()
 	if appCfg.Pathfinder.Host == "" {
 		return nil, ErrPathfinderNotConfigured
 	}
+	warnIfPathfinderSSLVerifyDisabled(os.Stderr)
 	return &Client{
 		host:            appCfg.Pathfinder.Host,
 		sslVerify:       appCfg.Pathfinder.SSLVerify,
@@ -61,6 +69,22 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		onProgress:      cfg.OnProgress,
 		isTTY:           cfg.IsTTY,
 	}, nil
+}
+
+// warnIfPathfinderSSLVerifyDisabled prints a stderr warning when TLS
+// certificate verification is disabled for the Pathfinder relay connection
+// (pathfinder.ssl_verify=false, e.g. via NDCLI_PATHFINDER_SSL_VERIFY=false).
+// With verification disabled, an on-path attacker can intercept the relay
+// WebSocket, read or inject relay frames, and reach the device's shell —
+// this mirrors warnIfTLSVerifyDisabled in cli/auth.go for the controlplane
+// connection.
+func warnIfPathfinderSSLVerifyDisabled(w io.Writer) {
+	if config.Get().Pathfinder.SSLVerify {
+		return
+	}
+	color.New(color.FgYellow).Fprintln(w, "Warning: TLS certificate verification is disabled for the Pathfinder relay "+
+		"(pathfinder.ssl_verify=false). An on-path attacker can intercept the relay connection, reading or injecting "+
+		"traffic and potentially reaching an interactive shell on the device.")
 }
 
 // ErrPathfinderNotConfigured is returned when the pathfinder host is not set
