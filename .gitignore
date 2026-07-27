@@ -38,3 +38,11 @@ __debug_bin*
 .env
 .env.local
 local-only/
+
+# Rendered by scripts/render-server-json.sh at release time (version +
+# fileSha256 are filled in per-release) — server.json.tmpl is the source of
+# truth, never commit the rendered output.
+/server.json
+/mcpb-dist/
+*.mcpb
+*.mcpb.sha256

@@ -2,10 +2,11 @@ BINARY_NAME=ndcli
 MCP_BINARY_NAME=netdefense-mcp
 TUI_BINARY_NAME=netdefense
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+MCPB_VERSION=$(patsubst v%,%,$(VERSION))
 BUILD_TIME=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS=-ldflags "-s -w -X github.com/netdefense-io/NDCLI/internal/config.Version=$(VERSION) -X github.com/netdefense-io/NDCLI/internal/config.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build build-mcp build-tui build-all test lint clean install
+.PHONY: all build build-mcp build-tui build-all test lint clean install mcpb
 
 all: build build-mcp build-tui
 
@@ -67,3 +68,18 @@ run-mcp:
 
 run-tui:
 	go run ./cmd/netdefense $(ARGS)
+
+# Builds the netdefense-mcp MCPB (MCP Bundle) artifact locally for testing —
+# the release pipeline (.github/workflows/release-please.yml) does the same
+# thing against goreleaser's cross-compiled dist/ output, then also renders
+# server.json from server.json.tmpl with the resulting fileSha256. This
+# target is for local iteration on mcpb/manifest.json.tmpl or
+# scripts/build-mcpb.sh; output lands in mcpb-dist/ (gitignored).
+mcpb:
+	@mkdir -p mcpb-dist/input/netdefense-mcp_darwin_arm64
+	@mkdir -p mcpb-dist/input/netdefense-mcp_linux_amd64
+	@mkdir -p mcpb-dist/input/netdefense-mcp_windows_amd64
+	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o mcpb-dist/input/netdefense-mcp_darwin_arm64/netdefense-mcp      ./cmd/netdefense-mcp
+	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o mcpb-dist/input/netdefense-mcp_linux_amd64/netdefense-mcp       ./cmd/netdefense-mcp
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o mcpb-dist/input/netdefense-mcp_windows_amd64/netdefense-mcp.exe ./cmd/netdefense-mcp
+	./scripts/build-mcpb.sh $(MCPB_VERSION) mcpb-dist/input mcpb-dist/out

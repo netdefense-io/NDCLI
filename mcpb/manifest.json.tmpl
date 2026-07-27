@@ -1,0 +1,51 @@
+{
+  "manifest_version": "0.3",
+  "name": "netdefense-mcp",
+  "display_name": "NetDefense for OPNsense MCP Server",
+  "version": "__VERSION__",
+  "description": "Manage a fleet of OPNsense firewalls through NetDefense for OPNsense: 129 MCP tools for devices, organizations, tasks, schedules, backups, and networks.",
+  "author": {
+    "name": "NetDefense",
+    "url": "https://netdefense.io"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/netdefense-io/NDCLI.git"
+  },
+  "homepage": "https://netdefense.io",
+  "documentation": "https://netdefense.io/docs/mcp/",
+  "license": "Apache-2.0",
+  "keywords": ["opnsense", "firewall", "fleet-management"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/linux/netdefense-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/linux/netdefense-mcp",
+      "args": [],
+      "env": {
+        "NDCLI_TOKEN": "${user_config.ndcli_token}"
+      },
+      "platform_overrides": {
+        "darwin": {
+          "command": "${__dirname}/server/darwin/netdefense-mcp"
+        },
+        "win32": {
+          "command": "${__dirname}/server/win32/netdefense-mcp.exe"
+        }
+      }
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"]
+  },
+  "tools_generated": true,
+  "user_config": {
+    "ndcli_token": {
+      "type": "string",
+      "title": "NetDefense Access Token",
+      "description": "Personal access token (ndpat_...) for non-interactive auth. Leave blank to fall back to an existing `ndcli auth login` session on this machine.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

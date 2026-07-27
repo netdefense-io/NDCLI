@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.netdefense-io/netdefense-mcp",
+  "title": "NetDefense for OPNsense MCP Server",
+  "description": "NetDefense for OPNsense MCP server: 129 tools for devices, orgs, tasks, backups & networks.",
+  "version": "__VERSION__",
+  "websiteUrl": "https://netdefense.io/docs/mcp/",
+  "repository": {
+    "url": "https://github.com/netdefense-io/NDCLI",
+    "source": "github",
+    "id": "1191621013"
+  },
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/netdefense-io/ndcli-releases/releases/download/v__VERSION__/netdefense-mcp___VERSION__.mcpb",
+      "version": "__VERSION__",
+      "fileSha256": "__MCPB_SHA256__",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "NDCLI_TOKEN",
+          "description": "NetDefense personal access token (ndpat_...) for non-interactive auth. Omit to fall back to an existing `ndcli auth login` session on this machine.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
