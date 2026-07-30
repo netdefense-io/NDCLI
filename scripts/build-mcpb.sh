@@ -24,7 +24,8 @@
 #               matches server.json's non-"v"-prefixed `version` field.
 #   <dist-dir>  Directory containing the goreleaser-built binaries (its
 #               `dist/` output — this script does not build them itself).
-#   <out-dir>   Directory to write the .mcpb file and its .sha256 sidecar to.
+#   <out-dir>   Directory to write the .mcpb file and its .sha256 and
+#               .smithery-payload.json sidecars to.
 #
 # Requires: zip, openssl, python3, sed, and a working `go build` (used to
 # compile a throwaway host-native binary that this script introspects via a
@@ -105,6 +106,12 @@ rm -f "$MCPB_PATH"
 
 SHA256="$(openssl dgst -sha256 "$MCPB_PATH" | awk '{print $NF}')"
 echo "$SHA256" > "${MCPB_PATH}.sha256"
+
+# Smithery release payload (see gen-smithery-payload.py for why this is a
+# separate file from manifest.json rather than a field added to it). Built
+# from the same final manifest.json, so its tools/version/config can never
+# drift from what's actually in the bundle above.
+python3 "$SCRIPT_DIR/gen-smithery-payload.py" "$WORKDIR/manifest.json" "${MCPB_PATH}.smithery-payload.json"
 
 echo "built: $MCPB_PATH"
 echo "sha256: $SHA256"
