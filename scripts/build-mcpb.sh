@@ -26,7 +26,10 @@
 #               `dist/` output — this script does not build them itself).
 #   <out-dir>   Directory to write the .mcpb file and its .sha256 sidecar to.
 #
-# Requires: zip, openssl, python3 (for JSON validation), sed.
+# Requires: zip, openssl, python3, sed, and a working `go build` (used to
+# compile a throwaway host-native binary that this script introspects via a
+# live MCP stdio handshake to populate the manifest's "tools" array -- see
+# gen-mcpb-manifest.py).
 
 set -euo pipefail
 
@@ -73,8 +76,22 @@ install -m 0755 "$DARWIN_BIN" "$WORKDIR/server/darwin/netdefense-mcp"
 install -m 0755 "$LINUX_BIN" "$WORKDIR/server/linux/netdefense-mcp"
 install -m 0755 "$WIN_BIN" "$WORKDIR/server/win32/netdefense-mcp.exe"
 
-sed "s/__VERSION__/${VERSION}/g" "$MANIFEST_TMPL" > "$WORKDIR/manifest.json"
+# Populate the manifest's "tools" array from a live introspection of the
+# server's own tool registry, so it can never drift from what's actually
+# shipping (see gen-mcpb-manifest.py for why this works without credentials).
+# This needs a binary that runs on THIS host -- the darwin/linux/win32
+# binaries staged above are cross-compiled and may not match it (e.g. the
+# CI runner is linux/amd64, but `make mcpb` on a dev Mac cross-compiles all
+# three and none of them may be runnable there) -- so build one separately
+# with a plain, unqualified `go build`.
+INTROSPECT_BIN="$WORKDIR/introspect-netdefense-mcp"
+(cd "$REPO_ROOT" && go build -o "$INTROSPECT_BIN" ./cmd/netdefense-mcp)
+
+sed "s/__VERSION__/${VERSION}/g" "$MANIFEST_TMPL" > "$WORKDIR/manifest.json.tmp"
+python3 "$SCRIPT_DIR/gen-mcpb-manifest.py" "$INTROSPECT_BIN" "$WORKDIR/manifest.json.tmp" "$WORKDIR/manifest.json"
 python3 -m json.tool "$WORKDIR/manifest.json" > /dev/null
+
+cp "$REPO_ROOT/mcpb/icon.png" "$WORKDIR/icon.png"
 
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"  # resolve to absolute — we cd into $WORKDIR below to zip
@@ -83,8 +100,8 @@ MCPB_PATH="$OUT_DIR/$MCPB_NAME"
 rm -f "$MCPB_PATH"
 
 # ZIP with max compression, matching the MCPB CLI's own `pack` behavior
-# (an .mcpb is just a zip of manifest.json + bundled server files).
-(cd "$WORKDIR" && zip -X -r -9 -q "$MCPB_PATH" manifest.json server)
+# (an .mcpb is just a zip of manifest.json + icon + bundled server files).
+(cd "$WORKDIR" && zip -X -r -9 -q "$MCPB_PATH" manifest.json icon.png server)
 
 SHA256="$(openssl dgst -sha256 "$MCPB_PATH" | awk '{print $NF}')"
 echo "$SHA256" > "${MCPB_PATH}.sha256"

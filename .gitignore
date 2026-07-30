@@ -39,10 +39,9 @@ __debug_bin*
 .env.local
 local-only/
 
-# Rendered by scripts/render-server-json.sh at release time (version +
-# fileSha256 are filled in per-release) — server.json.tmpl is the source of
-# truth, never commit the rendered output.
-/server.json
+# server.json IS tracked (see server.json.tmpl comment + CLAUDE.md) — the
+# release job re-renders and commits it every release, same as CHANGELOG.md.
+# Only the large build outputs below are gitignored.
 /mcpb-dist/
 *.mcpb
 *.mcpb.sha256
