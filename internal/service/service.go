@@ -5,6 +5,8 @@
 package service
 
 import (
+	"reflect"
+
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
@@ -42,6 +44,28 @@ func New(apiClient *api.Client, authMgr *auth.Manager, cfg *config.Config) *Serv
 	var am authManager
 	if authMgr != nil {
 		am = authMgr
+	}
+	return &Service{
+		api:  apiClient,
+		auth: am,
+		cfg:  cfg,
+	}
+}
+
+// NewFromProvider constructs a Service from an auth implementation other
+// than the concrete *auth.Manager — e.g. *auth.StaticTokenProvider, used for
+// NDCLI_TOKEN static-PAT auth. Callers with no auth manager at all should
+// use New(client, nil, cfg) instead.
+func NewFromProvider(apiClient *api.Client, am authManager, cfg *config.Config) *Service {
+	// Same nil-pointer-in-interface guard New() applies: a typed-nil
+	// concrete pointer passed as am would otherwise box into a non-nil
+	// authManager interface value, silently defeating every s.auth == nil
+	// check downstream. There is exactly one caller today
+	// (internal/mcp/server.go, always passing a real, non-nil
+	// *auth.StaticTokenProvider) but the guard is one line and keeps this
+	// constructor correct if a second caller is added later.
+	if rv := reflect.ValueOf(am); am != nil && rv.Kind() == reflect.Ptr && rv.IsNil() {
+		am = nil
 	}
 	return &Service{
 		api:  apiClient,

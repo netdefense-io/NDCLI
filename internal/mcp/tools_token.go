@@ -6,6 +6,13 @@ package mcp
 //     the MCP transport can display the raw token in the tool result — the
 //     operator invoking the agent is responsible for capturing it)
 //   ndcli auth token revoke → ndcli.auth.token_revoke (MCP-parity: included)
+//
+// token_create and token_revoke both call requireInteractiveAuth() before
+// svc.RequireAuth(), mirroring cli/root.go's isTokenMutationCommand gate:
+// neither is reachable when netdefense-mcp is running under NDCLI_TOKEN
+// static-PAT auth, even though svc.RequireAuth() alone would happily accept
+// a static token for these too. token_list has no such gate — read access
+// to the token list is allowed under a static PAT, same as the CLI.
 
 import (
 	"context"
@@ -44,7 +51,7 @@ func (s *Server) registerTokenTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.auth.token_create",
-		Description: "Create a new personal access token. The raw token value is returned once — capture it immediately. Set confirm=true to execute; without it returns a preview.",
+		Description: "Create a new personal access token. The raw token value is returned once — capture it immediately. Set confirm=true to execute; without it returns a preview. Requires interactive OAuth2 authentication — not available when netdefense-mcp is running under NDCLI_TOKEN static-PAT auth.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -60,7 +67,7 @@ func (s *Server) registerTokenTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.auth.token_revoke",
-		Description: "Revoke a personal access token by name. Set confirm=true to execute; without it returns a preview.",
+		Description: "Revoke a personal access token by name. Set confirm=true to execute; without it returns a preview. Requires interactive OAuth2 authentication — not available when netdefense-mcp is running under NDCLI_TOKEN static-PAT auth.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -87,6 +94,9 @@ func (s *Server) handleTokenList(ctx context.Context, req *mcp.CallToolRequest) 
 }
 
 func (s *Server) handleTokenCreate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.requireInteractiveAuth(); err != nil {
+		return s.errorResult(err)
+	}
 	if err := s.svc.RequireAuth(); err != nil {
 		return s.errorResult(err)
 	}
@@ -147,6 +157,9 @@ func (s *Server) createToken(ctx context.Context, input *TokenCreateInput) (*mcp
 }
 
 func (s *Server) handleTokenRevoke(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.requireInteractiveAuth(); err != nil {
+		return s.errorResult(err)
+	}
 	if err := s.svc.RequireAuth(); err != nil {
 		return s.errorResult(err)
 	}

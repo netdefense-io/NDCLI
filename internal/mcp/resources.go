@@ -78,26 +78,30 @@ func (s *Server) handleConfigResource(ctx context.Context, req *mcp.ReadResource
 	}, nil
 }
 
+// handleAuthResource reports auth state via the shared service layer (never
+// s.authManager directly) — s.authManager is nil under static-PAT
+// (NDCLI_TOKEN) auth, and svc's own auth field is populated in both modes
+// (see NewServer / service.NewFromProvider), so going through svc keeps this
+// resource nil-safe without special-casing static-PAT here.
 func (s *Server) handleAuthResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	isAuthenticated := s.authManager.IsAuthenticated()
+	isAuthenticated := s.svc.AuthIsAuthenticated()
 
 	status := "not_authenticated"
 	var userInfo *models.UserInfo
 
 	if isAuthenticated {
-		_, err := s.authManager.GetAccessToken()
-		if err != nil {
+		if err := s.svc.RequireAuth(); err != nil {
 			status = "token_expired"
 		} else {
 			status = "authenticated"
-			userInfo, _ = s.authManager.GetUserInfo()
+			userInfo, _ = s.svc.AuthLocalUser()
 		}
 	}
 
 	content := map[string]interface{}{
 		"authenticated": isAuthenticated,
 		"status":        status,
-		"storage":       s.authManager.GetStorageName(),
+		"storage":       s.svc.AuthStorageName(),
 	}
 
 	if userInfo != nil {

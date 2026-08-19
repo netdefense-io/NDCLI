@@ -57,15 +57,15 @@ It provides commands for managing devices, organizations, templates, and more.`,
 		}
 
 		// Static PAT via NDCLI_TOKEN — skips OAuth2 device flow entirely.
-		if token := os.Getenv("NDCLI_TOKEN"); token != "" {
-			if !isValidPATFormat(token) {
-				return fmt.Errorf("NDCLI_TOKEN does not look like a valid personal access token (expected prefix: ndpat_)")
-			}
+		staticProvider, err := auth.StaticProviderFromEnv()
+		if err != nil {
+			return err
+		}
+		if staticProvider != nil {
 			// Commands that write/revoke tokens require interactive JWT auth.
 			if isTokenMutationCommand(cmd) {
 				return fmt.Errorf("token create/revoke requires interactive authentication — unset NDCLI_TOKEN and log in with 'ndcli auth login'")
 			}
-			staticProvider := auth.NewStaticTokenProvider(token)
 			apiClient = api.NewClientFromConfig(staticProvider)
 			// No auth manager needed for static auth; leave authManager nil.
 			svc = service.New(apiClient, nil, config.Get())
@@ -236,11 +236,6 @@ func setupOutputAndFormatter(_ *cobra.Command) error {
 	}
 	formatter = output.GetFormatter(format)
 	return nil
-}
-
-// isValidPATFormat returns true when s starts with the expected PAT prefix.
-func isValidPATFormat(s string) bool {
-	return len(s) > 6 && s[:6] == "ndpat_"
 }
 
 // isTokenMutationCommand returns true when cmd is one of the token subcommands

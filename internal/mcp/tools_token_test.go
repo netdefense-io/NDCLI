@@ -7,6 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/netdefense-io/NDCLI/internal/api"
+	"github.com/netdefense-io/NDCLI/internal/auth"
+	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
@@ -118,5 +123,121 @@ func TestCreateToken_ConfirmedCreateSucceeds(t *testing.T) {
 	data, ok := resp.Data.(map[string]interface{})
 	if !ok || data["token"] != "ndpat_abc123" {
 		t.Errorf("expected raw token in confirmed response, got %v", resp.Data)
+	}
+}
+
+// --- static-PAT (NDCLI_TOKEN) auth gate tests ---
+//
+// handleTokenCreate/handleTokenRevoke must reject a static-PAT-backed
+// Server before ever reaching svc.RequireAuth() (which a static token
+// always satisfies) — mirroring cli/root.go's isTokenMutationCommand.
+// handleTokenList has no such gate: read access is allowed under a static
+// PAT, same as the CLI.
+
+// newStaticAuthTestServerWithAPI is newStaticAuthTestServer (server_test.go)
+// but pointed at a real httptest server instead of an unreachable host, for
+// tests that need a request to actually reach the (fake) API.
+func newStaticAuthTestServerWithAPI(t *testing.T, srv *httptest.Server, org string) *Server {
+	t.Helper()
+	provider := auth.NewStaticTokenProvider("ndpat_test123")
+	client := api.NewClient(srv.URL, false, provider)
+	cfg := &config.Config{}
+	cfg.Organization.Name = org
+	return &Server{
+		svc:             service.NewFromProvider(client, provider, cfg),
+		config:          cfg,
+		consoleSessions: newConsoleSessionManager(),
+		// authManager intentionally left nil — matches static-PAT mode.
+	}
+}
+
+func TestHandleTokenCreate_RejectsStaticAuth(t *testing.T) {
+	hit := false
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	s := newStaticAuthTestServerWithAPI(t, srv, "acme")
+
+	result, err := s.handleTokenCreate(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"name":"ci-bot","scope":"RW","confirm":true}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if hit {
+		t.Fatal("expected the create-token endpoint NOT to be hit under static-PAT auth")
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for token_create under static-PAT auth")
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	if resp.Error == nil || resp.Error.Code != "INTERACTIVE_AUTH_REQUIRED" {
+		t.Errorf("expected INTERACTIVE_AUTH_REQUIRED, got %+v", resp.Error)
+	}
+}
+
+func TestHandleTokenRevoke_RejectsStaticAuth(t *testing.T) {
+	hit := false
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	s := newStaticAuthTestServerWithAPI(t, srv, "acme")
+
+	result, err := s.handleTokenRevoke(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"name":"ci-bot","confirm":true}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if hit {
+		t.Fatal("expected the revoke-token endpoint NOT to be hit under static-PAT auth")
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for token_revoke under static-PAT auth")
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	if resp.Error == nil || resp.Error.Code != "INTERACTIVE_AUTH_REQUIRED" {
+		t.Errorf("expected INTERACTIVE_AUTH_REQUIRED, got %+v", resp.Error)
+	}
+}
+
+// TestHandleTokenList_AllowsStaticAuth confirms the interactive-auth gate is
+// scoped to create/revoke only — list must still reach the API under a
+// static PAT, matching the CLI's "token list works with PAT auth" policy.
+func TestHandleTokenList_AllowsStaticAuth(t *testing.T) {
+	hit := false
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]interface{}{})
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	s := newStaticAuthTestServerWithAPI(t, srv, "acme")
+
+	result, err := s.handleTokenList(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !hit {
+		t.Fatal("expected the list-tokens endpoint to be hit under static-PAT auth")
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	if !resp.Success {
+		t.Fatalf("expected success (no interactive-auth gate on list), got error: %+v", resp.Error)
 	}
 }

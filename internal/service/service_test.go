@@ -14,13 +14,13 @@ type stubAuthManager struct {
 	refreshErr error
 }
 
-func (s *stubAuthManager) IsAuthenticated() bool                     { return s.token != "" }
-func (s *stubAuthManager) GetAccessToken() (string, error)           { return s.token, s.accessErr }
-func (s *stubAuthManager) ForceRefresh() error                       { return s.refreshErr }
-func (s *stubAuthManager) GetUserInfo() (*models.UserInfo, error)    { return nil, nil }
-func (s *stubAuthManager) GetTokenSummary() map[string]interface{}   { return nil }
-func (s *stubAuthManager) GetStorageName() string                    { return "stub" }
-func (s *stubAuthManager) Logout() error                             { return nil }
+func (s *stubAuthManager) IsAuthenticated() bool                   { return s.token != "" }
+func (s *stubAuthManager) GetAccessToken() (string, error)         { return s.token, s.accessErr }
+func (s *stubAuthManager) ForceRefresh() error                     { return s.refreshErr }
+func (s *stubAuthManager) GetUserInfo() (*models.UserInfo, error)  { return nil, nil }
+func (s *stubAuthManager) GetTokenSummary() map[string]interface{} { return nil }
+func (s *stubAuthManager) GetStorageName() string                  { return "stub" }
+func (s *stubAuthManager) Logout() error                           { return nil }
 
 // newServiceWithStubAuth builds a bare *Service wired to the given stub.
 func newServiceWithStubAuth(am authManager) *Service {
@@ -84,6 +84,58 @@ func TestRequireAuth_ExpiredTokenRefreshFails(t *testing.T) {
 	}
 	if !errors.Is(err, refreshErr) {
 		t.Errorf("expected wrapped refreshErr, got %v", err)
+	}
+}
+
+// --- NewFromProvider tests ---
+
+// TestNewFromProvider_RequireAuthSucceeds guards the exact bug this
+// constructor exists to avoid: a Service built with a non-nil auth
+// implementation that isn't the concrete *auth.Manager (e.g.
+// internal/auth.StaticTokenProvider, used for NDCLI_TOKEN static-PAT auth in
+// the MCP server) must pass RequireAuth() — not be indistinguishable from
+// the "no auth manager at all" case that New(client, nil, cfg) produces.
+func TestNewFromProvider_RequireAuthSucceeds(t *testing.T) {
+	svc := NewFromProvider(nil, &stubAuthManager{token: "static-pat-value"}, nil)
+	if err := svc.RequireAuth(); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if !svc.AuthIsAuthenticated() {
+		t.Error("expected AuthIsAuthenticated to be true")
+	}
+}
+
+func TestNewFromProvider_RequireAuthFailsOnRejectedToken(t *testing.T) {
+	rejectErr := errors.New("token rejected")
+	svc := NewFromProvider(nil, &stubAuthManager{accessErr: rejectErr}, nil)
+	err := svc.RequireAuth()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, rejectErr) {
+		t.Errorf("expected wrapped rejectErr, got %v", err)
+	}
+}
+
+// TestNewFromProvider_TypedNilPointerGuard guards the nil-pointer-in-
+// interface footgun New() already guards against: a typed-nil *stubAuthManager
+// passed as am must not box into a non-nil authManager interface value,
+// which would silently defeat every s.auth == nil check downstream (e.g.
+// RequireAuth would try to call GetAccessToken on a nil receiver instead of
+// cleanly reporting CodeNotAuthenticated).
+func TestNewFromProvider_TypedNilPointerGuard(t *testing.T) {
+	var nilStub *stubAuthManager // typed nil, not an untyped nil literal
+	svc := NewFromProvider(nil, nilStub, nil)
+	err := svc.RequireAuth()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	svcErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if svcErr.Code != CodeNotAuthenticated {
+		t.Errorf("expected CodeNotAuthenticated (guard should treat typed-nil as no auth manager), got %q", svcErr.Code)
 	}
 }
 

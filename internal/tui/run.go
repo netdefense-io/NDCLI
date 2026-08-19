@@ -99,11 +99,11 @@ func resolveAccount(svc *service.Service) string {
 // static-PAT (NDCLI_TOKEN) and OAuth2 paths. The returned cleanup closes the
 // auth manager when non-nil.
 func buildService() (*service.Service, func(), error) {
-	if token := os.Getenv("NDCLI_TOKEN"); token != "" {
-		if len(token) <= 6 || token[:6] != "ndpat_" {
-			return nil, nil, fmt.Errorf("NDCLI_TOKEN does not look like a valid personal access token (expected prefix: ndpat_)")
-		}
-		provider := auth.NewStaticTokenProvider(token)
+	provider, err := auth.StaticProviderFromEnv()
+	if err != nil {
+		return nil, nil, err
+	}
+	if provider != nil {
 		client := api.NewClientFromConfig(provider)
 		return service.New(client, nil, config.Get()), nil, nil
 	}
