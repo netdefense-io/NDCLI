@@ -541,10 +541,16 @@ func (f *DetailedFormatter) FormatSoftwarePolicies(policies []models.SoftwarePol
 		if i > 0 {
 			fmt.Fprintln(f.Writer)
 		}
-		present, absent := softwarePolicyCounts(p.Content)
+		c := softwarePolicyCounts(p.Content)
 		ColorHeader.Fprintf(f.Writer, "─── %s ───\n", p.Name)
-		f.printLabelValue("Present count", fmt.Sprintf("%d", present))
-		f.printLabelValue("Absent count", fmt.Sprintf("%d", absent))
+		f.printLabelValue("Present count", fmt.Sprintf("%d", c.Present))
+		f.printLabelValue("Absent count", fmt.Sprintf("%d", c.Absent))
+		// Shown only when the policy uses them, so the describe view of
+		// an ordinary package policy stays as short as it was.
+		if c.HasEntries() {
+			f.printLabelValue("Repository count", fmt.Sprintf("%d", c.Repositories))
+			f.printLabelValue("External count", fmt.Sprintf("%d", c.External))
+		}
 		// TemplateNames is only populated on describe (GET /…/<name>),
 		// not on list responses. Distinguish nil (not loaded) from
 		// empty (loaded; attached to nothing).

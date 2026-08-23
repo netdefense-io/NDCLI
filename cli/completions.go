@@ -605,6 +605,58 @@ func completeSoftwarePolicies(cmd *cobra.Command, args []string, toComplete stri
 	return fetchSoftwarePolicyNames(cmd)
 }
 
+// completeSoftwarePolicyRepos completes a repository name as the second
+// arg of `software remove-repo`, reading it out of the named policy's
+// own content document.
+func completeSoftwarePolicyRepos(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeSoftwarePolicyEntries(cmd, args, func(c *models.SoftwarePolicyContent) []string {
+		names := make([]string, 0, len(c.Repositories))
+		for _, r := range c.Repositories {
+			names = append(names, r.Name)
+		}
+		return names
+	})
+}
+
+// completeSoftwarePolicyExternals is the same for `remove-external`.
+func completeSoftwarePolicyExternals(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeSoftwarePolicyEntries(cmd, args, func(c *models.SoftwarePolicyContent) []string {
+		names := make([]string, 0, len(c.External))
+		for _, e := range c.External {
+			names = append(names, e.Name)
+		}
+		return names
+	})
+}
+
+func completeSoftwarePolicyEntries(cmd *cobra.Command, args []string, pick func(*models.SoftwarePolicyContent) []string) ([]string, cobra.ShellCompDirective) {
+	// First arg is the policy name and completes via
+	// completeSoftwarePolicies; past the second there is nothing left
+	// to suggest.
+	if len(args) == 0 {
+		return fetchSoftwarePolicyNames(cmd)
+	}
+	if len(args) > 1 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if err := initForCompletion(); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	org := getOrgForCompletion(cmd)
+	if org == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	sp, err := svc.SoftwarePolicyGet(context.Background(), org, args[0])
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	content, err := models.ParseSoftwarePolicyContent(sp.Content)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return pick(content), cobra.ShellCompDirectiveNoFileComp
+}
+
 // fetchTaskCodes returns recent task codes (any status) for the current org,
 // newest first. Both `task describe` and `task cancel` use this — cancelling a
 // terminal task is harmless (NDManager rejects it) and trimming completions to

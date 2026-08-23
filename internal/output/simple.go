@@ -270,18 +270,27 @@ func (f *SimpleFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolic
 		return nil
 	}
 	for _, p := range policies {
-		present, absent := softwarePolicyCounts(p.Content)
-		fmt.Fprintf(f.Writer, "• %s (present: %d, absent: %d)\n", p.Name, present, absent)
+		c := softwarePolicyCounts(p.Content)
+		if c.HasEntries() {
+			fmt.Fprintf(f.Writer, "• %s (present: %d, absent: %d, repos: %d, external: %d)\n",
+				p.Name, c.Present, c.Absent, c.Repositories, c.External)
+			continue
+		}
+		fmt.Fprintf(f.Writer, "• %s (present: %d, absent: %d)\n", p.Name, c.Present, c.Absent)
 	}
 	return nil
 }
 
 // FormatSoftwarePolicy formats a single software policy.
 func (f *SimpleFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
-	present, absent := softwarePolicyCounts(p.Content)
+	c := softwarePolicyCounts(p.Content)
 	fmt.Fprintf(f.Writer, "Software policy: %s\n", p.Name)
-	fmt.Fprintf(f.Writer, "  Present: %d\n", present)
-	fmt.Fprintf(f.Writer, "  Absent:  %d\n", absent)
+	fmt.Fprintf(f.Writer, "  Present: %d\n", c.Present)
+	fmt.Fprintf(f.Writer, "  Absent:  %d\n", c.Absent)
+	if c.HasEntries() {
+		fmt.Fprintf(f.Writer, "  Repos:    %d\n", c.Repositories)
+		fmt.Fprintf(f.Writer, "  External: %d\n", c.External)
+	}
 	if p.TemplateNames != nil {
 		if len(p.TemplateNames) == 0 {
 			fmt.Fprintf(f.Writer, "  Templates: (none)\n")

@@ -560,23 +560,38 @@ func (f *TableFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy
 	// Keeps `software list` compact while letting describe surface
 	// attached templates inline.
 	showTemplates := false
-	for _, p := range policies {
+	// Same idea for the repository / external columns: only widen the
+	// table for the policies that actually use them.
+	showEntries := false
+	counts := make([]softwarePolicyCountSet, len(policies))
+	for i, p := range policies {
 		if p.TemplateNames != nil {
 			showTemplates = true
-			break
+		}
+		counts[i] = softwarePolicyCounts(p.Content)
+		if counts[i].HasEntries() {
+			showEntries = true
 		}
 	}
-	headers := []string{"Name", "Present", "Absent", "Updated"}
-	if showTemplates {
-		headers = []string{"Name", "Present", "Absent", "Templates", "Updated"}
+	headers := []string{"Name", "Present", "Absent"}
+	if showEntries {
+		headers = append(headers, "Repos", "External")
 	}
+	if showTemplates {
+		headers = append(headers, "Templates")
+	}
+	headers = append(headers, "Updated")
+
 	table := NewStyledTable(headers)
-	for _, p := range policies {
-		present, absent := softwarePolicyCounts(p.Content)
+	for i, p := range policies {
+		c := counts[i]
 		row := []string{
 			p.Name,
-			fmt.Sprintf("%d", present),
-			fmt.Sprintf("%d", absent),
+			fmt.Sprintf("%d", c.Present),
+			fmt.Sprintf("%d", c.Absent),
+		}
+		if showEntries {
+			row = append(row, fmt.Sprintf("%d", c.Repositories), fmt.Sprintf("%d", c.External))
 		}
 		if showTemplates {
 			row = append(row, templatesCell(p.TemplateNames))

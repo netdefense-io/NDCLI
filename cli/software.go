@@ -122,6 +122,84 @@ re-install anything.`,
 	RunE:              runSoftwareWaivePackage,
 }
 
+var softwareAddRepoCmd = &cobra.Command{
+	Use:   "add-repo [policy]",
+	Short: "Add or update a custom package repository in a software policy",
+	Long: `Add or update a custom package repository in a software policy.
+
+Repositories are configured on the device before any package work
+happens, so packages served only by a custom repository can be named in
+require-package. Re-running with identical values is a no-op, which
+makes this safe to drive from a script.
+
+The repository is identified by --name; running add-repo again with the
+same name updates that entry in place rather than adding a second one.
+Flags you leave out keep their stored values, so you can change a URL
+without restating the priority or re-enabling a repository you disabled.
+--url and the signature flags are required only when adding a repository
+that does not exist yet.
+
+Signature configuration is required when adding a repository. It is
+inferred from the flags you pass (--fingerprint implies fingerprints,
+--pubkey-file implies pubkey); an unverified repository must be
+requested explicitly with --signature-type none, and the organization
+must have unverified repositories enabled for the server to accept it.`,
+	Example: `  ndcli software add-repo baseline --name mimugmail \
+    --url 'https://opn-repo.routerperformance.net/repo/${ABI}' \
+    --priority 5 --fingerprint sha256:<64-hex>`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareAddRepo,
+}
+
+var softwareRemoveRepoCmd = &cobra.Command{
+	Use:   "remove-repo [policy] [repository]",
+	Short: "Remove a custom package repository from a software policy",
+	Long: `Remove a custom package repository from a software policy.
+
+The repository configuration is removed from every device the policy
+reaches on the next sync. Packages already installed from it stay
+installed — removing a repository is not an uninstall.`,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeSoftwarePolicyRepos,
+	RunE:              runSoftwareRemoveRepo,
+}
+
+var softwareAddExternalCmd = &cobra.Command{
+	Use:   "add-external [policy]",
+	Short: "Add or update an external (URL-installed) package in a software policy",
+	Long: `Add or update an external package in a software policy.
+
+External packages are installed straight from a URL with pkg add, for
+software that is not served by any repository. --version and --url are
+required when adding a package that does not exist yet: pkg add takes a
+URL, not a package identity, so the policy has to state which package
+the URL is expected to deliver for the agent to tell "already installed"
+from "not yet installed".
+
+The entry is identified by --name; the same name at a new --version
+updates the entry rather than adding a second one. Flags you leave out
+keep their stored values.`,
+	Example: `  ndcli software add-external baseline --name ookla-speedtest --version 1.2.0 \
+    --url https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-freebsd13-x86_64.pkg`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSoftwarePolicies,
+	RunE:              runSoftwareAddExternal,
+}
+
+var softwareRemoveExternalCmd = &cobra.Command{
+	Use:   "remove-external [policy] [package]",
+	Short: "Remove an external package from a software policy",
+	Long: `Remove an external package from a software policy.
+
+The device stops being asked to install it. Like remove-repo, this is
+not an uninstall — an already-installed package stays installed. Use
+block-package if you want it removed from the device.`,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeSoftwarePolicyExternals,
+	RunE:              runSoftwareRemoveExternal,
+}
+
 func init() {
 	softwareCmd.AddCommand(softwareListCmd)
 	softwareCmd.AddCommand(softwareCreateCmd)
@@ -133,6 +211,10 @@ func init() {
 	softwareCmd.AddCommand(softwareRequirePackageCmd)
 	softwareCmd.AddCommand(softwareBlockPackageCmd)
 	softwareCmd.AddCommand(softwareWaivePackageCmd)
+	softwareCmd.AddCommand(softwareAddRepoCmd)
+	softwareCmd.AddCommand(softwareRemoveRepoCmd)
+	softwareCmd.AddCommand(softwareAddExternalCmd)
+	softwareCmd.AddCommand(softwareRemoveExternalCmd)
 
 	softwareListCmd.Flags().String("name", "", "Filter by name (regex pattern)")
 	softwareListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction (name, created_at, updated_at)")
@@ -141,6 +223,21 @@ func init() {
 
 	softwareCreateCmd.Flags().String("content", "", `Optional inline JSON content for bulk seed. When omitted, the policy is created empty ({"present":[],"absent":[]}) and you fill it with require-package / block-package.`)
 	softwareCreateCmd.Flags().String("file", "", "Read content from a file instead of --content (bulk-seed alternative)")
+
+	softwareAddRepoCmd.Flags().String("name", "", "Repository name (required) — also the identity used to update an existing entry")
+	softwareAddRepoCmd.Flags().String("url", "", "Repository URL (required). ${ABI} is substituted on the device, so quote it to keep the shell off it")
+	softwareAddRepoCmd.Flags().Int("priority", 0, "Repository priority, 0-10. Must be unique within the policy")
+	softwareAddRepoCmd.Flags().Bool("enabled", true, "Whether the repository is enabled on the device")
+	softwareAddRepoCmd.Flags().String("signature-type", "", "Signature type: fingerprints, pubkey, or none. Inferred from --fingerprint / --pubkey-file when omitted")
+	softwareAddRepoCmd.Flags().StringArray("fingerprint", nil, "Trusted fingerprint as sha256:<64-hex> (repeatable). Implies --signature-type fingerprints")
+	softwareAddRepoCmd.Flags().String("pubkey-file", "", "Path to a PEM public key. Implies --signature-type pubkey; the key is sent by value, not by path")
+	_ = softwareAddRepoCmd.MarkFlagRequired("name")
+
+	softwareAddExternalCmd.Flags().String("name", "", "Package name the URL is expected to deliver (required)")
+	softwareAddExternalCmd.Flags().String("version", "", "Package version the URL is expected to deliver (required)")
+	softwareAddExternalCmd.Flags().String("url", "", "Package URL to install from (required)")
+	softwareAddExternalCmd.Flags().Bool("force", false, "Pass -f to pkg add — reinstall even when pkg considers it installed")
+	_ = softwareAddExternalCmd.MarkFlagRequired("name")
 }
 
 func runSoftwareList(cmd *cobra.Command, args []string) error {
@@ -240,10 +337,12 @@ func runSoftwareEdit(cmd *cobra.Command, args []string) error {
 		fmt.Println("No changes made")
 		return nil
 	}
-	if err := svc.SoftwarePolicyUpdateContent(ctx, org, name, newContent); err != nil {
+	warnings, err := svc.SoftwarePolicyUpdateContent(ctx, org, name, newContent)
+	if err != nil {
 		return err
 	}
 	color.Green("✓ Software policy updated: %s", name)
+	renderPolicyWarnings(warnings)
 	return nil
 }
 
@@ -258,10 +357,12 @@ func runSoftwareUpdateContent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
-	if err := svc.SoftwarePolicyUpdateContent(context.Background(), org, name, string(data)); err != nil {
+	warnings, err := svc.SoftwarePolicyUpdateContent(context.Background(), org, name, string(data))
+	if err != nil {
 		return err
 	}
 	color.Green("✓ Software policy content updated: %s", name)
+	renderPolicyWarnings(warnings)
 	return nil
 }
 
@@ -319,15 +420,16 @@ func runSoftwareMutate(cmd *cobra.Command, args []string, op string) error {
 
 	var (
 		outcomes []models.PackageActionOutcome
+		warnings []string
 		err      error
 	)
 	switch op {
 	case "require":
-		outcomes, err = svc.SoftwarePolicyRequirePackages(ctx, org, policy, packages)
+		outcomes, warnings, err = svc.SoftwarePolicyRequirePackages(ctx, org, policy, packages)
 	case "block":
-		outcomes, err = svc.SoftwarePolicyBlockPackages(ctx, org, policy, packages)
+		outcomes, warnings, err = svc.SoftwarePolicyBlockPackages(ctx, org, policy, packages)
 	case "waive":
-		outcomes, err = svc.SoftwarePolicyWaivePackages(ctx, org, policy, packages)
+		outcomes, warnings, err = svc.SoftwarePolicyWaivePackages(ctx, org, policy, packages)
 	default:
 		return fmt.Errorf("internal error: unknown op %q", op)
 	}
@@ -340,6 +442,7 @@ func runSoftwareMutate(cmd *cobra.Command, args []string, op string) error {
 		return err
 	}
 	renderPackageOutcomes(outcomes)
+	renderPolicyWarnings(warnings)
 	return nil
 }
 
@@ -392,4 +495,185 @@ func renderPackageOutcomes(outcomes []models.PackageActionOutcome) {
 		fmt.Printf(" (%d no-op)", noop)
 	}
 	fmt.Println(".")
+}
+
+func runSoftwareAddRepo(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	policy := args[0]
+	name, _ := cmd.Flags().GetString("name")
+
+	// Only the flags actually given are sent. On an existing repository
+	// the rest keep their stored values, so changing a URL does not
+	// reset the priority or re-enable something the operator turned off.
+	patch := models.RepositoryPatch{Name: name}
+	if cmd.Flags().Changed("url") {
+		url, _ := cmd.Flags().GetString("url")
+		patch.URL = &url
+	}
+	if cmd.Flags().Changed("priority") {
+		priority, _ := cmd.Flags().GetInt("priority")
+		patch.Priority = &priority
+	}
+	if cmd.Flags().Changed("enabled") {
+		enabled, _ := cmd.Flags().GetBool("enabled")
+		patch.Enabled = &enabled
+	}
+
+	signature, err := buildRepositorySignature(cmd)
+	if err != nil {
+		return err
+	}
+	patch.Signature = signature
+
+	outcome, warnings, err := svc.SoftwarePolicySetRepository(context.Background(), org, policy, patch)
+	if err != nil {
+		return err
+	}
+	renderEntryOutcome(outcome, "Repository")
+	renderPolicyWarnings(warnings)
+	return nil
+}
+
+// buildRepositorySignature turns the signature flags into the wire
+// shape, or returns nil when the operator passed none — meaning "leave
+// the signature configuration alone", which is only valid for a
+// repository that already exists.
+//
+// The type is inferred when it can be, but never inferred as "none":
+// disabling signature verification is a decision the operator states
+// out loud, not something that falls out of omitting a flag.
+func buildRepositorySignature(cmd *cobra.Command) (*models.RepositorySignature, error) {
+	sigType, _ := cmd.Flags().GetString("signature-type")
+	fingerprints, _ := cmd.Flags().GetStringArray("fingerprint")
+	pubkeyFile, _ := cmd.Flags().GetString("pubkey-file")
+
+	if sigType == "" && len(fingerprints) == 0 && pubkeyFile == "" {
+		return nil, nil
+	}
+	if len(fingerprints) > 0 && pubkeyFile != "" {
+		return nil, fmt.Errorf("--fingerprint and --pubkey-file are mutually exclusive")
+	}
+	if sigType == "" {
+		if len(fingerprints) > 0 {
+			sigType = "fingerprints"
+		} else {
+			sigType = "pubkey"
+		}
+	}
+
+	switch sigType {
+	case "fingerprints":
+		parsed := make([]models.RepositoryFingerprint, 0, len(fingerprints))
+		for _, raw := range fingerprints {
+			fp, err := models.ParseFingerprint(raw)
+			if err != nil {
+				return nil, err
+			}
+			parsed = append(parsed, fp)
+		}
+		return &models.RepositorySignature{Type: sigType, Fingerprints: parsed}, nil
+
+	case "pubkey":
+		if pubkeyFile == "" {
+			return nil, fmt.Errorf("--signature-type pubkey requires --pubkey-file")
+		}
+		data, err := os.ReadFile(pubkeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read public key: %w", err)
+		}
+		return &models.RepositorySignature{Type: sigType, Pubkey: string(data)}, nil
+
+	case "none":
+		return &models.RepositorySignature{Type: sigType}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown --signature-type %q: expected fingerprints, pubkey, or none", sigType)
+	}
+}
+
+func runSoftwareRemoveRepo(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	outcome, warnings, err := svc.SoftwarePolicyRemoveRepository(context.Background(), org, args[0], args[1])
+	if err != nil {
+		return err
+	}
+	renderEntryOutcome(outcome, "Repository")
+	renderPolicyWarnings(warnings)
+	return nil
+}
+
+func runSoftwareAddExternal(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	name, _ := cmd.Flags().GetString("name")
+	patch := models.ExternalPatch{Name: name}
+	if cmd.Flags().Changed("version") {
+		version, _ := cmd.Flags().GetString("version")
+		patch.Version = &version
+	}
+	if cmd.Flags().Changed("url") {
+		url, _ := cmd.Flags().GetString("url")
+		patch.URL = &url
+	}
+	if cmd.Flags().Changed("force") {
+		force, _ := cmd.Flags().GetBool("force")
+		patch.Force = &force
+	}
+
+	outcome, warnings, err := svc.SoftwarePolicySetExternal(context.Background(), org, args[0], patch)
+	if err != nil {
+		return err
+	}
+	renderEntryOutcome(outcome, "External package")
+	renderPolicyWarnings(warnings)
+	return nil
+}
+
+func runSoftwareRemoveExternal(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+
+	outcome, warnings, err := svc.SoftwarePolicyRemoveExternal(context.Background(), org, args[0], args[1])
+	if err != nil {
+		return err
+	}
+	renderEntryOutcome(outcome, "External package")
+	renderPolicyWarnings(warnings)
+	return nil
+}
+
+// renderEntryOutcome prints one line for a repository / external-package
+// mutation, in the same shape renderPackageOutcomes uses.
+func renderEntryOutcome(o models.EntryActionOutcome, kind string) {
+	switch o.Action {
+	case "added":
+		color.Green("✓ %s added: %s", kind, o.Name)
+	case "updated":
+		color.Green("✓ %s updated: %s", kind, o.Name)
+	case "removed":
+		color.Green("✓ %s removed: %s", kind, o.Name)
+	default:
+		color.Cyan("ℹ %s %s: no change", kind, o.Name)
+	}
+}
+
+// renderPolicyWarnings surfaces the server's advisory conflict notices.
+// The write already succeeded — these say that this policy and another
+// one landing on the same device disagree, which will hard-fail at sync
+// time. Yellow, not red, and never an error return: the operator asked
+// for a write and got one.
+func renderPolicyWarnings(warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Println()
+	color.Yellow("⚠ %d conflict warning(s) — the change was saved, but sync will fail until they are resolved:", len(warnings))
+	for _, w := range warnings {
+		color.Yellow("  • %s", w)
+	}
 }

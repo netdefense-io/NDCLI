@@ -67,6 +67,51 @@ type softwarePolicyPackageMutationInput struct {
 	Confirm      bool     `json:"confirm,omitempty"`
 }
 
+// softwarePolicySetRepositoryInput mirrors the repositories[] wire
+// entry. Fingerprints are objects rather than strings: the wire format
+// carries {function, fingerprint} pairs, and flattening them to
+// "sha256:hex" here would only mean parsing them apart again.
+type softwarePolicySetRepositoryInput struct {
+	Organization string `json:"organization,omitempty"`
+	Policy       string `json:"policy"`
+	Name         string `json:"name"`
+	// Omitted fields keep whatever the existing entry has — the stored
+	// entry is replaced wholesale, so anything not carried forward would
+	// be reset. On a new entry url and signature are required; priority
+	// defaults to 0 and enabled to true.
+	URL       *string `json:"url,omitempty"`
+	Priority  *int    `json:"priority,omitempty"`
+	Enabled   *bool   `json:"enabled,omitempty"`
+	Signature *struct {
+		Type         string `json:"type"`
+		Fingerprints []struct {
+			Function    string `json:"function,omitempty"`
+			Fingerprint string `json:"fingerprint"`
+		} `json:"fingerprints,omitempty"`
+		Pubkey string `json:"pubkey,omitempty"`
+	} `json:"signature,omitempty"`
+	Confirm bool `json:"confirm,omitempty"`
+}
+
+type softwarePolicySetExternalInput struct {
+	Organization string `json:"organization,omitempty"`
+	Policy       string  `json:"policy"`
+	Name         string  `json:"name"`
+	Version      *string `json:"version,omitempty"`
+	URL          *string `json:"url,omitempty"`
+	Force        *bool   `json:"force,omitempty"`
+	Confirm      bool    `json:"confirm,omitempty"`
+}
+
+// softwarePolicyEntryRemoveInput removes one named repository or
+// external-package entry.
+type softwarePolicyEntryRemoveInput struct {
+	Organization string `json:"organization,omitempty"`
+	Policy       string `json:"policy"`
+	Name         string `json:"name"`
+	Confirm      bool   `json:"confirm,omitempty"`
+}
+
 func (s *Server) registerSoftwarePolicyTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.software.list",
@@ -185,7 +230,98 @@ func (s *Server) registerSoftwarePolicyTools() {
 	}, s.handleTemplateRemoveSoftwarePolicy)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.software.require_package",
+		Name:        "ndcli.software.set_repository",
+		Description: `Add or update a custom package repository in a software policy. Repositories are configured on the device before any package work, so packages served only by a custom repository can then be named in require_package. The entry is identified by 'name': calling this again with the same name updates it in place, and any field you omit keeps its stored value rather than resetting. 'url' and 'signature' are required only when adding a repository that does not exist yet. Identical values are a no-op. Signature configuration is required; type "none" is accepted only for organizations that have unverified repositories enabled. Requires confirm=true.`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"policy":       stringProperty("Software policy name"),
+				"name":         stringProperty("Repository name — also the identity used to update an existing entry"),
+				"url":          stringProperty("Repository URL. ${ABI} is substituted on the device; send it literally, unexpanded"),
+				"priority":     intProperty("Repository priority, 0-10. Must be unique within the policy", 0),
+				"enabled":      boolProperty("Whether the repository is enabled on the device (default true)"),
+				"signature": map[string]interface{}{
+					"type":        "object",
+					"description": `Trust configuration. type "fingerprints" requires the fingerprints array; "pubkey" requires a PEM key by value; "none" disables verification and needs the organization flag.`,
+					"properties": map[string]interface{}{
+						"type": map[string]interface{}{
+							"type":        "string",
+							"description": "Signature type",
+							"enum":        []string{"fingerprints", "pubkey", "none"},
+						},
+						"fingerprints": map[string]interface{}{
+							"type":        "array",
+							"description": "Trusted key fingerprints",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"function":    stringProperty("Hash function (sha256)"),
+									"fingerprint": stringProperty("Fingerprint, 64 hex characters"),
+								},
+								"required": []string{"fingerprint"},
+							},
+						},
+						"pubkey": stringProperty("PEM-encoded public key, by value"),
+					},
+					"required": []string{"type"},
+				},
+				"confirm": confirmProperty(),
+			},
+			"required": []string{"policy", "name"},
+		},
+	}, s.handleSoftwarePolicySetRepository)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.software.remove_repository",
+		Description: `Remove a custom package repository from a software policy. Packages already installed from it stay installed — this is not an uninstall. Requires confirm=true.`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"policy":       stringProperty("Software policy name"),
+				"name":         stringProperty("Repository name"),
+				"confirm":      confirmProperty(),
+			},
+			"required": []string{"policy", "name"},
+		},
+	}, s.handleSoftwarePolicyRemoveRepository)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.software.set_external",
+		Description: `Add or update an external (URL-installed) package in a software policy, for software no repository serves. 'version' and 'url' are required when adding a package that does not exist yet; omitted fields keep their stored values. Version matters because pkg add takes a URL, not a package identity — the policy has to state what the URL delivers so the agent can tell installed from not-installed. The same name at a new version replaces the entry. Requires confirm=true.`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"policy":       stringProperty("Software policy name"),
+				"name":         stringProperty("Package name the URL is expected to deliver"),
+				"version":      stringProperty("Package version the URL is expected to deliver"),
+				"url":          stringProperty("Package URL to install from"),
+				"force":        boolProperty("Pass -f to pkg add — reinstall even when pkg considers it installed"),
+				"confirm":      confirmProperty(),
+			},
+			"required": []string{"policy", "name"},
+		},
+	}, s.handleSoftwarePolicySetExternal)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.software.remove_external",
+		Description: `Remove an external package from a software policy. Like remove_repository this is not an uninstall — use block_package to have it removed from devices. Requires confirm=true.`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"policy":       stringProperty("Software policy name"),
+				"name":         stringProperty("External package name"),
+				"confirm":      confirmProperty(),
+			},
+			"required": []string{"policy", "name"},
+		},
+	}, s.handleSoftwarePolicyRemoveExternal)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.software.require_package",
 		Description: `Mark one or more packages as required by a software policy. Required packages get installed on every device the policy covers. A package already required is a no-op; a package currently blocked by the same policy is moved (block → require). Requires confirm=true.`,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -200,7 +336,7 @@ func (s *Server) registerSoftwarePolicyTools() {
 	}, s.handleSoftwarePolicyRequirePackage)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.software.block_package",
+		Name:        "ndcli.software.block_package",
 		Description: `Mark one or more packages as blocked by a software policy. Blocked packages get uninstalled on every device the policy covers. A package already blocked is a no-op; a package currently required by the same policy is moved (require → block). Requires confirm=true.`,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -215,7 +351,7 @@ func (s *Server) registerSoftwarePolicyTools() {
 	}, s.handleSoftwarePolicyBlockPackage)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.software.waive_package",
+		Name:        "ndcli.software.waive_package",
 		Description: `Stop having an opinion about one or more packages — removes each from whichever list (required or blocked) it sits in. Does NOT uninstall or reinstall anything on devices; just stops the policy from caring. Requires confirm=true.`,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -346,13 +482,18 @@ func (s *Server) handleSoftwarePolicyUpdateContent(ctx context.Context, req *mcp
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	if err := s.svc.SoftwarePolicyUpdateContent(apiCtx, org, input.Name, input.Content); err != nil {
+	warnings, err := s.svc.SoftwarePolicyUpdateContent(apiCtx, org, input.Name, input.Content)
+	if err != nil {
 		return s.errorResult(err)
 	}
-	return s.successResult(map[string]interface{}{
+	data := map[string]interface{}{
 		"name":   input.Name,
 		"action": "updated",
-	}, fmt.Sprintf("Software policy '%s' content updated", input.Name))
+	}
+	if len(warnings) > 0 {
+		data["warnings"] = warnings
+	}
+	return s.successResult(data, fmt.Sprintf("Software policy '%s' content updated", input.Name))
 }
 
 func (s *Server) handleSoftwarePolicyRename(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -535,14 +676,17 @@ func (s *Server) handleSoftwarePolicyPackageMutation(ctx context.Context, req *m
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	var outcomes []models.PackageActionOutcome
+	var (
+		outcomes []models.PackageActionOutcome
+		warnings []string
+	)
 	switch op {
 	case "require":
-		outcomes, err = s.svc.SoftwarePolicyRequirePackages(apiCtx, org, input.Policy, input.Packages)
+		outcomes, warnings, err = s.svc.SoftwarePolicyRequirePackages(apiCtx, org, input.Policy, input.Packages)
 	case "block":
-		outcomes, err = s.svc.SoftwarePolicyBlockPackages(apiCtx, org, input.Policy, input.Packages)
+		outcomes, warnings, err = s.svc.SoftwarePolicyBlockPackages(apiCtx, org, input.Policy, input.Packages)
 	case "waive":
-		outcomes, err = s.svc.SoftwarePolicyWaivePackages(apiCtx, org, input.Policy, input.Packages)
+		outcomes, warnings, err = s.svc.SoftwarePolicyWaivePackages(apiCtx, org, input.Policy, input.Packages)
 	default:
 		return s.errorResult(fmt.Errorf("internal error: unknown op %q", op))
 	}
@@ -573,10 +717,155 @@ func (s *Server) handleSoftwarePolicyPackageMutation(ctx context.Context, req *m
 		}
 	}
 	summary := fmt.Sprintf("%d change(s), %d move(s), %d no-op(s)", changed, moved, noop)
-	return s.successResult(map[string]interface{}{
-		"policy":   input.Policy,
-		"op":       op,
-		"results":  results,
-		"summary":  summary,
-	}, summary)
+	data := map[string]interface{}{
+		"policy":  input.Policy,
+		"op":      op,
+		"results": results,
+		"summary": summary,
+	}
+	if len(warnings) > 0 {
+		data["warnings"] = warnings
+	}
+	return s.successResult(data, summary)
+}
+
+func (s *Server) handleSoftwarePolicySetRepository(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[softwarePolicySetRepositoryInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		return s.previewResult(fmt.Sprintf("set repository '%s' in policy", input.Name), input.Policy)
+	}
+
+	patch := models.RepositoryPatch{
+		Name:     input.Name,
+		URL:      input.URL,
+		Priority: input.Priority,
+		Enabled:  input.Enabled,
+	}
+	if input.Signature != nil {
+		signature := models.RepositorySignature{
+			Type:   input.Signature.Type,
+			Pubkey: input.Signature.Pubkey,
+		}
+		for _, fp := range input.Signature.Fingerprints {
+			function := fp.Function
+			if function == "" {
+				function = "sha256"
+			}
+			signature.Fingerprints = append(signature.Fingerprints,
+				models.RepositoryFingerprint{Function: function, Fingerprint: fp.Fingerprint})
+		}
+		patch.Signature = &signature
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	outcome, warnings, err := s.svc.SoftwarePolicySetRepository(apiCtx, org, input.Policy, patch)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	return s.entryOutcomeResult(input.Policy, "repository", outcome, warnings)
+}
+
+func (s *Server) handleSoftwarePolicyRemoveRepository(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return s.handleSoftwarePolicyEntryRemove(ctx, req, "repository")
+}
+
+func (s *Server) handleSoftwarePolicyRemoveExternal(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return s.handleSoftwarePolicyEntryRemove(ctx, req, "external")
+}
+
+func (s *Server) handleSoftwarePolicyEntryRemove(ctx context.Context, req *mcp.CallToolRequest, kind string) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[softwarePolicyEntryRemoveInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		return s.previewResult(fmt.Sprintf("remove %s '%s' from policy", kind, input.Name), input.Policy)
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	var (
+		outcome  models.EntryActionOutcome
+		warnings []string
+	)
+	if kind == "repository" {
+		outcome, warnings, err = s.svc.SoftwarePolicyRemoveRepository(apiCtx, org, input.Policy, input.Name)
+	} else {
+		outcome, warnings, err = s.svc.SoftwarePolicyRemoveExternal(apiCtx, org, input.Policy, input.Name)
+	}
+	if err != nil {
+		return s.errorResult(err)
+	}
+	return s.entryOutcomeResult(input.Policy, kind, outcome, warnings)
+}
+
+func (s *Server) handleSoftwarePolicySetExternal(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[softwarePolicySetExternalInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		return s.previewResult(fmt.Sprintf("set external package '%s' in policy", input.Name), input.Policy)
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	outcome, warnings, err := s.svc.SoftwarePolicySetExternal(apiCtx, org, input.Policy, models.ExternalPatch{
+		Name:    input.Name,
+		Version: input.Version,
+		URL:     input.URL,
+		Force:   input.Force,
+	})
+	if err != nil {
+		return s.errorResult(err)
+	}
+	return s.entryOutcomeResult(input.Policy, "external", outcome, warnings)
+}
+
+// entryOutcomeResult is the shared success payload for the four
+// repository / external-package tools. Warnings are advisory — the
+// write already landed — so they ride alongside the outcome rather
+// than turning it into an error.
+func (s *Server) entryOutcomeResult(policy, kind string, outcome models.EntryActionOutcome, warnings []string) (*mcp.CallToolResult, error) {
+	data := map[string]interface{}{
+		"policy": policy,
+		"kind":   kind,
+		"name":   outcome.Name,
+		"action": outcome.Action,
+	}
+	if len(warnings) > 0 {
+		data["warnings"] = warnings
+	}
+	return s.successResult(data, fmt.Sprintf("%s '%s': %s", kind, outcome.Name, outcome.Action))
 }

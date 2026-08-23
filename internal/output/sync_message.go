@@ -95,9 +95,6 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 	typeWidth := 0
 	for _, r := range results {
 		sym := symbolForResult(r)
-		if sym == "" {
-			continue
-		}
 		typeLabel := r.Type
 		if len(typeLabel) > typeWidth {
 			typeWidth = len(typeLabel)
@@ -129,19 +126,54 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 	}
 }
 
+// symbolForResult maps a result entry's action to a one-character
+// marker. Two families arrive here: config sync uses lowercase verbs
+// (create/update/delete), and the software-policy path on NDAgent uses
+// SCREAMING_SNAKE constants (INSTALLED, REPO_CONFIGURED, ...).
+//
+// An action this build does not recognise gets a neutral bullet rather
+// than being dropped. Dropping it meant a newer agent's results
+// rendered as an empty change list, which reads as "nothing happened"
+// rather than "this build does not know that word" — and it is why an
+// installed package was invisible in `task describe` for a while.
 func symbolForResult(r syncResultEntry) string {
 	if r.Status != "" && r.Status != "success" && r.Status != "ok" {
 		return "✗"
 	}
-	switch r.Action {
+	switch strings.ToLower(r.Action) {
+	// Config sync
 	case "create", "created":
 		return "+"
 	case "update", "updated":
 		return "~"
 	case "delete", "deleted":
 		return "-"
+
+	// Package reconcile
+	case "installed":
+		return "+"
+	case "removed":
+		return "-"
+	case "already_present", "already_absent":
+		return "="
+	case "not_found", "invalid_name", "error":
+		return "✗"
+
+	// Custom repositories and external packages
+	case "repo_configured":
+		return "+"
+	case "repo_removed":
+		return "-"
+	case "repo_unchanged":
+		return "="
+	// REPO_CONFLICT: a repository this policy does not manage already
+	// defines the name. SHADOWED: more than one configured repository
+	// offers the package, so which one pkg picks is not determined by
+	// the policy. The agent refuses both rather than guessing.
+	case "repo_conflict", "shadowed":
+		return "✗"
 	}
-	return ""
+	return "•"
 }
 
 func looksLikeJSONObject(s string) bool {

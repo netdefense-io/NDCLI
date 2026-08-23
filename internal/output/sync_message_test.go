@@ -83,3 +83,52 @@ func TestFormatTaskMessage_JSONWithoutSyncFields(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "just a string")
 	}
 }
+
+// A software-policy result must be visible in `task describe`. It was
+// not: symbolForResult only knew the config-sync verbs and returned ""
+// for everything else, and writeResultLines dropped every entry with an
+// empty symbol. An installed package rendered as nothing at all.
+func TestSymbolForResult_SoftwareAndRepositoryActions(t *testing.T) {
+	cases := map[string]string{
+		"INSTALLED":       "+",
+		"REMOVED":         "-",
+		"ALREADY_PRESENT": "=",
+		"NOT_FOUND":       "✗",
+		"REPO_CONFIGURED": "+",
+		"REPO_UNCHANGED":  "=",
+		"REPO_REMOVED":    "-",
+		"REPO_CONFLICT":   "✗",
+		"SHADOWED":        "✗",
+		"create":          "+",
+		"updated":         "~",
+	}
+	for action, want := range cases {
+		got := symbolForResult(syncResultEntry{Action: action, Status: "success"})
+		if got != want {
+			t.Errorf("symbolForResult(%q) = %q, want %q", action, got, want)
+		}
+	}
+
+	// Unknown actions stay visible — "nothing happened" and "this build
+	// does not know that word" must not look the same.
+	if got := symbolForResult(syncResultEntry{Action: "SOME_FUTURE_ACTION", Status: "success"}); got == "" {
+		t.Error("an unknown action must still render")
+	}
+
+	// A failed status wins over whatever the action says.
+	if got := symbolForResult(syncResultEntry{Action: "INSTALLED", Status: "error"}); got != "✗" {
+		t.Errorf("failed status: got %q, want ✗", got)
+	}
+}
+
+func TestWriteResultLines_KeepsSoftwareResults(t *testing.T) {
+	var b strings.Builder
+	writeResultLines(&b, []syncResultEntry{
+		{Type: "SOFTWARE", Name: "btop", Action: "INSTALLED", Status: "success"},
+		{Type: "REPOSITORY", Name: "mimugmail", Action: "REPO_UNCHANGED", Status: "success"},
+	})
+	out := b.String()
+	if !strings.Contains(out, "btop") || !strings.Contains(out, "mimugmail") {
+		t.Errorf("software results dropped from the rendered output:\n%s", out)
+	}
+}
