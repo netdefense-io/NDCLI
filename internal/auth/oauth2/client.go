@@ -106,8 +106,10 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 			Domain:   c.domain,
 			ClientID: c.clientID,
 		}
+		// SaveTokens already prefixes its own errors; wrapping again here
+		// produced "failed to save tokens: failed to save tokens: ...".
 		if err := c.tokenManager.SaveTokens(token, userInfo, oauth2Config); err != nil {
-			return nil, fmt.Errorf("failed to save tokens: %w", err)
+			return nil, err
 		}
 
 		return token, nil

@@ -33,11 +33,10 @@ func (tm *TokenManager) SaveTokens(tokens *models.TokenResponse, userInfo *model
 	stored := models.StoredTokens{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
-		IDToken:      tokens.IDToken,
 		TokenType:    tokens.TokenType,
 		ExpiresAt:    expiresAt,
 		Scope:        tokens.Scope,
-		UserInfo:     userInfo,
+		UserInfo:     userInfo.Persistable(),
 		OAuth2Config: oauth2Config,
 		CreatedAt:    time.Now(),
 	}
@@ -164,10 +163,9 @@ func (tm *TokenManager) UpdateAccessToken(tokens *models.TokenResponse) error {
 		existing.RefreshToken = tokens.RefreshToken
 	}
 
-	// Update ID token if provided
-	if tokens.IDToken != "" {
-		existing.IDToken = tokens.IDToken
-	}
+	// Re-narrow the profile: a document written by an older release may carry
+	// fields that are no longer persisted.
+	existing.UserInfo = existing.UserInfo.Persistable()
 
 	data, err := json.Marshal(existing)
 	if err != nil {

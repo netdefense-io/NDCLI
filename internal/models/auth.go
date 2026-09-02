@@ -8,11 +8,17 @@ type StoredOAuth2Config struct {
 	ClientID string `json:"client_id"`
 }
 
-// StoredTokens represents the saved authentication tokens
+// StoredTokens represents the saved authentication tokens.
+//
+// Only what ndcli needs to call the API and refresh the session is persisted.
+// The id_token in particular is deliberately absent: nothing reads it, and it
+// is the single largest field in the bundle, which pushed the whole payload
+// past the per-secret size cap of the macOS and Windows keyrings. Documents
+// written by older releases still carry an "id_token" key; it is ignored on
+// read and dropped the next time the session is written.
 type StoredTokens struct {
 	AccessToken  string              `json:"access_token"`
 	RefreshToken string              `json:"refresh_token,omitempty"`
-	IDToken      string              `json:"id_token,omitempty"`
 	TokenType    string              `json:"token_type"`
 	ExpiresAt    time.Time           `json:"expires_at"`
 	Scope        string              `json:"scope,omitempty"`
@@ -41,7 +47,9 @@ type DeviceAuthResponse struct {
 	Interval                int    `json:"interval"`
 }
 
-// UserInfo represents user information from the OAuth2 provider
+// UserInfo represents user information from the OAuth2 provider.
+//
+// Not every field survives into storage; see Persistable.
 type UserInfo struct {
 	Subject       string `json:"sub"`
 	Email         string `json:"email,omitempty"`
@@ -49,6 +57,22 @@ type UserInfo struct {
 	Name          string `json:"name,omitempty"`
 	Nickname      string `json:"nickname,omitempty"`
 	Picture       string `json:"picture,omitempty"`
+}
+
+// Persistable returns a copy holding only the fields ndcli reads back out of
+// storage: Subject, Email and Name. Dropping the rest keeps unbounded values
+// -- a provider "picture" URL has no length limit -- out of a payload that has
+// to fit inside the keyring's per-secret cap, and avoids storing profile data
+// nothing uses.
+func (u *UserInfo) Persistable() *UserInfo {
+	if u == nil {
+		return nil
+	}
+	return &UserInfo{
+		Subject: u.Subject,
+		Email:   u.Email,
+		Name:    u.Name,
+	}
 }
 
 // IsExpired checks if the token is expired (with 60-second buffer)

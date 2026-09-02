@@ -2,11 +2,11 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/zalando/go-keyring"
@@ -36,144 +36,118 @@ type Storage interface {
 
 // KeyringStorage stores tokens in the system keyring.
 //
-// On Windows, the Credential Manager enforces CRED_MAX_CREDENTIAL_BLOB_SIZE
-// (2560 bytes). Auth0 tokens combined with federated-IdP id_tokens routinely
-// exceed that. When Save hits this limit, the instance switches itself over
-// to a FileStorage fallback for the rest of the process and persists
-// auth.storage=file so future runs go straight to the file backend.
+// Payloads are written through chunkedKeyring, which splits anything larger
+// than the platform's per-secret cap across numbered part entries. See
+// keyring_chunk.go for the caps and the on-disk layout.
 type KeyringStorage struct {
-	fallback *FileStorage
+	keyring chunkedKeyring
+	// warn receives non-fatal operator-facing messages. A nil warn means
+	// os.Stderr; it is a field so tests can capture instead of printing.
+	warn io.Writer
+}
+
+func (k *KeyringStorage) warnWriter() io.Writer {
+	if k.warn != nil {
+		return k.warn
+	}
+	return os.Stderr
 }
 
 // NewKeyringStorage creates a new keyring storage backend
 func NewKeyringStorage() *KeyringStorage {
-	return &KeyringStorage{}
+	return &KeyringStorage{
+		keyring: chunkedKeyring{
+			ops:     systemKeyring{},
+			service: KeyringService,
+			limit:   maxKeyringSecretBytes,
+		},
+	}
 }
 
 // Save stores data in the system keyring for the given credential key (email@host)
 func (k *KeyringStorage) Save(data []byte, credentialKey string) error {
-	if k.fallback != nil {
-		return k.fallback.Save(data, credentialKey)
-	}
-
 	if credentialKey == "" {
 		return fmt.Errorf("credential key is required for keyring storage")
 	}
 
-	err := keyring.Set(KeyringService, credentialKey, string(data))
-	if err == nil {
-		// Update config file with credential key (for multi-config isolation)
-		if cfgErr := config.UpdateValue("auth.account", credentialKey); cfgErr != nil {
-			return fmt.Errorf("failed to update config with account: %w", cfgErr)
-		}
-		return nil
+	if err := k.keyring.save(credentialKey, data); err != nil {
+		return fmt.Errorf("failed to save to keyring: %w", err)
 	}
 
-	if runtime.GOOS == "windows" && isCredentialBlobTooBig(err) {
-		return k.fallbackToFile(data, credentialKey, os.Stderr)
+	// Update config file with credential key (for multi-config isolation)
+	if err := config.UpdateValue("auth.account", credentialKey); err != nil {
+		return fmt.Errorf("failed to update config with account: %w", err)
 	}
-
-	return fmt.Errorf("failed to save to keyring: %w", err)
-}
-
-// fallbackToFile switches this KeyringStorage over to FileStorage after the
-// Windows Credential Manager rejected an oversized blob. The decision is
-// persisted to config so subsequent runs skip the keyring entirely.
-func (k *KeyringStorage) fallbackToFile(data []byte, credentialKey string, warn io.Writer) error {
-	fs := NewFileStorage("")
-
-	fmt.Fprintln(warn, "Warning: token blob exceeds the Windows Credential Manager 2560-byte limit.")
-	fmt.Fprintf(warn, "  Falling back to plaintext file storage at %s (user-only ACLs).\n", fs.FilePath())
-	fmt.Fprintln(warn, "  This is the same fallback ndcli uses when the system keyring is unavailable.")
-	fmt.Fprintln(warn, "  To suppress this warning, set 'auth.storage: file' in your config.yaml.")
-
-	if err := fs.Save(data, credentialKey); err != nil {
-		return fmt.Errorf("keyring rejected oversized blob and file fallback also failed: %w", err)
-	}
-
-	if err := config.UpdateValue("auth.storage", "file"); err != nil {
-		return fmt.Errorf("saved to file but failed to persist auth.storage=file: %w", err)
-	}
-
-	k.fallback = fs
 	return nil
 }
 
 // Load retrieves data from the system keyring for the current credential key
 func (k *KeyringStorage) Load() ([]byte, error) {
-	if k.fallback != nil {
-		return k.fallback.Load()
-	}
-
 	credentialKey := k.GetCurrentCredentialKey()
 	if credentialKey == "" {
 		return nil, nil // No account configured
 	}
-
-	// Load tokens for that credential key from keyring
-	data, err := keyring.Get(KeyringService, credentialKey)
-	if err != nil {
-		if err == keyring.ErrNotFound {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return []byte(data), nil
+	return k.keyring.load(credentialKey)
 }
 
 // Clear removes data from the system keyring for the current credential key
 func (k *KeyringStorage) Clear() error {
-	if k.fallback != nil {
-		return k.fallback.Clear()
-	}
-
 	credentialKey := k.GetCurrentCredentialKey()
 	if credentialKey == "" {
 		return nil // Nothing to clear
 	}
 
-	// Delete the token data from keyring
-	if err := keyring.Delete(KeyringService, credentialKey); err != nil && err != keyring.ErrNotFound {
+	// clear removes the primary entry -- the one that actually holds the
+	// session -- even when best-effort cleanup of leftover part entries fails,
+	// and reports that separately. Reporting it as a failed logout would print
+	// "logout failed" for a session that is genuinely gone and leave
+	// auth.account pointing at it.
+	err := k.keyring.clear(credentialKey)
+	var cleanup partCleanupError
+	if err != nil && !errors.As(err, &cleanup) {
+		// The session secret is still in the keyring. Leave auth.account in
+		// place so a retry can still find it.
 		return err
 	}
 
 	// Clear the account from config
-	if err := config.UpdateValue("auth.account", ""); err != nil {
-		return fmt.Errorf("failed to clear config account: %w", err)
+	if cfgErr := config.UpdateValue("auth.account", ""); cfgErr != nil {
+		return fmt.Errorf("failed to clear config account: %w", cfgErr)
 	}
 
+	if err != nil {
+		fmt.Fprintf(k.warnWriter(), "Warning: the stored session was removed, but leftover keyring entries could not be deleted: %v\n", cleanup.err)
+		fmt.Fprintf(k.warnWriter(), "  They hold fragments of the old session. Remove entries named %q with a %q suffix from your keyring once it is available.\n", credentialKey, partSuffix)
+	}
 	return nil
 }
 
 // Name returns the storage backend name
 func (k *KeyringStorage) Name() string {
-	if k.fallback != nil {
-		return k.fallback.Name()
-	}
 	return "keyring"
 }
 
 // GetCurrentCredentialKey returns the current credential key (email@host) from config
 func (k *KeyringStorage) GetCurrentCredentialKey() string {
-	if k.fallback != nil {
-		return k.fallback.GetCurrentCredentialKey()
-	}
 	return config.Get().Auth.Account
 }
 
-// isCredentialBlobTooBig recognizes the size-limit error from the Windows
-// Credential Manager. zalando/go-keyring pre-checks the secret on Windows and
-// returns "data passed to Set was too big"; if that check is bypassed the
-// underlying wincred call surfaces "The stub received bad data" (Win32 1783).
+// isCredentialBlobTooBig recognizes a keyring rejecting a secret for being too
+// large. zalando/go-keyring pre-checks the size on macOS and Windows and
+// returns ErrSetDataTooBig ("data passed to Set was too big"); if that check is
+// bypassed the underlying wincred call surfaces "The stub received bad data"
+// (Win32 1783) instead.
 func isCredentialBlobTooBig(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, keyring.ErrSetDataTooBig) {
+		return true
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "too big") ||
 		strings.Contains(msg, "stub received bad data")
 }
-
 
 // FileStorage stores tokens in a host-scoped file
 type FileStorage struct {
@@ -393,9 +367,10 @@ func MigrateToKeyring() (string, error) {
 	host := config.Get().Controlplane.Host
 	credentialKey := config.BuildCredentialKey(email, host)
 
-	// Save to keyring with credential key (email@host)
+	// Save to keyring with credential key (email@host). Save prefixes its own
+	// errors; wrapping again here printed "failed to save to keyring:" twice.
 	if err := keyringStorage.Save(data, credentialKey); err != nil {
-		return "", fmt.Errorf("failed to save to keyring: %w", err)
+		return "", err
 	}
 
 	return credentialKey, nil
