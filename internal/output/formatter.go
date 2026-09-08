@@ -207,6 +207,18 @@ type Formatter interface {
 	FormatScheduledTasks(tasks []models.ScheduledTask, total int) error
 	FormatScheduledTaskRegisterResult(result *models.ScheduledTaskRegisterResult) error
 
+	// Support tickets
+	FormatTicketList(tickets []models.Ticket, total int, showOrg bool) error
+	FormatTicketDetail(ticket *models.Ticket, messages []models.TicketInteraction, messagesTotal int) error
+	FormatTicketThread(messages []models.TicketInteraction, total int) error
+	FormatTicketAttachment(att *models.TicketAttachment) error
+	FormatTicketDownload(result *models.TicketDownloadResult) error
+	FormatTicketParticipants(participants []models.TicketParticipant) error
+	FormatTicketStatusChange(ticket *models.Ticket) error
+	FormatTicketMessagePosted(code string, msg *models.TicketInteraction) error
+	FormatTicketAttachmentDeleted(uuid string) error
+	FormatSupportProfile(profile *models.SupportResponderProfile) error
+
 	// Personal Access Tokens
 	FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error
 	FormatTokenCreated(resp models.TokenCreateResponse) error
@@ -255,6 +267,7 @@ func (f *BaseFormatter) Info(message string) {
 
 // GetFormatter returns the appropriate formatter for the given format
 func GetFormatter(format string) Formatter {
+	selectedFormat = Format(format)
 	switch Format(format) {
 	case FormatSimple:
 		return NewSimpleFormatter()
@@ -405,10 +418,27 @@ func formatFirmwareDataLines(d *firmwareUpgradeData) []string {
 	return lines
 }
 
-// PrintPagination prints pagination info
+// selectedFormat records the format GetFormatter last handed out, so the
+// few helpers that print outside a Formatter can tell whether stdout is
+// carrying machine-readable output.
+var selectedFormat Format
+
+// PrintPagination prints pagination info. It is a no-op under `-f json`:
+// every list command calls it after the formatter, and a trailing human
+// page line appended to a JSON document makes the whole thing unparseable.
 func PrintPagination(current, total, perPage int) {
-	if total > perPage {
-		totalPages := (total + perPage - 1) / perPage
-		ColorDim.Printf("\nPage %d of %d (showing %d of %d items)\n", current, totalPages, perPage, total)
+	if line := paginationLine(current, total, perPage); line != "" {
+		ColorDim.Print(line)
 	}
+}
+
+// paginationLine returns the line PrintPagination would print, or "" when
+// there is nothing to say — one page of results, or JSON output, where a
+// human line after the closing brace would break the document.
+func paginationLine(current, total, perPage int) string {
+	if selectedFormat == FormatJSON || perPage <= 0 || total <= perPage {
+		return ""
+	}
+	totalPages := (total + perPage - 1) / perPage
+	return fmt.Sprintf("\nPage %d of %d (showing %d of %d items)\n", current, totalPages, perPage, total)
 }

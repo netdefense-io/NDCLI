@@ -101,6 +101,8 @@ func NewServer() (*Server, error) {
 	s.registerDeviceHealthTool()
 	s.registerScheduleTools()
 	s.registerConsoleTools()
+	s.registerTicketTools()
+	s.registerSupportTools()
 
 	// Register all resources
 	s.registerResources()
@@ -285,7 +287,32 @@ func (s *Server) jsonResult(response interface{}, isError bool) (*mcp.CallToolRe
 	}, nil
 }
 
-// contextWithTimeout creates a context with a reasonable timeout
+// contextWithTimeout creates a context with a reasonable timeout for a JSON
+// API call.
 func contextWithTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), apiTimeout)
+}
+
+// contextForCleanup returns a short-lived context for best-effort cleanup
+// after a failed write. It must not reuse the failed call's context: the
+// most likely reason a write failed is that its own deadline expired, and a
+// cleanup inherited from an expired context does nothing at all — exactly
+// when it is needed.
+func contextForCleanup() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), cleanupTimeout)
+}
+
+// contextForRawTransfer returns the context for an attachment upload or
+// download. It deliberately carries no deadline of its own.
+//
+// A context deadline is the minimum of the whole chain, so handing a raw
+// transfer the 30 s JSON budget as its parent would silently win over the
+// api package's own per-transfer deadline and cap every attachment at 30 s
+// — the exact cap that deadline exists to lift for a 25 MiB file on a slow
+// link. The bound here is api.rawTransferTimeout, applied inside PostRaw
+// and GetStream. JSON calls made alongside a transfer (the thread lookup a
+// download starts with) stay bounded by the API client's own 30 s HTTP
+// timeout, which no context can widen.
+func contextForRawTransfer() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -745,4 +746,34 @@ func completeAccountEmailThenRole(cmd *cobra.Command, args []string, toComplete 
 	default:
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// completeDeviceUUIDs completes a device UUID with the device name as its
+// description. Ticket --device flags identify devices by uuid, not name, so
+// completeDevices (which yields names) would suggest values the API rejects.
+func completeDeviceUUIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := initForCompletion(); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	org := getOrgForCompletion(cmd)
+	if org == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	resp, err := apiClient.Get(context.Background(), "/api/v1/organizations/"+url.PathEscape(org)+"/devices",
+		map[string]string{"per_page": completionPerPageMax500})
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var result models.DeviceListResponse
+	if err := api.ParseResponse(resp, &result); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var uuids []string
+	for _, device := range result.GetItems() {
+		if device.UUID == "" {
+			continue
+		}
+		uuids = append(uuids, device.UUID+"\t"+device.Name)
+	}
+	return uuids, cobra.ShellCompDirectiveNoFileComp
 }

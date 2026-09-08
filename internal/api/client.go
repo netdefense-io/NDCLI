@@ -69,6 +69,7 @@ func ReadBody(r io.Reader) ([]byte, error) {
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	rawClient  *http.Client
 	authMgr    AuthProvider
 	userAgent  string
 }
@@ -85,6 +86,14 @@ func NewClient(baseURL string, sslVerify bool, authMgr AuthProvider) *Client {
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
+		// rawClient shares the transport but carries no global timeout:
+		// attachment uploads/downloads are bounded by a per-transfer
+		// context deadline (rawTransferTimeout) instead, because a
+		// 25 MiB transfer over a slow link legitimately outlives the
+		// 30 s budget that suits a JSON call.
+		rawClient: &http.Client{
 			Transport: transport,
 		},
 		authMgr:   authMgr,
@@ -273,4 +282,200 @@ func ParseResponseWithStatus(resp *http.Response, target interface{}) (int, erro
 		return resp.StatusCode, err
 	}
 	return resp.StatusCode, nil
+}
+
+// --- Raw transfers (attachment upload / download) ---
+//
+// Ticket attachments are the only part of the API that moves bytes rather
+// than JSON: an upload is the file itself as the raw request body (see the
+// support-ticket attachment contract — multipart would have to be parsed in
+// full before the size cap could reject it), and a download is the stored
+// object streamed back. Both need two things the JSON helpers above do not
+// provide: a body that is not marshalled/decoded, and a time budget large
+// enough for 25 MiB over a slow link.
+
+// rawTransferTimeout bounds a single attachment upload or download. It
+// replaces the client's 30 s JSON timeout for these calls; the deadline is
+// attached to the request context and released when the response body is
+// closed. A var so tests can shorten it.
+var rawTransferTimeout = 10 * time.Minute
+
+// MaxAttachmentBytes is the server's per-file attachment cap. Clients check
+// it before sending so an oversized file fails locally instead of after
+// uploading a request the server rejects on Content-Length.
+const MaxAttachmentBytes int64 = 25 << 20 // 25 MiB
+
+// BodyOpener opens the request body for a raw POST. It returns the reader,
+// the exact number of bytes it will yield (sent as Content-Length, which
+// NDManager checks before reading a byte), and an error. PostRaw calls it
+// once per attempt, so it must be able to produce a fresh reader for the
+// single 401-retry.
+type BodyOpener func() (io.ReadCloser, int64, error)
+
+// cancelOnClose ties a context cancel func to the lifetime of a response
+// body, so a streaming caller keeps its deadline until it is done reading
+// and nothing leaks when it stops.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
+}
+
+// PostRaw POSTs the bytes produced by open as the request body, with an
+// explicit Content-Type and Content-Length, and the usual bearer token. The
+// response is returned unparsed so the caller can decode the JSON envelope
+// (or read the error) itself.
+func (c *Client) PostRaw(ctx context.Context, path string, params map[string]string, open BodyOpener, contentType string) (*http.Response, error) {
+	return c.doRawPost(ctx, appendParams(path, params), open, contentType, true)
+}
+
+func (c *Client) doRawPost(ctx context.Context, path string, open BodyOpener, contentType string, retry bool) (*http.Response, error) {
+	body, length, err := open()
+	if err != nil {
+		return nil, err
+	}
+
+	transferCtx, cancel := context.WithTimeout(ctx, rawTransferTimeout)
+
+	req, err := http.NewRequestWithContext(transferCtx, http.MethodPost, c.baseURL+path, body)
+	if err != nil {
+		body.Close()
+		cancel()
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	// ContentLength must be set explicitly: an io.ReadCloser of unknown
+	// size would otherwise be sent chunked, and the server's pre-read size
+	// check has nothing to look at.
+	req.ContentLength = length
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.userAgent)
+
+	if c.authMgr != nil {
+		token, err := c.authMgr.GetAccessToken()
+		if err != nil {
+			body.Close()
+			cancel()
+			return nil, fmt.Errorf("failed to get access token: %w", err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	resp, err := c.rawClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, c.handleNetworkError(err)
+	}
+	update.ProcessResponseHeaders(resp.Header)
+
+	if resp.StatusCode == http.StatusUnauthorized && retry && c.authMgr != nil {
+		resp.Body.Close()
+		cancel()
+		time.Sleep(100 * time.Millisecond)
+		if err := c.authMgr.ForceRefresh(); err != nil {
+			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
+			if err.Error() != "" {
+				msg = err.Error()
+			}
+			return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: msg}
+		}
+		// open() is called again on the retry, which is why it is a
+		// factory rather than a reader: the first attempt consumed the
+		// previous one.
+		return c.doRawPost(ctx, path, open, contentType, false)
+	}
+
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+// GetStream performs a GET and returns the response with its body still
+// open, for callers that stream the payload to disk. A status >= 400 is
+// parsed through ParseError exactly like a JSON call, and the body is
+// closed before returning — so a non-nil response always has bytes worth
+// reading, and the caller must close it.
+func (c *Client) GetStream(ctx context.Context, path string) (*http.Response, error) {
+	return c.doRawGet(ctx, path, true)
+}
+
+func (c *Client) doRawGet(ctx context.Context, path string, retry bool) (*http.Response, error) {
+	transferCtx, cancel := context.WithTimeout(ctx, rawTransferTimeout)
+
+	req, err := http.NewRequestWithContext(transferCtx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", c.userAgent)
+
+	if c.authMgr != nil {
+		token, err := c.authMgr.GetAccessToken()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("failed to get access token: %w", err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	resp, err := c.rawClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, c.handleNetworkError(err)
+	}
+	update.ProcessResponseHeaders(resp.Header)
+
+	if resp.StatusCode == http.StatusUnauthorized && retry && c.authMgr != nil {
+		resp.Body.Close()
+		cancel()
+		time.Sleep(100 * time.Millisecond)
+		if err := c.authMgr.ForceRefresh(); err != nil {
+			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
+			if err.Error() != "" {
+				msg = err.Error()
+			}
+			return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: msg}
+		}
+		return c.doRawGet(ctx, path, false)
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := ParseError(resp)
+		resp.Body.Close()
+		cancel()
+		return nil, apiErr
+	}
+
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+// appendParams encodes params onto path as a query string, skipping empty
+// values — the same rule Get/PostWithParams apply.
+func appendParams(path string, params map[string]string) string {
+	if len(params) == 0 {
+		return path
+	}
+	query := url.Values{}
+	for k, v := range params {
+		if v != "" {
+			query.Set(k, v)
+		}
+	}
+	if encoded := query.Encode(); encoded != "" {
+		return path + "?" + encoded
+	}
+	return path
 }

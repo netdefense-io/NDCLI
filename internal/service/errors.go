@@ -9,7 +9,13 @@ const (
 	CodeAuthFailed       = "AUTH_FAILED"
 	CodeOrgRequired      = "ORG_REQUIRED"
 	CodeInvalidInput     = "INVALID_INPUT"
-	CodeAPIError         = "API_ERROR"
+	// CodeDestinationExists is returned when a download would replace an
+	// existing local file. It has its own code so each front-end can name
+	// its own way of overriding — a --overwrite flag in the CLI, an
+	// overwrite parameter over MCP — while the shared message stays
+	// surface-neutral.
+	CodeDestinationExists = "DESTINATION_EXISTS"
+	CodeAPIError          = "API_ERROR"
 )
 
 // Error is the typed error returned by service methods. Callers can type-

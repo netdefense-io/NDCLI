@@ -5,9 +5,14 @@ import (
 	"time"
 )
 
-const (
-	apiTimeout = 30 * time.Second
-)
+// apiTimeout bounds a JSON tool call. A var, not a const, so tests can
+// shorten it to prove which calls it does and does not bound.
+var apiTimeout = 30 * time.Second
+
+// cleanupTimeout bounds a best-effort cleanup call made after a write has
+// already failed. Short on purpose: the caller is holding a real error and
+// must not be delayed further by tidying.
+var cleanupTimeout = 10 * time.Second
 
 // Tool input types
 
