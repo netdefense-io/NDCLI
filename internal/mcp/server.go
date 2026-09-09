@@ -83,6 +83,16 @@ func NewServer() (*Server, error) {
 		consoleSessions: newConsoleSessionManager(),
 	}
 
+	s.registerAll()
+
+	return s, nil
+}
+
+// registerAll installs every tool and resource on the server. It is split out
+// of NewServer so a test can build the same surface without the config, auth
+// and keyring setup around it — a test that listed the register calls itself
+// would still pass if NewServer stopped making one.
+func (s *Server) registerAll() {
 	// Register all tools
 	s.registerDeviceTools()
 	s.registerOrgTools()
@@ -106,8 +116,6 @@ func NewServer() (*Server, error) {
 
 	// Register all resources
 	s.registerResources()
-
-	return s, nil
 }
 
 // Serve starts the MCP server on stdio transport.

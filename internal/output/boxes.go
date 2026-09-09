@@ -232,11 +232,10 @@ const fieldBoxFallbackWidth = 100
 const fieldBoxFloorWidth = 24
 
 // boxWidthLimit reports the widest a self-sizing box may grow: the terminal's
-// width when stdout is one, else a fixed cap. It sizes off os.Stdout by
-// design — that is where the formatters write, whatever writer a test hands
-// them. Growing past it would wrap in
-// the terminal and break every border. It is a var so a test can force a
-// width.
+// width when stdout is one, else a fixed cap. Growing past it would wrap in
+// the terminal and break every border. It sizes off os.Stdout by design —
+// that is where the formatters write, whatever writer a test hands them. It
+// is a var so a test can force a width.
 var boxWidthLimit = func() int {
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		return w
@@ -264,8 +263,34 @@ type fieldBoxEntry struct {
 
 // field appends one "Label: value" line. The value may already carry ANSI
 // colour; width is measured with visibleLength, so it still aligns.
+//
+// The value is normalised on the way in, so everything downstream — the
+// width calculation as much as the wrap — sees line breaks in one form.
 func (b *fieldBox) field(label, value string) {
-	b.fields = append(b.fields, fieldBoxEntry{label: label, value: value})
+	b.fields = append(b.fields, fieldBoxEntry{label: label, value: normalizeLineBreaks(value)})
+}
+
+// normalizeLineBreaks folds CRLF and lone CR into LF and drops trailing
+// blank space.
+//
+// A carriage return is worse than a newline here. visibleLength counts it as
+// one ordinary column, so the padding comes out a column short, and the
+// terminal then renders it as a return to column 0, painting the rest of the
+// value over the left border. Trailing breaks go too: they would otherwise
+// add an empty content line under the field.
+func normalizeLineBreaks(s string) string {
+	if strings.ContainsRune(s, '\r') {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+	}
+	return strings.TrimRight(s, " \n")
+}
+
+// hasLineBreak reports whether s would break a content line. It still looks
+// for a carriage return even though field() normalises them away, so a value
+// reaching the renderer by some other route cannot slip past.
+func hasLineBreak(s string) bool {
+	return strings.ContainsAny(s, "\n\r")
 }
 
 // width picks the rendered width: wide enough for the longest field and the
@@ -330,12 +355,12 @@ func (b *fieldBox) lines(content int) []string {
 	var out []string
 	for _, f := range b.fields {
 		prefix := f.label + ": "
-		// A newline has to reach the wrap branch whatever its length:
-		// visibleLength counts it as one ordinary column, so a value that
+		// A line break has to reach the wrap branch whatever its length:
+		// visibleLength counts one as an ordinary column, so a value that
 		// "fits" could still break the line in two and leave one half
 		// without a left border and the other without a right one.
 		if visibleLength(ColorLabel.Sprint(prefix)+f.value) <= content &&
-			!strings.Contains(f.value, "\n") {
+			!hasLineBreak(f.value) {
 			// Fits as it stands, colour and all. Every coloured value today
 			// is a short status or enum, so this is the path they take.
 			out = append(out, ColorLabel.Sprint(prefix)+f.value)

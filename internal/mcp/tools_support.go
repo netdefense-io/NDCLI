@@ -90,7 +90,7 @@ const (
 	responderWriteNote = " Requires an enabled NetDefense support responder with write access: a login or a read-write token. Read-only tokens are refused, and an organization-scoped token is refused outright because this surface is cross-organization."
 )
 
-// registerSupportTools registers the support-console tools.
+// registerSupportTools registers the responder-console tools (ndcli respond).
 func (s *Server) registerSupportTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.respond.me",

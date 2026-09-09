@@ -249,3 +249,66 @@ func TestFieldBox_EmbeddedNewlineStaysInsideTheBorder(t *testing.T) {
 		}
 	}
 }
+
+// TestFieldBox_CarriageReturnStaysInsideTheBorder is the carriage-return
+// companion to the newline regression. A "\r" is the worse of the two:
+// visibleLength counts it as one ordinary column, so the padding came out a
+// column short, and the terminal then rendered it as a return to column 0,
+// painting the rest of the value straight over the left border. A CRLF value
+// was only half handled — the wrap split on the "\n" and left the "\r"
+// stranded at the end of the first line.
+func TestFieldBox_CarriageReturnStaysInsideTheBorder(t *testing.T) {
+	// Wide enough that every case fits on one line by length alone, so the
+	// line break is the only thing that can split it.
+	forceBoxWidth(t, 66)
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"crlf", "one\r\ntwo", []string{"one", "two"}},
+		{"bare cr", "one\rtwo", []string{"one", "two"}},
+		{"trailing cr", "trailing\r", []string{"trailing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &fieldBox{title: "Return"}
+			b.field("Detail", tc.value)
+			lines := renderFieldBox(b)
+
+			if len(lines) < 3 {
+				t.Fatalf("expected a box with content, got:\n%s", strings.Join(lines, "\n"))
+			}
+			width := visibleLength(lines[0])
+			for i, line := range lines[1 : len(lines)-1] {
+				if !strings.HasPrefix(line, BoxVertical) || !strings.HasSuffix(line, BoxVertical) {
+					t.Errorf("content line %d is not bordered on both sides: %q", i, line)
+				}
+				if got := visibleLength(line); got != width {
+					t.Errorf("content line %d is %d columns, want %d: %q", i, got, width, line)
+				}
+			}
+
+			// No carriage return may survive into the rendered box: it would
+			// return the cursor to column 0 and overwrite the left border.
+			for _, line := range lines {
+				if strings.ContainsRune(line, '\r') {
+					t.Errorf("a carriage return reached the output: %q", line)
+				}
+			}
+
+			seen := countTokens(lines)
+			for _, want := range tc.want {
+				if seen[want] != 1 {
+					t.Errorf("%q appears %d times, want exactly 1:\n%s", want, seen[want], strings.Join(lines, "\n"))
+				}
+			}
+			// A trailing break must not leave an empty content line behind.
+			for i, line := range lines[1 : len(lines)-1] {
+				if strings.TrimSpace(strings.Trim(line, BoxVertical)) == "" {
+					t.Errorf("content line %d is blank: %q", i, line)
+				}
+			}
+		})
+	}
+}
