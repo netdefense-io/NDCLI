@@ -11,9 +11,9 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// Support-ticket tools, the org side of the resource. Every ndcli ticket
-// command has a tool here (MCP-parity policy); the support side lives in
-// tools_support.go.
+// Support-ticket tools, the org side of the resource. Every ndcli support
+// command has a tool here (MCP-parity policy); the responder side
+// (ndcli respond) lives in tools_support.go.
 //
 // Two conventions matter for callers:
 //   - Ticket text (subjects, message bodies, filenames) is returned in data
@@ -111,7 +111,7 @@ type ticketDownloadInput struct {
 }
 
 // ticketListProperties are the filter properties shared by the org and
-// support list tools.
+// respond list tools.
 func ticketListProperties() map[string]interface{} {
 	return map[string]interface{}{
 		"status":   stringEnumProperty("Filter by status", models.TicketStatuses),
@@ -144,7 +144,7 @@ const ticketCodeDesc = "Ticket code (8 alphanumeric characters)"
 // registerTicketTools registers the organization-side ticket tools.
 func (s *Server) registerTicketTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.list",
+		Name:        "ndcli.support.list",
 		Description: "List the organization's support tickets, with optional status/priority/category/participant/device/subject filters.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -157,7 +157,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketList)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.get",
+		Name:        "ndcli.support.get",
 		Description: "Read one support ticket, by default together with its message thread.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -171,7 +171,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketGet)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.create",
+		Name:        "ndcli.support.create",
 		Description: "Open a support ticket with its first message. Message text is plain text, never markup.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -189,7 +189,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketCreate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.update",
+		Name:        "ndcli.support.update",
 		Description: "Change a ticket's subject, priority, category or related devices. At least one field is required. `devices` replaces the whole list, so an empty list clears every related device — which is why this tool requires confirm=true; without it, returns a preview.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -207,7 +207,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketUpdate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.close",
+		Name:        "ndcli.support.close",
 		Description: "Close a ticket. An optional message is recorded as a reply before the status change.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -221,7 +221,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketClose)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.reopen",
+		Name:        "ndcli.support.reopen",
 		Description: "Reopen a closed ticket. An optional message is recorded as a reply before the status change.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -235,7 +235,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketReopen)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.messages",
+		Name:        "ndcli.support.messages",
 		Description: "List a ticket's messages, oldest first by default.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -248,7 +248,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketMessages)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.reply",
+		Name:        "ndcli.support.reply",
 		Description: "Post a reply visible to NetDefense Support. A reply to a closed ticket reopens it — read ticket_status from the result rather than assuming the previous status held.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -262,7 +262,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketReply)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.note",
+		Name:        "ndcli.support.note",
 		Description: "Post an internal note visible only to this organization. Support never sees it, and it does not change the ticket status.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -276,7 +276,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketNote)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.participant_add",
+		Name:        "ndcli.support.participant_add",
 		Description: "Add an enabled organization member to a ticket as a participant.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -290,7 +290,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketParticipantAdd)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.participant_remove",
+		Name:        "ndcli.support.participant_remove",
 		Description: "Remove a participant from a ticket. Requires confirm=true; without it, returns a preview. The ticket creator cannot be removed.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -305,7 +305,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketParticipantRemove)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.attachment_upload",
+		Name:        "ndcli.support.attachment_upload",
 		Description: "Upload a local file and return its attachment uuid. Reads the path on the machine running this server; the file must be a regular file of at most 25 MiB. The uuid is unbound until referenced in a create or reply, and is swept after 24 hours.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -318,7 +318,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketAttachmentUpload)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.attachment_delete",
+		Name:        "ndcli.support.attachment_delete",
 		Description: "Delete an attachment that is not yet bound to a ticket. Requires confirm=true; without it, returns a preview.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -332,7 +332,7 @@ func (s *Server) registerTicketTools() {
 	}, s.handleTicketAttachmentDelete)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.ticket.attachment_download",
+		Name:        "ndcli.support.attachment_download",
 		Description: "Download a ticket attachment to the machine running this server. Writes to path, or to the attachment's filename in the working directory; an existing file is never replaced unless overwrite is true. The SHA-256 is verified before the file appears.",
 		InputSchema: map[string]interface{}{
 			"type": "object",

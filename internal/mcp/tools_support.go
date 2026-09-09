@@ -10,8 +10,8 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// Support-console tools: the responder's side of the same tickets the
-// ndcli.ticket.* tools work from the organization's side.
+// Responder-console tools (ndcli respond): the responder's side of the same
+// tickets the ndcli.support.* tools work from the organization's side.
 //
 // None of these take an organization. The surface is cross-org by design, so
 // `organization` on the list tool is an exact-name filter, not a scope. Every
@@ -93,13 +93,13 @@ const (
 // registerSupportTools registers the support-console tools.
 func (s *Server) registerSupportTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.me",
+		Name:        "ndcli.respond.me",
 		Description: "Show the caller's support responder profile, including whether this principal may write." + responderReadNote,
 		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 	}, s.handleSupportMe)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.list",
+		Name:        "ndcli.respond.list",
 		Description: "List support tickets across every organization. `organization` is an exact-name filter, not a scope; an unknown name returns an empty page." + responderReadNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -110,7 +110,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportList)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.get",
+		Name:        "ndcli.respond.get",
 		Description: "Read one ticket from any organization, by default with its message thread. Support-authored internal notes are visible here; the organization's own notes never are." + responderReadNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -123,7 +123,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportGet)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.update",
+		Name:        "ndcli.respond.update",
 		Description: "Set a ticket's priority and/or category. Support owns triage only: subject, devices and participants stay organization-owned. Requires confirm=true; without it, returns a preview." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -138,7 +138,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportUpdate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.close",
+		Name:        "ndcli.respond.close",
 		Description: "Close a ticket. An optional message is recorded as a support reply before the status change." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -151,7 +151,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportClose)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.reopen",
+		Name:        "ndcli.respond.reopen",
 		Description: "Reopen a closed ticket. An optional message is recorded as a support reply before the status change." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -164,7 +164,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportReopen)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.messages",
+		Name:        "ndcli.respond.messages",
 		Description: "List a ticket's messages as support sees them, oldest first by default." + responderReadNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -176,7 +176,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportMessages)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.reply",
+		Name:        "ndcli.respond.reply",
 		Description: "Post a reply visible to the organization. A support reply moves the ticket to PENDING and emails every participant; a reply to a closed ticket reopens it, so read ticket_status from the result." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -189,7 +189,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportReply)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.note",
+		Name:        "ndcli.respond.note",
 		Description: "Post an internal note visible only to support. It changes no status and emails nobody." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -202,7 +202,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportNote)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.attachment_upload",
+		Name:        "ndcli.respond.attachment_upload",
 		Description: "Upload a local file into a ticket's scope and return its attachment uuid. Reads the path on the machine running this server; the file must be a regular file of at most 25 MiB." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -215,7 +215,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportAttachmentUpload)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.attachment_delete",
+		Name:        "ndcli.respond.attachment_delete",
 		Description: "Delete an attachment that is not yet bound to a ticket. Requires confirm=true; without it, returns a preview." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -228,7 +228,7 @@ func (s *Server) registerSupportTools() {
 	}, s.handleSupportAttachmentDelete)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.support.attachment_download",
+		Name:        "ndcli.respond.attachment_download",
 		Description: "Download a ticket attachment to the machine running this server. Writes to path, or to the attachment's filename in the working directory; an existing file is never replaced unless overwrite is true. The SHA-256 is verified before the file appears." + responderWriteNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -342,9 +342,10 @@ func (s *Server) handleSupportUpdate(ctx context.Context, req *mcp.CallToolReque
 }
 
 func (s *Server) supportUpdateCore(_ context.Context, input *supportUpdateInput) (*mcp.CallToolResult, error) {
-	// Gated like ndcli.ticket.update. The support patch cannot clear a list
-	// the way the org-side one can, but a pair of twin surfaces that gates
-	// one and not the other would be the surprising arrangement.
+	// Gated like the org-side ndcli.support.update. This responder patch
+	// (ndcli.respond.update) cannot clear a list the way the org-side one
+	// can, but a pair of twin surfaces that gates one and not the other
+	// would be the surprising arrangement.
 	if !input.Confirm {
 		return s.previewResult("update ticket", input.Code)
 	}

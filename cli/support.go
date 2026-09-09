@@ -13,17 +13,17 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// The support console: the responder's side of the same tickets `ndcli
-// ticket` works from the organization's side.
+// The responder console: the responder's side of the same tickets `ndcli
+// support` works from the organization's side.
 //
 // Nothing here calls requireOrganization(). The support surface is cross-org
 // by design — codes are global and a responder may read any ticket — so an
-// org is neither needed nor meaningful; `support list --org NAME` is a
+// org is neither needed nor meaningful; `respond list --org NAME` is a
 // filter, not a scope.
 
 var supportCmd = &cobra.Command{
-	Use:   "support",
-	Short: "Support console for NetDefense responders",
+	Use:   "respond",
+	Short: "Responder console for support tickets",
 	Long: `Work support tickets as a NetDefense responder.
 
 These commands require an enabled support responder: your login email, or the
@@ -31,7 +31,7 @@ email of the account behind your token, must match a responder record. Reads
 work with any responder; replying, closing and reopening need a login or a
 read-write token.
 
-The surface is cross-organization, so no --org is required. On 'support list'
+The surface is cross-organization, so no --org is required. On 'respond list'
 --org is a filter over an exact organization name.`,
 }
 
@@ -150,7 +150,7 @@ func init() {
 	// Declared with the -o shorthand on purpose. A local flag named "org"
 	// suppresses inheritance of the root's persistent --org/-o entirely for
 	// this command, shorthand included, so without this the reflex
-	// `support list -o acme` would fail to parse rather than filter.
+	// `respond list -o acme` would fail to parse rather than filter.
 	supportListCmd.Flags().StringP("org", "o", "", "Filter by exact organization name (this surface is cross-org; there is no org scope to set)")
 
 	supportShowCmd.Flags().Bool("no-messages", false, "Print the ticket details only, without the message thread")

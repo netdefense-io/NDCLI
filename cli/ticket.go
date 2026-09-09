@@ -15,13 +15,13 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
-// showThreadPerPage is the first page size `ticket show` / `support show`
+// showThreadPerPage is the first page size `support show` / `respond show`
 // pulls; anything beyond it is a pointer to the messages command rather
 // than an unbounded fetch.
 const showThreadPerPage = 100
 
 var ticketCmd = &cobra.Command{
-	Use:   "ticket",
+	Use:   "support",
 	Short: "Support tickets (list, show, create, reply, close)",
 	Long: `Open and work support tickets for your organization.
 
@@ -213,8 +213,8 @@ func init() {
 	ticketDownloadCmd.Flags().Bool("overwrite", false, "Replace an existing file at the destination")
 }
 
-// addTicketListFlags installs the filters shared by `ticket list` and
-// `support list`; the support side additionally filters by organization.
+// addTicketListFlags installs the filters shared by `support list` and
+// `respond list`; the responder side additionally filters by organization.
 func addTicketListFlags(cmd *cobra.Command, support bool) {
 	cmd.Flags().String("status", "", "Filter by status: OPEN, PENDING, CLOSED")
 	cmd.Flags().String("priority", "", "Filter by priority: LOW, NORMAL, HIGH, URGENT")

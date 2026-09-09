@@ -3,7 +3,10 @@ package output
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // Box drawing characters
@@ -89,14 +92,35 @@ func (b *Box) TopLineWithTitle(title string) string {
 		tl, tr = BoxTopLeft, BoxTopRight
 	}
 
-	titleLen := len(title)
-	if titleLen+4 > b.Width {
-		title = title[:b.Width-7] + "..."
-		titleLen = len(title)
+	// The line is corner, leftPad dashes, space, title, space, rightPad
+	// dashes, corner — so once the single left dash is spent the title has
+	// Width-5 columns to live in. Titles were measured and cut in bytes
+	// against a budget one column too generous, which drove rightPad to -1
+	// and panicked strings.Repeat; a multi-byte title was also cut mid-rune.
+	const leftPad = 1
+	budget := b.Width - 4 - leftPad
+	if budget < 1 {
+		// No room for a title at all. A bare border beats a broken one.
+		if b.Width < 2 {
+			return tl + tr
+		}
+		return b.TopLine()
 	}
 
-	leftPad := 1
+	runes := []rune(title)
+	if len(runes) > budget {
+		if budget == 1 {
+			title = "…"
+		} else {
+			title = string(runes[:budget-1]) + "…"
+		}
+	}
+
+	titleLen := len([]rune(title))
 	rightPad := b.Width - 4 - titleLen - leftPad
+	if rightPad < 0 {
+		rightPad = 0
+	}
 
 	return tl + strings.Repeat(BoxHorizontal, leftPad) + " " + title + " " + strings.Repeat(BoxHorizontal, rightPad) + tr
 }
@@ -138,6 +162,31 @@ func visibleLength(s string) int {
 	return count
 }
 
+// stripANSI removes ANSI escape sequences and returns the visible text. It is
+// the counterpart of visibleLength and shares its simple scanner.
+func stripANSI(s string) string {
+	if !strings.ContainsRune(s, '\x1b') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // Header draws a header box with title and optional subtitle
 func Header(w io.Writer, title string, subtitle string, width int) {
 	box := NewBox(width)
@@ -168,6 +217,174 @@ func Section(w io.Writer, title string, lines []string, width int) {
 		fmt.Fprintln(w, box.ContentLine(line))
 	}
 	fmt.Fprintln(w, box.BottomLine())
+}
+
+// fieldBoxMinWidth is the floor for a fieldBox; the box grows past it to fit
+// its widest field.
+const fieldBoxMinWidth = 66
+
+// fieldBoxFallbackWidth caps a fieldBox when stdout is not a terminal, so a
+// redirected or piped run still produces a box that fits a normal window.
+const fieldBoxFallbackWidth = 100
+
+// fieldBoxFloorWidth keeps a very narrow terminal from producing a box with
+// no room for content.
+const fieldBoxFloorWidth = 24
+
+// boxWidthLimit reports the widest a self-sizing box may grow: the terminal's
+// width when stdout is one, else a fixed cap. It sizes off os.Stdout by
+// design — that is where the formatters write, whatever writer a test hands
+// them. Growing past it would wrap in
+// the terminal and break every border. It is a var so a test can force a
+// width.
+var boxWidthLimit = func() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return fieldBoxFallbackWidth
+}
+
+// fieldBox collects label/value pairs and renders them *inside* one titled
+// box, wrapping any value too wide for the box onto continuation lines.
+//
+// Several detailed renderers used to print the titled top border and the
+// bottom border back to back and then print their fields underneath with
+// printLabelValue, which writes no border at all. The result was an empty
+// single-line box with every field outside it. Build the block through this
+// type and the fields always sit between the two borders.
+type fieldBox struct {
+	title  string
+	fields []fieldBoxEntry
+}
+
+type fieldBoxEntry struct {
+	label string
+	value string
+}
+
+// field appends one "Label: value" line. The value may already carry ANSI
+// colour; width is measured with visibleLength, so it still aligns.
+func (b *fieldBox) field(label, value string) {
+	b.fields = append(b.fields, fieldBoxEntry{label: label, value: value})
+}
+
+// width picks the rendered width: wide enough for the longest field and the
+// title, never wider than the terminal.
+func (b *fieldBox) width() int {
+	limit := boxWidthLimit()
+	if limit < fieldBoxFloorWidth {
+		limit = fieldBoxFloorWidth
+	}
+	width := fieldBoxMinWidth
+	// ContentLine spends 5 columns on borders and padding.
+	for _, f := range b.fields {
+		if w := len(f.label) + 2 + visibleLength(f.value) + 5; w > width {
+			width = w
+		}
+	}
+	// TopLineWithTitle spends 4 columns on borders, spaces and the left
+	// dash, plus the single dash it always draws on the right.
+	if w := len(b.title) + 6; w > width {
+		width = w
+	}
+	if width > limit {
+		width = limit
+	}
+	return width
+}
+
+// wrapFirstThenRest wraps s with `first` columns available on the opening
+// line and `rest` on every line after it. A boxed field spends its first line
+// on the label, so a narrow box would otherwise wrap the whole value at the
+// few columns left beside a long label instead of using the full width once
+// the label is out of the way.
+func wrapFirstThenRest(s string, first, rest int) []string {
+	if first < 1 {
+		first = 1
+	}
+	if rest < 1 {
+		rest = 1
+	}
+	// Trim before wrapping and compare against the trimmed value: wrapToWidth
+	// splits on fields, so the chunk it returns for a value with leading
+	// whitespace is not a literal prefix of the original. Trimming afterwards
+	// instead produced a tail that still held the opening chunk, which was
+	// then printed twice.
+	trimmed := strings.TrimLeft(s, " \n")
+	head := wrapToWidth(trimmed, first)
+	if len(head) <= 1 {
+		return head
+	}
+	tail := strings.TrimLeft(strings.TrimPrefix(trimmed, head[0]), " \n")
+	if tail == "" || tail == trimmed {
+		// The head is not a literal prefix of the value (repeated whitespace
+		// was collapsed); keep the single-width wrap rather than guess.
+		return head
+	}
+	return append([]string{head[0]}, wrapToWidth(tail, rest)...)
+}
+
+// lines renders the content lines, wrapping a value that does not fit.
+// Continuation lines are indented two columns under the label.
+func (b *fieldBox) lines(content int) []string {
+	var out []string
+	for _, f := range b.fields {
+		prefix := f.label + ": "
+		// A newline has to reach the wrap branch whatever its length:
+		// visibleLength counts it as one ordinary column, so a value that
+		// "fits" could still break the line in two and leave one half
+		// without a left border and the other without a right one.
+		if visibleLength(ColorLabel.Sprint(prefix)+f.value) <= content &&
+			!strings.Contains(f.value, "\n") {
+			// Fits as it stands, colour and all. Every coloured value today
+			// is a short status or enum, so this is the path they take.
+			out = append(out, ColorLabel.Sprint(prefix)+f.value)
+			continue
+		}
+		// It has to wrap, and wrapping coloured text could cut an escape
+		// sequence in half. A value too wide to fit therefore loses its
+		// colour rather than the box losing its border.
+		value := stripANSI(f.value)
+		// What is left of the line once the label is printed. wrapToWidth
+		// hard-splits a token wider than that, so a narrow box wraps more
+		// often rather than running through the right border.
+		avail := content - len(prefix)
+		if avail < 1 {
+			// The label alone fills the line. Give the value its own
+			// indented block underneath instead of pushing past the border.
+			indent := content - 2
+			if indent < 1 {
+				indent = 1
+			}
+			// The label goes through the wrap too: this branch exists to keep
+			// a long label off the border, so printing it unclamped would
+			// defeat it.
+			for _, part := range wrapToWidth(strings.TrimSuffix(prefix, " "), content) {
+				out = append(out, ColorLabel.Sprint(part))
+			}
+			for _, rest := range wrapToWidth(value, indent) {
+				out = append(out, "  "+rest)
+			}
+			continue
+		}
+		wrapped := wrapFirstThenRest(value, avail, content-2)
+		out = append(out, ColorLabel.Sprint(prefix)+wrapped[0])
+		for _, rest := range wrapped[1:] {
+			out = append(out, "  "+rest)
+		}
+	}
+	return out
+}
+
+// render writes the box to the formatter's writer.
+func (b *fieldBox) render(f BaseFormatter) {
+	width := b.width()
+	box := NewBox(width)
+	fmt.Fprintln(f.Writer, box.TopLineWithTitle(b.title))
+	for _, line := range b.lines(width - 5) {
+		fmt.Fprintln(f.Writer, box.ContentLine(line))
+	}
+	fmt.Fprintln(f.Writer, box.BottomLine())
 }
 
 // KeyValue formats a key-value pair with consistent spacing

@@ -290,7 +290,7 @@ func TestSupportTicketList_ShowsOrgColumn(t *testing.T) {
 }
 
 // TestTicketDownloadJSON_FieldNamesArePinned exists because this shape is a
-// contract: `ndcli ticket download -f json` and its support twin marshal
+// contract: `ndcli support download -f json` and its responder twin marshal
 // TicketDownloadResult straight out, so a tag change here is a change to
 // what scripts parse. size_bytes matches the field name the API uses on an
 // attachment; the two should not drift apart, and neither should silently
@@ -320,5 +320,218 @@ func TestTicketDownloadJSON_FieldNamesArePinned(t *testing.T) {
 	}
 	if n, _ := got["size_bytes"].(float64); int64(n) != 2048 {
 		t.Errorf("size_bytes = %v, want 2048", got["size_bytes"])
+	}
+}
+
+// assertBoxedFields checks that a detailed-format block is a real box: the
+// first line is a titled top border carrying wantTitle, the last is a bottom
+// border of the same visible width, and every line in between is a content
+// line delimited by │ on both sides. Each name in wantFields must appear on
+// one of those inner lines.
+func assertBoxedFields(t *testing.T, out, wantTitle string, wantFields []string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected a box of at least 3 lines, got:\n%s", out)
+	}
+	top, bottom := lines[0], lines[len(lines)-1]
+	if !strings.HasPrefix(top, BoxTopLeft) || !strings.HasSuffix(top, BoxTopRight) {
+		t.Errorf("first line is not a top border: %q", top)
+	}
+	if !strings.Contains(top, wantTitle) {
+		t.Errorf("top border is missing the title %q: %q", wantTitle, top)
+	}
+	if !strings.HasPrefix(bottom, BoxBottomLeft) || !strings.HasSuffix(bottom, BoxBottomRight) {
+		t.Errorf("last line is not a bottom border: %q", bottom)
+	}
+	if visibleLength(top) != visibleLength(bottom) {
+		t.Errorf("borders disagree on width: top %d, bottom %d", visibleLength(top), visibleLength(bottom))
+	}
+	inner := lines[1 : len(lines)-1]
+	if len(inner) == 0 {
+		t.Fatalf("the box is empty — the fields were printed outside it:\n%s", out)
+	}
+	for _, line := range inner {
+		if !strings.HasPrefix(line, BoxVertical) || !strings.HasSuffix(line, BoxVertical) {
+			t.Errorf("line is not inside the box: %q", line)
+		}
+		if visibleLength(line) != visibleLength(top) {
+			t.Errorf("content line width %d != border width %d: %q", visibleLength(line), visibleLength(top), line)
+		}
+	}
+	body := strings.Join(inner, "\n")
+	for _, field := range wantFields {
+		if !strings.Contains(body, field) {
+			t.Errorf("field %q is not inside the box:\n%s", field, out)
+		}
+	}
+}
+
+// TestDetailedTicketRenderers_FieldsAreInsideTheBox is the regression for
+// the collapsed box: every detailed ticket/support renderer used to print
+// the titled top border and the bottom border back to back and then print
+// its fields underneath, so the box was an empty one-line rectangle holding
+// nothing and the fields sat outside it entirely.
+func TestDetailedTicketRenderers_FieldsAreInsideTheBox(t *testing.T) {
+	ticket := sampleTicket()
+	ticket.WebURL = "https://app.netdefense.io/support/tickets/Ab12Cd34"
+
+	for _, tc := range []struct {
+		name   string
+		render func(f *DetailedFormatter) error
+		title  string
+		fields []string
+		// trailing output the renderer adds after the box
+		cut string
+	}{
+		{
+			name:   "list",
+			render: func(f *DetailedFormatter) error { return f.FormatTicketList([]models.Ticket{*ticket}, 1, true) },
+			title:  "Ab12Cd34",
+			fields: []string{"Subject", "VPN tunnel drops nightly", "Organization", "acme", "Status", "Priority", "Category", "Created By", "Last Activity"},
+			cut:    "\nTotal:",
+		},
+		{
+			name:   "detail",
+			render: func(f *DetailedFormatter) error { return f.FormatTicketDetail(ticket, nil, 0) },
+			title:  "Ticket Ab12Cd34",
+			fields: []string{"Subject", "Status", "Priority", "Category", "Created By", "Created", "Last Activity", "Web", "Participant", "bob@acme.com", "Device", "fw-branch-01"},
+		},
+		{
+			name: "attachment",
+			render: func(f *DetailedFormatter) error {
+				return f.FormatTicketAttachment(&models.TicketAttachment{
+					UUID: "a-1", Filename: "capture.pcap",
+					ContentType: "application/vnd.tcpdump.pcap", SizeBytes: 2048, SHA256: "deadbeef",
+				})
+			},
+			title:  "Attachment",
+			fields: []string{"UUID", "a-1", "Filename", "capture.pcap", "Content Type", "Size", "SHA-256", "deadbeef"},
+		},
+		{
+			name: "support profile",
+			render: func(f *DetailedFormatter) error {
+				return f.FormatSupportProfile(&models.SupportResponderProfile{
+					DisplayName: "Ann Responder", Email: "ann@netdefense.io",
+					Status: "ENABLED", Principal: "LOGIN", CanWrite: true,
+				})
+			},
+			title:  "Support Responder",
+			fields: []string{"Display Name", "Ann Responder", "Email", "ann@netdefense.io", "Status", "Principal", "Access"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			f := &DetailedFormatter{BaseFormatter: BaseFormatter{Writer: &buf}}
+			if err := tc.render(f); err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			out := buf.String()
+			if tc.cut != "" {
+				out = strings.SplitN(out, tc.cut, 2)[0]
+			}
+			assertBoxedFields(t, out, tc.title, tc.fields)
+		})
+	}
+}
+
+// TestDetailedTicketBox_ClampsToWidthAndWrapsLongValues pins the sizing
+// rule. The box grows past its 66-column floor to fit the widest field, but
+// never past the terminal width: growing wider than the window would wrap
+// every border and look worse than the bug this replaced. A value too wide
+// for the clamped box is wrapped onto continuation lines, never truncated.
+func TestDetailedTicketBox_ClampsToWidthAndWrapsLongValues(t *testing.T) {
+	const forced = 72
+	forceBoxWidth(t, forced)
+
+	// 255 'x' characters, the only 'x' anywhere in the sample ticket, so a
+	// count over the whole output proves nothing was dropped in the wrap.
+	subject := strings.Repeat("x", 255)
+	ticket := sampleTicket()
+	ticket.Subject = subject
+
+	var buf bytes.Buffer
+	f := &DetailedFormatter{BaseFormatter: BaseFormatter{Writer: &buf}}
+	if err := f.FormatTicketDetail(ticket, nil, 0); err != nil {
+		t.Fatalf("FormatTicketDetail: %v", err)
+	}
+	out := buf.String()
+
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if w := visibleLength(line); w > forced {
+			t.Errorf("line is %d columns, over the %d limit: %q", w, forced, line)
+		}
+	}
+	if got := strings.Count(out, "x"); got != len(subject) {
+		t.Errorf("subject text lost in the wrap: %d of %d characters survived", got, len(subject))
+	}
+	assertBoxedFields(t, out, "Ticket Ab12Cd34", []string{"Subject", "Status", "Device"})
+}
+
+// TestDetailedTicketBox_NarrowTerminalStaysInsideTheBorder is the regression
+// for the wrap arithmetic at the narrow end. The first cut of the clamp
+// widened a value back to the full content width when little room was left
+// after the label, but still printed the label ahead of it, so the line ran
+// past the right border by the width of the label — at a forced 24 columns a
+// ticket box emitted lines of 39.
+func TestDetailedTicketBox_NarrowTerminalStaysInsideTheBorder(t *testing.T) {
+	const forced = 24
+	forceBoxWidth(t, forced)
+
+	ticket := sampleTicket()
+	ticket.WebURL = "https://app.netdefense.io/support/tickets/Ab12Cd34"
+
+	var buf bytes.Buffer
+	f := &DetailedFormatter{BaseFormatter: BaseFormatter{Writer: &buf}}
+	if err := f.FormatTicketDetail(ticket, nil, 0); err != nil {
+		t.Fatalf("FormatTicketDetail: %v", err)
+	}
+	out := buf.String()
+
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if w := visibleLength(line); w > forced {
+			t.Errorf("line is %d columns, over the %d limit: %q", w, forced, line)
+		}
+	}
+	assertBoxedFields(t, out, "Ticket", []string{"Subject", "Status", "Web"})
+}
+
+// TestDetailedTicketBox_LeadingWhitespaceIsNotDuplicated is the regression
+// for the two-width wrap. wrapToWidth splits on fields, so the first chunk it
+// returns is not a literal prefix of a value that starts with whitespace: the
+// prefix trim was a no-op, the "not a prefix" guard did not fire, and the
+// opening chunk was printed once on its own line and again at the head of the
+// re-wrapped remainder.
+func TestDetailedTicketBox_LeadingWhitespaceIsNotDuplicated(t *testing.T) {
+	const forced = 24
+	forceBoxWidth(t, forced)
+
+	words := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
+	ticket := sampleTicket()
+	ticket.Subject = "   " + strings.Join(words, " ")
+
+	var buf bytes.Buffer
+	f := &DetailedFormatter{BaseFormatter: BaseFormatter{Writer: &buf}}
+	if err := f.FormatTicketDetail(ticket, nil, 0); err != nil {
+		t.Fatalf("FormatTicketDetail: %v", err)
+	}
+	out := buf.String()
+
+	// Count whole tokens, not substrings: "eta" also sits inside "beta".
+	seen := map[string]int{}
+	for _, line := range strings.Split(out, "\n") {
+		for _, tok := range strings.Fields(strings.Trim(line, BoxVertical+BoxHorizontal+BoxTopLeft+BoxTopRight+BoxBottomLeft+BoxBottomRight+" ")) {
+			seen[tok]++
+		}
+	}
+	for _, w := range words {
+		if seen[w] != 1 {
+			t.Errorf("word %q appears %d times, want exactly 1:\n%s", w, seen[w], out)
+		}
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if w := visibleLength(line); w > forced {
+			t.Errorf("line is %d columns, over the %d limit: %q", w, forced, line)
+		}
 	}
 }

@@ -1675,28 +1675,30 @@ func (f *DetailedFormatter) FormatPersonalAccessTokens(tokens []models.PersonalA
 
 // FormatTokenCreated formats a newly created PAT (detailed)
 func (f *DetailedFormatter) FormatTokenCreated(resp models.TokenCreateResponse) error {
-	const width = 62
-	box := NewBox(width)
-	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Personal Access Token Created"))
-	fmt.Fprintln(f.Writer, box.BottomLine())
-	fmt.Fprintln(f.Writer)
-
+	// The warning, the token itself and the closing hint stay outside the
+	// box. The warning is a callout rather than a field, and its ⚠ is an
+	// ambiguous-width rune that terminals disagree about, which would
+	// misalign a border it sat inside. The token stays on a bare unbordered
+	// line so it is still easy to select and copy.
 	ColorWarning.Fprintln(f.Writer, "  ⚠  Copy your token now — it will NOT be shown again.")
 	fmt.Fprintln(f.Writer)
 	ColorHeader.Fprintf(f.Writer, "  Token:   ")
 	fmt.Fprintln(f.Writer, resp.Token)
 	fmt.Fprintln(f.Writer)
 
-	f.printLabelValue("Name", resp.Name)
-	f.printLabelValue("Scope", resp.Scope)
+	box := &fieldBox{title: "Personal Access Token Created"}
+	box.field("Name", resp.Name)
+	box.field("Scope", resp.Scope)
 	if resp.Org != nil && *resp.Org != "" {
-		f.printLabelValue("Org", *resp.Org)
+		box.field("Org", *resp.Org)
 	}
 	expires := "never"
 	if resp.ExpiresAt != nil && !resp.ExpiresAt.IsZero() {
 		expires = FormatDate(resp.ExpiresAt.Time)
 	}
-	f.printLabelValue("Expires", expires)
+	box.field("Expires", expires)
+	box.render(f.BaseFormatter)
+
 	fmt.Fprintln(f.Writer)
 	ColorDim.Fprintln(f.Writer, "  Set NDCLI_TOKEN=<token> to use static auth without interactive login.")
 	return nil

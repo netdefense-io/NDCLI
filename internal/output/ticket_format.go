@@ -127,7 +127,7 @@ func writeTicketThread(f BaseFormatter, messages []models.TicketInteraction, tot
 	}
 	if total > len(messages) {
 		fmt.Fprintln(f.Writer)
-		ColorDim.Fprintf(f.Writer, "  Showing %d of %d messages — use 'ticket messages' with --page to read the rest.\n", len(messages), total)
+		ColorDim.Fprintf(f.Writer, "  Showing %d of %d messages — use the 'messages' command with --page to read the rest.\n", len(messages), total)
 	}
 }
 
@@ -391,19 +391,17 @@ func (f *DetailedFormatter) FormatTicketList(tickets []models.Ticket, total int,
 		if i > 0 {
 			fmt.Fprintln(f.Writer)
 		}
-		const width = 66
-		box := NewBox(width)
-		fmt.Fprintln(f.Writer, box.TopLineWithTitle(t.Code))
-		fmt.Fprintln(f.Writer, box.BottomLine())
-		f.printLabelValue("Subject", t.Subject)
+		box := &fieldBox{title: t.Code}
+		box.field("Subject", t.Subject)
 		if showOrg {
-			f.printLabelValue("Organization", t.OrgName())
+			box.field("Organization", t.OrgName())
 		}
-		f.printLabelValue("Status", ticketStatusDisplay(t.Status))
-		f.printLabelValue("Priority", ticketPriorityDisplay(t.Priority))
-		f.printLabelValue("Category", t.Category)
-		f.printLabelValue("Created By", ticketCreatedBy(t))
-		f.printLabelValue("Last Activity", RelativeTime(t.LastActivityAt.Time))
+		box.field("Status", ticketStatusDisplay(t.Status))
+		box.field("Priority", ticketPriorityDisplay(t.Priority))
+		box.field("Category", t.Category)
+		box.field("Created By", ticketCreatedBy(t))
+		box.field("Last Activity", RelativeTime(t.LastActivityAt.Time))
+		box.render(f.BaseFormatter)
 	}
 	fmt.Fprintf(f.Writer, "\nTotal: %d ticket(s)\n", total)
 	return nil
@@ -415,26 +413,22 @@ func (f *DetailedFormatter) FormatTicketDetail(ticket *models.Ticket, messages [
 		f.Info("No ticket found")
 		return nil
 	}
-	const width = 66
-	box := NewBox(width)
-	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Ticket "+ticket.Code))
-	fmt.Fprintln(f.Writer, box.BottomLine())
-	fmt.Fprintln(f.Writer)
-	f.printLabelValue("Subject", ticket.Subject)
+	box := &fieldBox{title: "Ticket " + ticket.Code}
+	box.field("Subject", ticket.Subject)
 	if org := ticket.OrgName(); org != "" {
-		f.printLabelValue("Organization", org)
+		box.field("Organization", org)
 	}
-	f.printLabelValue("Status", ticketStatusDisplay(ticket.Status))
-	f.printLabelValue("Priority", ticketPriorityDisplay(ticket.Priority))
-	f.printLabelValue("Category", ticket.Category)
-	f.printLabelValue("Created By", ticketCreatedBy(ticket))
-	f.printLabelValue("Created", FormatTimestamp(ticket.CreatedAt.Time))
-	f.printLabelValue("Last Activity", FormatTimestamp(ticket.LastActivityAt.Time))
+	box.field("Status", ticketStatusDisplay(ticket.Status))
+	box.field("Priority", ticketPriorityDisplay(ticket.Priority))
+	box.field("Category", ticket.Category)
+	box.field("Created By", ticketCreatedBy(ticket))
+	box.field("Created", FormatTimestamp(ticket.CreatedAt.Time))
+	box.field("Last Activity", FormatTimestamp(ticket.LastActivityAt.Time))
 	if ticket.ClosedAt != nil && !ticket.ClosedAt.IsZero() {
-		f.printLabelValue("Closed", ticketTime(ticket.ClosedAt))
+		box.field("Closed", ticketTime(ticket.ClosedAt))
 	}
 	if ticket.WebURL != "" {
-		f.printLabelValue("Web", ticket.WebURL)
+		box.field("Web", ticket.WebURL)
 	}
 	for _, p := range ticket.Participants {
 		label := p.Email
@@ -444,11 +438,12 @@ func (f *DetailedFormatter) FormatTicketDetail(ticket *models.Ticket, messages [
 		if !p.Enabled {
 			label += " (disabled)"
 		}
-		f.printLabelValue("Participant", label)
+		box.field("Participant", label)
 	}
 	for _, d := range ticket.Devices {
-		f.printLabelValue("Device", fmt.Sprintf("%s (%s)", d.Name, d.UUID))
+		box.field("Device", fmt.Sprintf("%s (%s)", d.Name, d.UUID))
 	}
+	box.render(f.BaseFormatter)
 	if messages != nil || messagesTotal > 0 {
 		fmt.Fprintln(f.Writer)
 		ColorHeader.Fprintln(f.Writer, "Messages")
@@ -471,20 +466,18 @@ func (f *DetailedFormatter) FormatTicketAttachment(att *models.TicketAttachment)
 	if att == nil {
 		return nil
 	}
-	const width = 66
-	box := NewBox(width)
-	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Attachment"))
-	fmt.Fprintln(f.Writer, box.BottomLine())
-	f.printLabelValue("UUID", att.UUID)
-	f.printLabelValue("Filename", att.Filename)
-	f.printLabelValue("Content Type", att.ContentType)
-	f.printLabelValue("Size", ticketAttachmentSize(att.SizeBytes))
-	f.printLabelValue("SHA-256", att.SHA256)
+	box := &fieldBox{title: "Attachment"}
+	box.field("UUID", att.UUID)
+	box.field("Filename", att.Filename)
+	box.field("Content Type", att.ContentType)
+	box.field("Size", ticketAttachmentSize(att.SizeBytes))
+	box.field("SHA-256", att.SHA256)
 	if att.TicketCode != "" {
-		f.printLabelValue("Ticket", att.TicketCode)
+		box.field("Ticket", att.TicketCode)
 	} else {
-		f.printLabelValue("Expires", ticketTime(att.ExpiresAt))
+		box.field("Expires", ticketTime(att.ExpiresAt))
 	}
+	box.render(f.BaseFormatter)
 	return nil
 }
 
@@ -731,15 +724,13 @@ func (f *DetailedFormatter) FormatSupportProfile(profile *models.SupportResponde
 	if profile == nil {
 		return nil
 	}
-	const width = 66
-	box := NewBox(width)
-	fmt.Fprintln(f.Writer, box.TopLineWithTitle("Support Responder"))
-	fmt.Fprintln(f.Writer, box.BottomLine())
-	f.printLabelValue("Display Name", profile.DisplayName)
-	f.printLabelValue("Email", profile.Email)
-	f.printLabelValue("Status", ColoredStatus(profile.Status))
-	f.printLabelValue("Principal", profile.Principal)
-	f.printLabelValue("Access", supportProfileWriteHint(profile))
+	box := &fieldBox{title: "Support Responder"}
+	box.field("Display Name", profile.DisplayName)
+	box.field("Email", profile.Email)
+	box.field("Status", ColoredStatus(profile.Status))
+	box.field("Principal", profile.Principal)
+	box.field("Access", supportProfileWriteHint(profile))
+	box.render(f.BaseFormatter)
 	return nil
 }
 

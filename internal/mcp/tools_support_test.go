@@ -260,8 +260,8 @@ func TestSupportAttachmentTransfers_NotBoundByJSONTimeout(t *testing.T) {
 }
 
 // TestSupportUpdateCore_PreviewWithoutConfirm keeps the two twin surfaces
-// aligned: gating ndcli.ticket.update but not its support counterpart would
-// be the surprising arrangement.
+// aligned: gating the org-side ndcli.support.update but not the responder
+// ndcli.respond.update would be the surprising arrangement.
 func TestSupportUpdateCore_PreviewWithoutConfirm(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("no request should be made without confirm")

@@ -64,14 +64,14 @@ func TestAttachmentsFromFlags_UuidsPassThroughWithoutUploading(t *testing.T) {
 
 // TestSupportListOrgFlag_KeepsShorthand guards a pflag subtlety: a local
 // flag named "org" suppresses inheritance of the root's persistent --org/-o
-// for that command, shorthand included. On `support list` the long name is
+// for that command, shorthand included. On `respond list` the long name is
 // deliberately repurposed as a filter, so the shorthand has to be declared
-// locally or `support list -o acme` fails to parse everywhere else in the
+// locally or `respond list -o acme` fails to parse everywhere else in the
 // CLI it works.
 func TestSupportListOrgFlag_KeepsShorthand(t *testing.T) {
 	flag := supportListCmd.Flags().Lookup("org")
 	if flag == nil {
-		t.Fatal("support list has no --org flag")
+		t.Fatal("respond list has no --org flag")
 	}
 	if flag.Shorthand != "o" {
 		t.Errorf("--org shorthand = %q, want \"o\"", flag.Shorthand)
