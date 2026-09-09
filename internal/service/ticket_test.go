@@ -411,6 +411,193 @@ func TestTicketAttachmentDownload_UnknownAttachment(t *testing.T) {
 	}
 }
 
+// ticketDownloadRaceServer serves the same thread listing as
+// ticketDownloadServer, but runs onBody just before the attachment bytes
+// go out — i.e. after ticketDownload has already stat'ed the destination
+// and decided it was free. It is the whole window the no-replace install
+// has to close.
+func ticketDownloadRaceServer(t *testing.T, content []byte, digest string, onBody func()) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/interactions"):
+			ticketJSON(t, w, 200, models.TicketInteractionListResponse{
+				Items: []models.TicketInteraction{{
+					UUID: "i-1", Kind: "RESPONSE", Body: "see attached",
+					Attachments: []models.TicketAttachment{{
+						UUID:         "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+						Filename:     "capture.txt",
+						ContentType:  "text/plain",
+						SizeBytes:    int64(len(content)),
+						SHA256:       digest,
+						DownloadPath: "/api/v1/organizations/acme/tickets/Ab12Cd34/attachments/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+					}},
+				}},
+				Total: 1, Page: 1, PerPage: 100, Pages: 1,
+			})
+		default:
+			onBody()
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(content)
+		}
+	}))
+}
+
+// tmpLeft counts the leftover .ndcli-download-* files in dir.
+func tmpLeft(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".ndcli-download-") {
+			n++
+		}
+	}
+	return n
+}
+
+// A destination that appears *during* the transfer must not be replaced:
+// the pre-transfer stat is only an early courtesy check, the install itself
+// has to refuse to replace anything.
+func TestTicketAttachmentDownload_DestinationCreatedDuringTransfer(t *testing.T) {
+	content := []byte("attachment payload")
+	sum := sha256.Sum256(content)
+	digest := hex.EncodeToString(sum[:])
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.txt")
+	srv := ticketDownloadRaceServer(t, content, digest, func() {
+		if err := os.WriteFile(dest, []byte("important data"), 0o600); err != nil {
+			t.Errorf("seed destination: %v", err)
+		}
+	})
+	defer srv.Close()
+
+	_, err := newTestService(t, srv).TicketAttachmentDownload(
+		context.Background(), "acme", "Ab12Cd34", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", dest, false)
+	if err == nil {
+		t.Fatal("expected a destination-exists refusal, got a successful download")
+	}
+	var svcErr *Error
+	if !errors.As(err, &svcErr) || svcErr.Code != CodeDestinationExists {
+		t.Errorf("expected CodeDestinationExists, got %v", err)
+	}
+	if !strings.Contains(err.Error(), OverwriteHint) {
+		t.Errorf("expected the overwrite hint, got %v", err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "important data" {
+		t.Errorf("the destination was replaced: %q", got)
+	}
+	if n := tmpLeft(t, dir); n != 0 {
+		t.Errorf("expected the temporary file to be removed, %d left", n)
+	}
+}
+
+// The same window with overwrite=true is a deliberate replace.
+func TestTicketAttachmentDownload_DestinationCreatedDuringTransferOverwrite(t *testing.T) {
+	content := []byte("attachment payload")
+	sum := sha256.Sum256(content)
+	digest := hex.EncodeToString(sum[:])
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.txt")
+	srv := ticketDownloadRaceServer(t, content, digest, func() {
+		if err := os.WriteFile(dest, []byte("important data"), 0o600); err != nil {
+			t.Errorf("seed destination: %v", err)
+		}
+	})
+	defer srv.Close()
+
+	if _, err := newTestService(t, srv).TicketAttachmentDownload(
+		context.Background(), "acme", "Ab12Cd34", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", dest, true); err != nil {
+		t.Fatalf("download with overwrite: %v", err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != string(content) {
+		t.Errorf("file was not replaced: %q", got)
+	}
+	if n := tmpLeft(t, dir); n != 0 {
+		t.Errorf("expected the temporary file to be removed, %d left", n)
+	}
+}
+
+// A dangling symlink is a directory entry like any other: without
+// overwrite it must be refused, and the link must survive untouched
+// rather than being followed into a write at its target.
+func TestTicketAttachmentDownload_DanglingSymlinkRefused(t *testing.T) {
+	content := []byte("attachment payload")
+	sum := sha256.Sum256(content)
+	srv := ticketDownloadServer(t, "capture.txt", content, hex.EncodeToString(sum[:]))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.txt")
+	pointee := filepath.Join(dir, "nowhere.txt")
+	if err := os.Symlink(pointee, dest); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := newTestService(t, srv).TicketAttachmentDownload(
+		context.Background(), "acme", "Ab12Cd34", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", dest, false)
+	if err == nil {
+		t.Fatal("expected a destination-exists refusal for a dangling symlink")
+	}
+	var svcErr *Error
+	if !errors.As(err, &svcErr) || svcErr.Code != CodeDestinationExists {
+		t.Errorf("expected CodeDestinationExists, got %v", err)
+	}
+	target, lerr := os.Readlink(dest)
+	if lerr != nil || target != pointee {
+		t.Errorf("symlink was disturbed: %q (err %v)", target, lerr)
+	}
+	if _, err := os.Lstat(pointee); !os.IsNotExist(err) {
+		t.Errorf("the symlink was followed and its pointee written: %v", err)
+	}
+	if n := tmpLeft(t, dir); n != 0 {
+		t.Errorf("expected the temporary file to be removed, %d left", n)
+	}
+}
+
+// With overwrite the symlink *entry* is replaced by the file. What the
+// link pointed at stays as it was: replacing the entry must never mean
+// writing through the link.
+func TestTicketAttachmentDownload_SymlinkOverwriteReplacesEntryNotPointee(t *testing.T) {
+	content := []byte("attachment payload")
+	sum := sha256.Sum256(content)
+	srv := ticketDownloadServer(t, "capture.txt", content, hex.EncodeToString(sum[:]))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.txt")
+	pointee := filepath.Join(dir, "pointee.txt")
+	if err := os.WriteFile(pointee, []byte("pointee data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(pointee, dest); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := newTestService(t, srv).TicketAttachmentDownload(
+		context.Background(), "acme", "Ab12Cd34", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", dest, true); err != nil {
+		t.Fatalf("download with overwrite: %v", err)
+	}
+	info, err := os.Lstat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("the symlink entry was not replaced by a regular file")
+	}
+	if got, _ := os.ReadFile(dest); string(got) != string(content) {
+		t.Errorf("destination content = %q", got)
+	}
+	if got, _ := os.ReadFile(pointee); string(got) != "pointee data" {
+		t.Errorf("the symlink was followed and its pointee overwritten: %q", got)
+	}
+}
+
 // --- validation helpers ---
 
 func TestValidateTicketEnum(t *testing.T) {

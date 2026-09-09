@@ -557,8 +557,9 @@ func (s *Service) ticketFindAttachment(ctx context.Context, r ticketRoutes, code
 // through the JSON decode path; the metadata used to name and verify the
 // file comes from the thread listing, which does. The file is written to a
 // temporary name beside its destination, hashed while streaming, and only
-// renamed into place once the digest matches — so a corrupted transfer
-// never leaves a plausible-looking file behind.
+// installed once the digest matches — so a corrupted transfer never
+// leaves a plausible-looking file behind. See installDownload for why the
+// install, not the stat below, is what enforces overwrite=false.
 func (s *Service) ticketDownload(ctx context.Context, r ticketRoutes, code, uuid, dest string, overwrite bool) (*DownloadResult, error) {
 	if err := validateTicketCode(code); err != nil {
 		return nil, err
@@ -577,10 +578,7 @@ func (s *Service) ticketDownload(ctx context.Context, r ticketRoutes, code, uuid
 		return nil, err
 	}
 	if _, statErr := os.Stat(target); statErr == nil && !overwrite {
-		return nil, &Error{
-			Code:    CodeDestinationExists,
-			Message: fmt.Sprintf("%s already exists; %s", target, OverwriteHint),
-		}
+		return nil, destinationExistsErr(target)
 	}
 
 	path := att.DownloadPath
@@ -650,9 +648,8 @@ func (s *Service) ticketDownload(ctx context.Context, r ticketRoutes, code, uuid
 		}
 	}
 
-	if err := os.Rename(tmpName, target); err != nil {
-		os.Remove(tmpName)
-		return nil, wrapAPI("failed to write %v", err)
+	if err := installDownload(tmpName, target, overwrite); err != nil {
+		return nil, err
 	}
 
 	return &DownloadResult{
@@ -662,6 +659,94 @@ func (s *Service) ticketDownload(ctx context.Context, r ticketRoutes, code, uuid
 		Size:        written,
 		SHA256:      digest,
 	}, nil
+}
+
+// destinationExistsErr is the refusal both no-replace checks return: the
+// courtesy stat before the transfer and the install that actually enforces
+// it. Built in one place so the two can never word it differently.
+func destinationExistsErr(target string) error {
+	return &Error{
+		Code:    CodeDestinationExists,
+		Message: fmt.Sprintf("%s already exists; %s", target, OverwriteHint),
+	}
+}
+
+// installDownload moves the verified temporary file to its destination.
+//
+// With overwrite=false the install itself must refuse to replace anything:
+// the stat before the transfer is only an early courtesy check, and a
+// destination created during a transfer that may run for minutes would
+// otherwise be clobbered by the rename. os.Link is the portable
+// no-replace install — it fails with EEXIST on any existing directory
+// entry, including a dangling symlink, which a stat cannot even see. On a
+// filesystem without hard links it falls back to an O_EXCL create, which
+// carries the same atomic create / no-replace guarantee. Note that only
+// the link path also publishes a complete file atomically; see
+// copyNoReplace for what the fallback does not promise.
+//
+// With overwrite=true the rename stays: it replaces the directory entry
+// itself, so a symlink at the destination is replaced rather than
+// followed into a write at whatever it points to.
+func installDownload(tmpName, target string, overwrite bool) error {
+	if overwrite {
+		if err := os.Rename(tmpName, target); err != nil {
+			os.Remove(tmpName)
+			return wrapAPI("failed to write %v", err)
+		}
+		return nil
+	}
+
+	err := os.Link(tmpName, target)
+	if err != nil && !os.IsExist(err) {
+		// Hard links are not available everywhere (a different device,
+		// a filesystem or platform that refuses them). Rather than
+		// enumerate errnos per platform, fall back to the other
+		// no-replace primitive and let it report its own failure.
+		err = copyNoReplace(tmpName, target)
+	}
+	os.Remove(tmpName)
+	switch {
+	case err == nil:
+		return nil
+	case os.IsExist(err):
+		return destinationExistsErr(target)
+	default:
+		return wrapAPI("failed to write %v", err)
+	}
+}
+
+// copyNoReplace writes src to a newly created dst, failing if dst already
+// exists. O_EXCL makes the create-or-fail decision atomically in the
+// kernel, so it never replaces an existing entry and never follows a
+// symlink at that name.
+//
+// What it does not offer is atomic publication of a complete file: the
+// name appears before the bytes do, so a reader watching that path can
+// catch it short. A copy that fails takes the destination back down, but a
+// crash mid-copy cannot, and the file it leaves is a partial one. That is
+// the price of the fallback, and it is only paid where os.Link is
+// unavailable — the link path publishes a fully written file in one step.
+func copyNoReplace(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	return nil
 }
 
 // resolveDownloadPath decides where an attachment lands: an explicit dest
