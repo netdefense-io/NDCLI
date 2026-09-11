@@ -14,9 +14,9 @@ import (
 // can render it as the user wrote it and the MCP can hand it back to the
 // model without an intermediate Go shape rebuilding the JSON.
 type SoftwarePolicy struct {
-	Name         string       `json:"name"`
-	Content      string       `json:"content,omitempty"`
-	Organization string       `json:"organization_name,omitempty"`
+	Name         string `json:"name"`
+	Content      string `json:"content,omitempty"`
+	Organization string `json:"organization_name,omitempty"`
 	// TemplateNames is the list of templates this policy is currently
 	// attached to. NDManager populates it on the single-policy GET
 	// (describe) only — list endpoints omit it to avoid the JOIN on
@@ -358,10 +358,10 @@ const (
 // to a single package. The CLI renders one line per outcome and the
 // MCP returns the array verbatim so the LLM can summarize.
 type PackageActionOutcome struct {
-	Package string             `json:"package"`
+	Package string `json:"package"`
 	// Action is the user-visible verb: "required", "blocked", "waived",
 	// "moved", or "no-change".
-	Action string             `json:"action"`
+	Action string `json:"action"`
 	// From is the prior state when the action actually changed things —
 	// useful for "Waived bash (was: required)" and move notices. Empty
 	// when nothing changed or there was nothing prior.

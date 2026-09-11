@@ -30,7 +30,11 @@ func TestPickStorage(t *testing.T) {
 			wantWarn: []string{
 				"system keyring is not available",
 				"plaintext file",
-				"auth.storage: file",
+				"config.yaml",
+				// The instruction has to be the nested YAML that actually
+				// works: `auth.storage` is a viper dotted key, and no
+				// `ndcli config set` subcommand writes it.
+				"auth:\n            storage: file",
 				"ndcli auth migrate",
 			},
 		},
@@ -103,6 +107,11 @@ func TestPickStorage(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("warning missing %q; full output:\n%s", want, out)
 				}
+			}
+			// No `ndcli config set` subcommand writes auth.storage, so a
+			// warning that tells the user to run one sends them nowhere.
+			if strings.Contains(out, "config set") {
+				t.Errorf("warning points at a `config set` subcommand that does not exist:\n%s", out)
 			}
 		})
 	}

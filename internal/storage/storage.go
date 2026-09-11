@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/zalando/go-keyring"
 
@@ -289,10 +291,44 @@ func IsKeyringAvailable() bool {
 	return err == nil || err == keyring.ErrNotFound
 }
 
+// warnedConditions holds the storage warnings already shown in this process,
+// keyed by the rendered text. `ndcli auth login` builds two independent
+// TokenManagers — one from auth.GetManager() in PersistentPreRunE, one from
+// the login client created after fetching the OAuth2 config — and each one
+// calls GetStorage, so the same warning was printed twice.
+//
+// Keyed on the text rather than latched on a single bool because the long-
+// lived front-ends (the `netdefense` TUI and the `netdefense-mcp` server)
+// share this code path: a bool would let a *different* degradation that
+// appears after startup — the keyring going away when a Secret Service or
+// D-Bus session drops — be swallowed by the latch a startup warning had
+// already tripped. Deduping per condition keeps the repeat quiet, which was
+// the actual goal, without silencing a state that has genuinely changed.
+//
+// The key space is bounded and tiny: the text is a pure function of
+// auth.storage and keyring availability.
+var warnedConditions sync.Map
+
 // GetStorage returns the appropriate storage backend based on config and availability
 func GetStorage() Storage {
 	cfg := config.Get()
-	return pickStorage(cfg.Auth.Storage, cfg.Auth.Path, IsKeyringAvailable(), os.Stderr)
+
+	var warning bytes.Buffer
+	s := pickStorage(cfg.Auth.Storage, cfg.Auth.Path, IsKeyringAvailable(), &warning)
+	emitDistinctWarning(os.Stderr, warning.Bytes())
+	return s
+}
+
+// emitDistinctWarning writes warning to w unless this process has already
+// written that exact text.
+func emitDistinctWarning(w io.Writer, warning []byte) {
+	if len(warning) == 0 {
+		return
+	}
+	if _, seen := warnedConditions.LoadOrStore(string(warning), struct{}{}); seen {
+		return
+	}
+	_, _ = w.Write(warning)
 }
 
 // pickStorage selects a storage backend and emits any operator-facing
@@ -321,12 +357,20 @@ func pickStorage(storageType, path string, keyringAvailable bool, warn io.Writer
 		fmt.Fprintln(warn, "Warning: system keyring is not available; credentials will be stored in a plaintext file.")
 		fmt.Fprintln(warn, "  This is risky on headless servers and CI runners. Either:")
 		fmt.Fprintln(warn, "    - install/unlock the system keyring (libsecret on Linux, Keychain on macOS), or")
-		fmt.Fprintln(warn, "    - set 'auth.storage: file' in config to acknowledge plaintext storage and suppress this warning.")
+		fmt.Fprintln(warn, "    - acknowledge plaintext storage and silence this warning by adding to your")
+		fmt.Fprintln(warn, "      ndcli config.yaml:")
+		fmt.Fprintln(warn, "")
+		fmt.Fprintln(warn, "          auth:")
+		fmt.Fprintln(warn, "            storage: file")
+		fmt.Fprintln(warn, "")
 		fmt.Fprintln(warn, "  Once a keyring is available, run 'ndcli auth migrate' to move stored tokens out of the plaintext file.")
 		return NewFileStorage(path)
 	default:
 		fmt.Fprintf(warn, "Warning: unknown auth.storage value %q; falling back to plaintext file storage.\n", storageType)
-		fmt.Fprintln(warn, "  Set 'auth.storage' to 'keyring' or 'file' to silence this warning.")
+		fmt.Fprintln(warn, "  Set it to 'keyring' or 'file' in your ndcli config.yaml:")
+		fmt.Fprintln(warn, "")
+		fmt.Fprintln(warn, "      auth:")
+		fmt.Fprintln(warn, "        storage: keyring")
 		return NewFileStorage(path)
 	}
 }

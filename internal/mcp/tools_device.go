@@ -114,7 +114,7 @@ func (s *Server) registerDeviceTools() {
 
 	// ndcli.device.rebind_token
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.device.rebind_token",
+		Name:        "ndcli.device.rebind_token",
 		Description: "Issue a one-time signing-key re-bind token for a device. The raw token is returned once and never echoed again. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",

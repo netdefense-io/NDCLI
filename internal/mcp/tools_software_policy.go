@@ -94,7 +94,7 @@ type softwarePolicySetRepositoryInput struct {
 }
 
 type softwarePolicySetExternalInput struct {
-	Organization string `json:"organization,omitempty"`
+	Organization string  `json:"organization,omitempty"`
 	Policy       string  `json:"policy"`
 	Name         string  `json:"name"`
 	Version      *string `json:"version,omitempty"`

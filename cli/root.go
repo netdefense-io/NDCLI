@@ -51,6 +51,12 @@ It provides commands for managing devices, organizations, templates, and more.`,
 			return nil
 		}
 
+		// Group commands only print their own help; they need no config,
+		// auth manager or formatter.
+		if isGroupCommand(cmd) {
+			return nil
+		}
+
 		// Load configuration
 		if err := config.Load(cfgFile); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
@@ -98,12 +104,28 @@ It provides commands for managing devices, organizations, templates, and more.`,
 
 // Execute runs the root command
 func Execute() error {
+	prepareRootCommand()
 	return rootCmd.Execute()
+}
+
+// prepareRootCommand performs the last-moment wiring that has to happen after
+// every command is registered. Cobra installs `help` and `completion` at the
+// top of ExecuteC; doing it here first lets enforceSubcommands see them too
+// (and both initialisers are no-ops the second time around).
+func prepareRootCommand() {
+	rootCmd.InitDefaultHelpCmd()
+	rootCmd.InitDefaultCompletionCmd()
+	enforceSubcommands(rootCmd)
 }
 
 func init() {
 	// Base usage template without global flags
-	usageTemplate := `Usage:{{if .Runnable}}
+	// A group command is Runnable only so that it can reject unknown
+	// subcommands (see cli/group.go); it takes no arguments of its own, so it
+	// must not advertise a "<path> [flags]" usage line. The annotation name is
+	// concatenated in rather than written out, so renaming the constant cannot
+	// leave the template silently matching nothing.
+	usageTemplate := `Usage:{{if and .Runnable (not (index .Annotations "` + groupAnnotation + `"))}}
   {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
   {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
 

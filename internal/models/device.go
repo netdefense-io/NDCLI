@@ -4,25 +4,25 @@ import "strings"
 
 // Device represents a managed firewall device
 type Device struct {
-	UUID                string        `json:"uuid"`
-	Name                string        `json:"name"`
-	Status              string        `json:"status"`
-	Organization        string        `json:"organization"`
-	OrganizationalUnits []string      `json:"organizational_units,omitempty"`
-	Version             string        `json:"version,omitempty"`
-	Heartbeat           FlexibleTime  `json:"heartbeat,omitempty"`
+	UUID                string       `json:"uuid"`
+	Name                string       `json:"name"`
+	Status              string       `json:"status"`
+	Organization        string       `json:"organization"`
+	OrganizationalUnits []string     `json:"organizational_units,omitempty"`
+	Version             string       `json:"version,omitempty"`
+	Heartbeat           FlexibleTime `json:"heartbeat,omitempty"`
 	// Online is tri-state from NDManager's online-device registry:
 	// true = a broker replica owns the device's WS; false = registry up,
 	// no replica reports ownership (authoritative offline); nil = lookup
 	// failed (Redis down / disabled) — callers must not infer offline.
-	Online              *bool         `json:"online,omitempty"`
-	AutoSync            bool          `json:"auto_sync"`
-	SyncedAt            *FlexibleTime `json:"synced_at,omitempty"`
-	SyncedHash          *string       `json:"synced_hash,omitempty"`
-	DriftStatus         string        `json:"drift_status,omitempty"`
-	DriftCheckedAt      *FlexibleTime `json:"drift_checked_at,omitempty"`
-	CreatedAt           FlexibleTime  `json:"created_at"`
-	UpdatedAt           FlexibleTime  `json:"updated_at"`
+	Online         *bool         `json:"online,omitempty"`
+	AutoSync       bool          `json:"auto_sync"`
+	SyncedAt       *FlexibleTime `json:"synced_at,omitempty"`
+	SyncedHash     *string       `json:"synced_hash,omitempty"`
+	DriftStatus    string        `json:"drift_status,omitempty"`
+	DriftCheckedAt *FlexibleTime `json:"drift_checked_at,omitempty"`
+	CreatedAt      FlexibleTime  `json:"created_at"`
+	UpdatedAt      FlexibleTime  `json:"updated_at"`
 }
 
 // IsSynced returns true if the device has a synced hash

@@ -380,4 +380,3 @@ func copyToClipboard(text string) error {
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
 }
-

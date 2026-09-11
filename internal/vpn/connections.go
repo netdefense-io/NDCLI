@@ -46,7 +46,7 @@ func ComputeEffectiveConnections(
 				RoleA:      "HUB",
 				RoleB:      "SPOKE",
 				PairType:   "hub-spoke",
-				Source:      "implicit",
+				Source:     "implicit",
 				Active:     true,
 				VpnNetwork: network.Name,
 			}
@@ -73,7 +73,7 @@ func ComputeEffectiveConnections(
 					RoleA:      "HUB",
 					RoleB:      "HUB",
 					PairType:   "hub-hub",
-					Source:      "implicit",
+					Source:     "implicit",
 					Active:     true,
 					VpnNetwork: network.Name,
 				}
@@ -111,7 +111,7 @@ func ComputeEffectiveConnections(
 			RoleA:      roleA,
 			RoleB:      roleB,
 			PairType:   pairType,
-			Source:      "explicit",
+			Source:     "explicit",
 			Active:     l.Enabled,
 			HasPSK:     l.HasPSK,
 			VpnNetwork: l.VpnNetwork,

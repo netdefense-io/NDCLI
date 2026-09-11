@@ -65,7 +65,7 @@ func (m *mockStorage) Save(data []byte, credentialKey string) error {
 	m.data = data
 	return nil
 }
-func (m *mockStorage) Load() ([]byte, error)          { return m.data, nil }
+func (m *mockStorage) Load() ([]byte, error)           { return m.data, nil }
 func (m *mockStorage) Clear() error                    { return nil }
 func (m *mockStorage) Name() string                    { return "mock" }
 func (m *mockStorage) GetCurrentCredentialKey() string { return m.credentialKey }

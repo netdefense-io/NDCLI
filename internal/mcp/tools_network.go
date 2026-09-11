@@ -199,36 +199,36 @@ func (s *Server) registerNetworkTools() {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization":         organizationProperty(),
-				"name":                 stringProperty("VPN network name"),
-				"cidr":                 stringProperty("Overlay IPv4 CIDR (e.g. 10.100.0.0/24)"),
-				"auto_connect_hubs":    boolProperty("Auto-create links between HUB members"),
-				"auto_firewall_rules":  boolProperty("Auto-generate OPNsense pass rules on the wireguard interface group"),
-				"listen_port":          intProperty("Default WireGuard listen port (default 51820)", 0),
-				"mtu":                  intProperty("Default MTU (1280-9000)", 0),
-				"keepalive":            intProperty("Default keepalive interval (1-65535)", 0),
+				"organization":        organizationProperty(),
+				"name":                stringProperty("VPN network name"),
+				"cidr":                stringProperty("Overlay IPv4 CIDR (e.g. 10.100.0.0/24)"),
+				"auto_connect_hubs":   boolProperty("Auto-create links between HUB members"),
+				"auto_firewall_rules": boolProperty("Auto-generate OPNsense pass rules on the wireguard interface group"),
+				"listen_port":         intProperty("Default WireGuard listen port (default 51820)", 0),
+				"mtu":                 intProperty("Default MTU (1280-9000)", 0),
+				"keepalive":           intProperty("Default keepalive interval (1-65535)", 0),
 			},
 			"required": []string{"name", "cidr"},
 		},
 	}, s.handleNetworkCreate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.update",
+		Name:        "ndcli.network.update",
 		Description: "Update a VPN network. Use clear_mtu / clear_keepalive to set those fields back to NULL on the server. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization":         organizationProperty(),
-				"network":              stringProperty("VPN network name"),
-				"new_name":             stringProperty("Rename to"),
-				"auto_connect_hubs":    boolProperty("Toggle auto-connect-hubs"),
-				"auto_firewall_rules":  boolProperty("Toggle auto-firewall-rules"),
-				"listen_port":          intProperty("Default WireGuard listen port", 0),
-				"mtu":                  intProperty("Default MTU", 0),
-				"clear_mtu":            boolProperty("Clear default MTU (sets server NULL)"),
-				"keepalive":            intProperty("Default keepalive interval", 0),
-				"clear_keepalive":      boolProperty("Clear default keepalive (sets server NULL)"),
-				"confirm":              confirmProperty(),
+				"organization":        organizationProperty(),
+				"network":             stringProperty("VPN network name"),
+				"new_name":            stringProperty("Rename to"),
+				"auto_connect_hubs":   boolProperty("Toggle auto-connect-hubs"),
+				"auto_firewall_rules": boolProperty("Toggle auto-firewall-rules"),
+				"listen_port":         intProperty("Default WireGuard listen port", 0),
+				"mtu":                 intProperty("Default MTU", 0),
+				"clear_mtu":           boolProperty("Clear default MTU (sets server NULL)"),
+				"keepalive":           intProperty("Default keepalive interval", 0),
+				"clear_keepalive":     boolProperty("Clear default keepalive (sets server NULL)"),
+				"confirm":             confirmProperty(),
 			},
 			"required": []string{"network"},
 		},
@@ -284,48 +284,48 @@ func (s *Server) registerNetworkTools() {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization":     organizationProperty(),
-				"network":          stringProperty("VPN network name"),
-				"device":           stringProperty("Device name"),
-				"role":             stringEnumProperty("Member role (default SPOKE)", []string{"HUB", "SPOKE"}),
-				"enabled":          boolProperty("Whether the member is enabled"),
-				"overlay_ip_v4":    stringProperty("Overlay IPv4 (auto-allocated if empty)"),
-				"endpoint_host":    stringProperty("Public hostname/IP"),
-				"endpoint_port":    intProperty("Public endpoint port", 0),
-				"listen_port":      intProperty("WireGuard listen port override", 0),
-				"mtu":              intProperty("MTU override", 0),
-				"keepalive":        intProperty("Keepalive interval override", 0),
-				"transit_via_hub":  stringProperty("HUB device name to route through"),
+				"organization":    organizationProperty(),
+				"network":         stringProperty("VPN network name"),
+				"device":          stringProperty("Device name"),
+				"role":            stringEnumProperty("Member role (default SPOKE)", []string{"HUB", "SPOKE"}),
+				"enabled":         boolProperty("Whether the member is enabled"),
+				"overlay_ip_v4":   stringProperty("Overlay IPv4 (auto-allocated if empty)"),
+				"endpoint_host":   stringProperty("Public hostname/IP"),
+				"endpoint_port":   intProperty("Public endpoint port", 0),
+				"listen_port":     intProperty("WireGuard listen port override", 0),
+				"mtu":             intProperty("MTU override", 0),
+				"keepalive":       intProperty("Keepalive interval override", 0),
+				"transit_via_hub": stringProperty("HUB device name to route through"),
 			},
 			"required": []string{"network", "device"},
 		},
 	}, s.handleNetworkMemberAdd)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.member_update",
+		Name:        "ndcli.network.member_update",
 		Description: "Update a VPN member. Use clear_<field> booleans to set string/int fields back to NULL on the server (e.g. clear endpoint_host, transit_via_hub). Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization":            organizationProperty(),
-				"network":                 stringProperty("VPN network name"),
-				"device":                  stringProperty("Device name"),
-				"role":                    stringEnumProperty("New role", []string{"HUB", "SPOKE"}),
-				"enabled":                 boolProperty("Enable/disable the member"),
-				"endpoint_host":           stringProperty("Set public hostname/IP"),
-				"clear_endpoint_host":     boolProperty("Clear public hostname/IP"),
-				"endpoint_port":           intProperty("Set public endpoint port", 0),
-				"clear_endpoint_port":     boolProperty("Clear public endpoint port"),
-				"listen_port":             intProperty("Set WireGuard listen port", 0),
-				"clear_listen_port":       boolProperty("Clear WireGuard listen port"),
-				"mtu":                     intProperty("Set MTU", 0),
-				"clear_mtu":               boolProperty("Clear MTU"),
-				"keepalive":               intProperty("Set keepalive", 0),
-				"clear_keepalive":         boolProperty("Clear keepalive"),
-				"transit_via_hub":         stringProperty("Set transit-via HUB"),
-				"clear_transit_via_hub":   boolProperty("Clear transit-via HUB"),
-				"regenerate_keys":         boolProperty("Regenerate WireGuard keypair"),
-				"confirm":                 confirmProperty(),
+				"organization":          organizationProperty(),
+				"network":               stringProperty("VPN network name"),
+				"device":                stringProperty("Device name"),
+				"role":                  stringEnumProperty("New role", []string{"HUB", "SPOKE"}),
+				"enabled":               boolProperty("Enable/disable the member"),
+				"endpoint_host":         stringProperty("Set public hostname/IP"),
+				"clear_endpoint_host":   boolProperty("Clear public hostname/IP"),
+				"endpoint_port":         intProperty("Set public endpoint port", 0),
+				"clear_endpoint_port":   boolProperty("Clear public endpoint port"),
+				"listen_port":           intProperty("Set WireGuard listen port", 0),
+				"clear_listen_port":     boolProperty("Clear WireGuard listen port"),
+				"mtu":                   intProperty("Set MTU", 0),
+				"clear_mtu":             boolProperty("Clear MTU"),
+				"keepalive":             intProperty("Set keepalive", 0),
+				"clear_keepalive":       boolProperty("Clear keepalive"),
+				"transit_via_hub":       stringProperty("Set transit-via HUB"),
+				"clear_transit_via_hub": boolProperty("Clear transit-via HUB"),
+				"regenerate_keys":       boolProperty("Regenerate WireGuard keypair"),
+				"confirm":               confirmProperty(),
 			},
 			"required": []string{"network", "device"},
 		},
@@ -348,7 +348,7 @@ func (s *Server) registerNetworkTools() {
 
 	// --- Links ---
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.link_list",
+		Name:        "ndcli.network.link_list",
 		Description: "List effective VPN connections (implicit hub-spoke + hub-hub + explicit links). Set raw=true to return only the link database rows; otherwise returns the computed connection view, optionally filtered to a single device.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -365,7 +365,7 @@ func (s *Server) registerNetworkTools() {
 	}, s.handleNetworkLinkList)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.link_create",
+		Name:        "ndcli.network.link_create",
 		Description: "Create a VPN link / override between two members. For implicit hub-spoke pairs this acts as an override (e.g. to disable the auto connection or attach a PSK).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -382,7 +382,7 @@ func (s *Server) registerNetworkTools() {
 	}, s.handleNetworkLinkCreate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.link_describe",
+		Name:        "ndcli.network.link_describe",
 		Description: "Describe an effective VPN connection between two devices. Works for both explicit links and implicit hub/spoke pairs (no row in the link table).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -397,7 +397,7 @@ func (s *Server) registerNetworkTools() {
 	}, s.handleNetworkLinkDescribe)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.link_update",
+		Name:        "ndcli.network.link_update",
 		Description: "Update an explicit VPN link. Requires confirm=true. (For implicit pairs without an existing override, use link_create instead.)",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -415,7 +415,7 @@ func (s *Server) registerNetworkTools() {
 	}, s.handleNetworkLinkUpdate)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name: "ndcli.network.link_delete",
+		Name:        "ndcli.network.link_delete",
 		Description: "Delete a VPN link. For explicit links this disconnects the pair; for implicit overrides this restores the automatic connection. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",

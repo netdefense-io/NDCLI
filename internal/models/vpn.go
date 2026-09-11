@@ -27,20 +27,20 @@ type VpnNetworkListResponse struct {
 
 // VpnMember represents a VPN network member
 type VpnMember struct {
-	VpnNetwork   string       `json:"vpn_network"`
-	DeviceName   string       `json:"device_name"`
-	Role         string       `json:"role"`
-	Enabled      bool         `json:"enabled"`
-	WgPublicKey  string       `json:"wg_public_key"`
-	OverlayIPv4  string       `json:"overlay_ip_v4"`
-	EndpointHost *string      `json:"endpoint_host"`
-	EndpointPort *int         `json:"endpoint_port"`
-	ListenPort   *int         `json:"listen_port"`
-	MTU          *int         `json:"mtu"`
-	Keepalive    *int         `json:"keepalive"`
-	TransitViaHub *string     `json:"transit_via_hub"`
-	CreatedAt    FlexibleTime `json:"created_at"`
-	UpdatedAt    FlexibleTime `json:"updated_at"`
+	VpnNetwork    string       `json:"vpn_network"`
+	DeviceName    string       `json:"device_name"`
+	Role          string       `json:"role"`
+	Enabled       bool         `json:"enabled"`
+	WgPublicKey   string       `json:"wg_public_key"`
+	OverlayIPv4   string       `json:"overlay_ip_v4"`
+	EndpointHost  *string      `json:"endpoint_host"`
+	EndpointPort  *int         `json:"endpoint_port"`
+	ListenPort    *int         `json:"listen_port"`
+	MTU           *int         `json:"mtu"`
+	Keepalive     *int         `json:"keepalive"`
+	TransitViaHub *string      `json:"transit_via_hub"`
+	CreatedAt     FlexibleTime `json:"created_at"`
+	UpdatedAt     FlexibleTime `json:"updated_at"`
 }
 
 // VpnMemberListResponse represents the paginated list of VPN members

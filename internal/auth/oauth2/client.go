@@ -4,7 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
+
+	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/auth/oauth2/providers"
 	"github.com/netdefense-io/NDCLI/internal/config"
@@ -13,6 +19,38 @@ import (
 
 // ErrAuthDisplayed is returned when the auth error was already displayed to the user
 var ErrAuthDisplayed = errors.New("authentication failed")
+
+// Poll-loop durations, all expressed in the provider's own unit (seconds) and
+// multiplied by pollIntervalUnit. Keeping the fallbacks in units rather than
+// as absolute Durations means every branch of the loop — including the ones
+// that only run when the provider omits a value — scales with the test hook,
+// so a future test cannot accidentally wait a real 5 s or 15 min.
+const (
+	// defaultPollIntervalUnits is used when the provider does not supply an
+	// interval.
+	defaultPollIntervalUnits = 5
+	// defaultDeviceCodeLifetimeUnits bounds a non-interactive login when the
+	// provider does not supply expires_in (15 minutes).
+	defaultDeviceCodeLifetimeUnits = 900
+	// slowDownBackoffUnits is how much is added to the poll interval each
+	// time the provider says slow_down, matching the interactive renderer.
+	slowDownBackoffUnits = 5
+)
+
+// pollIntervalUnit converts the provider's integer seconds into a Duration.
+// A test overrides it so the poll loop does not take real seconds.
+var pollIntervalUnit = time.Second
+
+// SupportsInteractive reports whether the full-screen device-flow renderer can
+// be used. It repaints with ANSI escapes and an in-place countdown, so it is
+// only meaningful when stdout is a terminal — piped into a file, a log or a CI
+// job it is pure noise.
+//
+// NB: this is deliberately stdout, not stdin. The IsTerminal checks in
+// interactive.go guard raw-mode keyboard reads and are a different question.
+func SupportsInteractive() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
 
 // Client orchestrates the OAuth2 authentication flow
 type Client struct {
@@ -81,6 +119,7 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 	// Wait for user to authenticate
 	var token *models.TokenResponse
 	var result AuthResult
+	var pollErr error
 
 	if interactive {
 		ia := NewInteractiveAuth(authResp, pollFunc)
@@ -90,7 +129,7 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 		fmt.Printf("Please visit: %s\n", authResp.VerificationURIComplete)
 		fmt.Printf("Or enter code: %s at https://%s/activate\n", authResp.UserCode, c.domain)
 
-		token, result = c.pollNonInteractive(ctx, authResp, pollFunc)
+		token, result, pollErr = c.pollNonInteractive(ctx, authResp, pollFunc)
 	}
 
 	switch result {
@@ -128,6 +167,11 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 		case AuthCancelled:
 			return nil, fmt.Errorf("authentication cancelled")
 		default:
+			// Nothing rendered the polling error, so it has to be carried
+			// out of here or the user is told only "authentication failed".
+			if pollErr != nil {
+				return nil, pollErr
+			}
 			return nil, fmt.Errorf("authentication failed")
 		}
 
@@ -136,10 +180,61 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 	}
 }
 
-func (c *Client) pollNonInteractive(ctx context.Context, authResp *models.DeviceAuthResponse, pollFunc func() (*models.TokenResponse, error)) (*models.TokenResponse, AuthResult) {
-	// Simple polling loop for non-interactive mode
-	ia := NewInteractiveAuth(authResp, pollFunc)
-	return ia.Wait(ctx)
+// pollNonInteractive waits for the device flow to complete without rendering
+// anything: no screen clears, no in-place countdown, no raw-mode key reader.
+// This used to delegate to InteractiveAuth.Wait despite its own comment, so a
+// redirected stdout collected an ANSI repaint per second.
+//
+// The caller has already printed the verification URL and user code once; from
+// here the only output is whatever the caller makes of the returned result.
+func (c *Client) pollNonInteractive(ctx context.Context, authResp *models.DeviceAuthResponse, pollFunc func() (*models.TokenResponse, error)) (*models.TokenResponse, AuthResult, error) {
+	interval := time.Duration(authResp.Interval) * pollIntervalUnit
+	if interval <= 0 {
+		interval = defaultPollIntervalUnits * pollIntervalUnit
+	}
+	expiresIn := time.Duration(authResp.ExpiresIn) * pollIntervalUnit
+	if expiresIn <= 0 {
+		expiresIn = defaultDeviceCodeLifetimeUnits * pollIntervalUnit
+	}
+
+	// Handle Ctrl-C ourselves so an interrupted login reports "cancelled"
+	// rather than dying mid-poll.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	expiry := time.NewTimer(expiresIn)
+	defer expiry.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, AuthCancelled, nil
+
+		case <-sigChan:
+			return nil, AuthCancelled, nil
+
+		case <-expiry.C:
+			return nil, AuthTimeout, nil
+
+		case <-ticker.C:
+			token, err := pollFunc()
+			if err == nil {
+				return token, AuthSuccess, nil
+			}
+			switch {
+			case errors.Is(err, providers.ErrAuthorizationPending):
+				continue
+			case errors.Is(err, providers.ErrSlowDown):
+				interval += slowDownBackoffUnits * pollIntervalUnit
+				ticker.Reset(interval)
+				continue
+			}
+			return nil, AuthError, err
+		}
+	}
 }
 
 // Logout revokes tokens and clears storage

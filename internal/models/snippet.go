@@ -19,4 +19,3 @@ type SnippetListResponse struct {
 	PerPage    int       `json:"per_page"`
 	TotalPages int       `json:"total_pages"`
 }
-

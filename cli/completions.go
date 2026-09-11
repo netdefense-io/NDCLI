@@ -26,7 +26,6 @@ const (
 	completionPageSizeMax   = "100" // /ous (uses `page_size`, max 100)
 )
 
-
 // completeOrganizations returns organization names for shell completion
 func completeOrganizations(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	// Check if already have enough args

@@ -10,9 +10,9 @@ import (
 
 // ConnectSpinner wraps the spinner library for connection status updates
 type ConnectSpinner struct {
-	spinner   *spinner.Spinner
-	enabled   bool
-	lastMsg   string
+	spinner *spinner.Spinner
+	enabled bool
+	lastMsg string
 }
 
 // NewConnectSpinner creates a new spinner for device connection

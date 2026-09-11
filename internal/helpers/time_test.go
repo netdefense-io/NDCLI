@@ -86,9 +86,9 @@ func TestParseFutureTime_Errors(t *testing.T) {
 	cases := []string{
 		"",
 		"not a time",
-		"30x",                     // unknown unit
-		"2026-13-99",              // invalid date
-		"2026-05-12T03:00:00Q",    // tz-suffix-like but invalid
+		"30x",                  // unknown unit
+		"2026-13-99",           // invalid date
+		"2026-05-12T03:00:00Q", // tz-suffix-like but invalid
 	}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {

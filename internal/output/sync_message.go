@@ -13,9 +13,9 @@ import (
 // store a plain string, in which case the JSON parse fails and we fall
 // back to rendering the raw text.
 type syncMessageEnvelope struct {
-	Message          string                 `json:"message"`
-	Results          []syncResultEntry      `json:"results"`
-	ValidationErrors []syncValidationEntry  `json:"validation_errors"`
+	Message          string                `json:"message"`
+	Results          []syncResultEntry     `json:"results"`
+	ValidationErrors []syncValidationEntry `json:"validation_errors"`
 }
 
 type syncResultEntry struct {

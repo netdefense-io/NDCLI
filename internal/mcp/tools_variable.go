@@ -15,7 +15,7 @@ import (
 // `scope` enum input, which keeps the LLM tool catalogue tractable while
 // still exercising every endpoint via the service layer.
 type varScopeKey struct {
-	Scope        string `json:"scope"`        // org|ou|template|device
+	Scope        string `json:"scope"` // org|ou|template|device
 	Organization string `json:"organization,omitempty"`
 	Entity       string `json:"entity,omitempty"` // ou name / template name / device name
 }
@@ -362,11 +362,11 @@ func (s *Server) handleVariableDelete(ctx context.Context, req *mcp.CallToolRequ
 		return s.errorResult(err)
 	}
 	return s.successResult(map[string]interface{}{
-		"name":            input.Name,
-		"scope":           input.Scope,
-		"entity":          input.Entity,
-		"cascade_count":   overrides,
-		"action":          "deleted",
+		"name":          input.Name,
+		"scope":         input.Scope,
+		"entity":        input.Entity,
+		"cascade_count": overrides,
+		"action":        "deleted",
 	}, fmt.Sprintf("Variable '%s' deleted", input.Name))
 }
 

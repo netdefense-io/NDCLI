@@ -47,21 +47,21 @@ type DashboardAgentVersion struct {
 }
 
 type DashboardCompactRow struct {
-	Name            string                       `json:"name"`
-	UUID            string                       `json:"uuid"`
-	Status          string                       `json:"status"`
-	StatusColor     string                       `json:"status_color"`
-	Online          *bool                        `json:"online,omitempty"`
-	OUs             []string                     `json:"ous,omitempty"`
-	HeartbeatAgeSec *int64                       `json:"heartbeat_age_sec,omitempty"`
-	Sync            DashboardCompactSync         `json:"sync"`
-	AgentVersion    string                       `json:"agent_version,omitempty"`
-	OPNsenseVersion string                       `json:"opnsense_version,omitempty"`
+	Name            string               `json:"name"`
+	UUID            string               `json:"uuid"`
+	Status          string               `json:"status"`
+	StatusColor     string               `json:"status_color"`
+	Online          *bool                `json:"online,omitempty"`
+	OUs             []string             `json:"ous,omitempty"`
+	HeartbeatAgeSec *int64               `json:"heartbeat_age_sec,omitempty"`
+	Sync            DashboardCompactSync `json:"sync"`
+	AgentVersion    string               `json:"agent_version,omitempty"`
+	OPNsenseVersion string               `json:"opnsense_version,omitempty"`
 	// FirmwareMixedState is true when the device last ran a FIRMWARE_UPGRADE
 	// with reboot=false and base/kernel updates are still pending. NDManager
 	// sets this when it receives a task result with mixed_state=true.
-	FirmwareMixedState bool                        `json:"firmware_mixed_state,omitempty"`
-	Telemetry          *DashboardCompactTelemetry  `json:"telemetry,omitempty"`
+	FirmwareMixedState bool                       `json:"firmware_mixed_state,omitempty"`
+	Telemetry          *DashboardCompactTelemetry `json:"telemetry,omitempty"`
 }
 
 type DashboardCompactSync struct {
@@ -71,20 +71,20 @@ type DashboardCompactSync struct {
 }
 
 type DashboardCompactTelemetry struct {
-	UptimeSec        *int64                 `json:"uptime_sec,omitempty"`
-	Load1            *float64               `json:"load1,omitempty"`
-	MemUsedPct       *float64               `json:"mem_used_pct,omitempty"`
-	SwapUsedPct      *float64               `json:"swap_used_pct,omitempty"`
-	DiskRootUsedPct  *float64               `json:"disk_root_used_pct,omitempty"`
-	SnapshotAgeSec   *int64                 `json:"snapshot_age_sec,omitempty"`
-	HeavySummary     *DashboardHeavySummary `json:"heavy_summary,omitempty"`
+	UptimeSec       *int64                 `json:"uptime_sec,omitempty"`
+	Load1           *float64               `json:"load1,omitempty"`
+	MemUsedPct      *float64               `json:"mem_used_pct,omitempty"`
+	SwapUsedPct     *float64               `json:"swap_used_pct,omitempty"`
+	DiskRootUsedPct *float64               `json:"disk_root_used_pct,omitempty"`
+	SnapshotAgeSec  *int64                 `json:"snapshot_age_sec,omitempty"`
+	HeavySummary    *DashboardHeavySummary `json:"heavy_summary,omitempty"`
 }
 
 // DashboardHeavySummary is three attention counters; each is nil when
 // the underlying probe failed (distinct from 0 = "no concerns").
 type DashboardHeavySummary struct {
-	ServicesDown    *int `json:"services_down,omitempty"`
-	PendingUpdates  *int `json:"pending_updates,omitempty"`
+	ServicesDown   *int `json:"services_down,omitempty"`
+	PendingUpdates *int `json:"pending_updates,omitempty"`
 	// CertsExpired counts certs whose days_left ≤ 0 (already past their
 	// notAfter). Distinct from CertsExpiring30d so the dashboard can
 	// render an already-expired cert as a P1 rather than a "≤30 d" warn.
@@ -97,18 +97,18 @@ type DashboardHeavySummary struct {
 // full agent snapshot (no compact trim) so the dashboard can render
 // service tables, cert lists, etc.
 type DeviceTelemetryResponse struct {
-	Name            string                 `json:"name"`
-	UUID            string                 `json:"uuid"`
-	Status          string                 `json:"status"`
-	Online          *bool                  `json:"online,omitempty"`
-	OUs             []string               `json:"ous,omitempty"`
-	AgentVersion    string                 `json:"agent_version,omitempty"`
-	Heartbeat       string                 `json:"heartbeat,omitempty"`
-	HeartbeatAgeSec *int64                 `json:"heartbeat_age_sec,omitempty"`
-	Sync            DeviceTelemetrySync    `json:"sync"`
-	Snapshot        *TelemetrySnapshot     `json:"snapshot,omitempty"`
-	SnapshotAgeSec  *int64                 `json:"snapshot_age_sec,omitempty"`
-	AsOf            int64                  `json:"as_of"`
+	Name            string              `json:"name"`
+	UUID            string              `json:"uuid"`
+	Status          string              `json:"status"`
+	Online          *bool               `json:"online,omitempty"`
+	OUs             []string            `json:"ous,omitempty"`
+	AgentVersion    string              `json:"agent_version,omitempty"`
+	Heartbeat       string              `json:"heartbeat,omitempty"`
+	HeartbeatAgeSec *int64              `json:"heartbeat_age_sec,omitempty"`
+	Sync            DeviceTelemetrySync `json:"sync"`
+	Snapshot        *TelemetrySnapshot  `json:"snapshot,omitempty"`
+	SnapshotAgeSec  *int64              `json:"snapshot_age_sec,omitempty"`
+	AsOf            int64               `json:"as_of"`
 }
 
 type DeviceTelemetrySync struct {
@@ -119,26 +119,26 @@ type DeviceTelemetrySync struct {
 }
 
 // TelemetrySnapshot mirrors the agent's wire format. Owners:
-// - Base fields (uptime, load, mem, disk, cpu_count): NDAgent
-//   internal/telemetry/snapshot.go
-// - Heavy block: NDAgent internal/telemetry/heavy.go
+//   - Base fields (uptime, load, mem, disk, cpu_count): NDAgent
+//     internal/telemetry/snapshot.go
+//   - Heavy block: NDAgent internal/telemetry/heavy.go
 type TelemetrySnapshot struct {
-	UptimeSec    uint64           `json:"uptime_sec"`
-	Load1        float64          `json:"load1"`
-	Load5        float64          `json:"load5"`
-	Load15       float64          `json:"load15"`
-	CPUCount     int              `json:"cpu_count"`
-	MemUsedPct   float64          `json:"mem_used_pct"`
-	MemTotalKB   uint64           `json:"mem_total_kb"`
-	SwapUsedPct  float64          `json:"swap_used_pct"`
-	SwapTotalKB  uint64           `json:"swap_total_kb"`
-	Disks        []TelemetryDisk  `json:"disks,omitempty"`
-	Hostname     string           `json:"hostname,omitempty"`
-	OSPlatform   string           `json:"os_platform,omitempty"`
-	OSVersion    string           `json:"os_version,omitempty"`
-	CollectedAt  float64          `json:"collected_at"`
-	CollectionMs int64            `json:"collection_ms"`
-	Heavy        *TelemetryHeavy  `json:"heavy,omitempty"`
+	UptimeSec    uint64          `json:"uptime_sec"`
+	Load1        float64         `json:"load1"`
+	Load5        float64         `json:"load5"`
+	Load15       float64         `json:"load15"`
+	CPUCount     int             `json:"cpu_count"`
+	MemUsedPct   float64         `json:"mem_used_pct"`
+	MemTotalKB   uint64          `json:"mem_total_kb"`
+	SwapUsedPct  float64         `json:"swap_used_pct"`
+	SwapTotalKB  uint64          `json:"swap_total_kb"`
+	Disks        []TelemetryDisk `json:"disks,omitempty"`
+	Hostname     string          `json:"hostname,omitempty"`
+	OSPlatform   string          `json:"os_platform,omitempty"`
+	OSVersion    string          `json:"os_version,omitempty"`
+	CollectedAt  float64         `json:"collected_at"`
+	CollectionMs int64           `json:"collection_ms"`
+	Heavy        *TelemetryHeavy `json:"heavy,omitempty"`
 }
 
 type TelemetryDisk struct {

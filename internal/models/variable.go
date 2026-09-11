@@ -35,8 +35,8 @@ const (
 
 // VariableDefinition represents a single definition of a variable at a specific scope
 type VariableDefinition struct {
-	Scope       string  `json:"scope"`       // organization, ou, template, device
-	ScopeName   *string `json:"scope_name"`  // null for org scope
+	Scope       string  `json:"scope"`      // organization, ou, template, device
+	ScopeName   *string `json:"scope_name"` // null for org scope
 	Value       string  `json:"value"`
 	Description string  `json:"description,omitempty"`
 	Secret      bool    `json:"secret"` // Whether this variable is marked as secret

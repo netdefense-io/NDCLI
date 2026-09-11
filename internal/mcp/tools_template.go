@@ -295,10 +295,10 @@ func (s *Server) handleTemplateUpdate(ctx context.Context, req *mcp.CallToolRequ
 		return s.errorResult(err)
 	}
 	return s.successResult(map[string]interface{}{
-		"name":       finalName,
-		"renamed":    input.NewName != "",
-		"old_name":   input.Name,
-		"action":     "updated",
+		"name":     finalName,
+		"renamed":  input.NewName != "",
+		"old_name": input.Name,
+		"action":   "updated",
 	}, fmt.Sprintf("Template updated: %s", finalName))
 }
 

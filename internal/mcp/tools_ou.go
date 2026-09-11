@@ -339,10 +339,10 @@ func (s *Server) handleOUDelete(ctx context.Context, req *mcp.CallToolRequest) (
 		var apiErr *api.APIError
 		if errors.As(err, &apiErr) && len(apiErr.BlockingResources) > 0 {
 			return s.successResult(map[string]interface{}{
-				"action":              "blocked",
-				"ou":                  input.OU,
-				"blocking_devices":    apiErr.BlockingResources,
-				"blocking_count":      len(apiErr.BlockingResources),
+				"action":           "blocked",
+				"ou":               input.OU,
+				"blocking_devices": apiErr.BlockingResources,
+				"blocking_count":   len(apiErr.BlockingResources),
 			}, fmt.Sprintf("Cannot delete OU '%s' — %d active device(s) must be removed first", input.OU, len(apiErr.BlockingResources)))
 		}
 		return s.errorResult(err)

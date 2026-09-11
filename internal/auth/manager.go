@@ -51,8 +51,10 @@ func (m *Manager) Login(ctx context.Context, scopes string, forceNew bool) (*mod
 	loginClient := oauth2.NewClientWithConfig(cliConfig.OAuth2.Domain, cliConfig.OAuth2.ClientID)
 	defer loginClient.Close()
 
-	// Perform login
-	token, err := loginClient.Login(ctx, scopes, true)
+	// Perform login. The full-screen renderer is only usable when stdout is
+	// a terminal; redirected into a file or a CI log it emits a screen clear
+	// and a countdown repaint every second.
+	token, err := loginClient.Login(ctx, scopes, oauth2.SupportsInteractive())
 	if err != nil {
 		return nil, err
 	}

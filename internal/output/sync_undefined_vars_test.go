@@ -25,9 +25,9 @@ func TestSimpleFormatter_SyncApply_UndefinedBySnippet(t *testing.T) {
 	var buf bytes.Buffer
 	f := &SimpleFormatter{BaseFormatter: BaseFormatter{Writer: &buf}}
 	err := models.SyncError{
-		DeviceName: "murphy01",
-		Error:      "Undefined variables in snippet content",
-		Code:       "UNDEFINED_VARIABLES",
+		DeviceName:         "murphy01",
+		Error:              "Undefined variables in snippet content",
+		Code:               "UNDEFINED_VARIABLES",
 		UndefinedVariables: []string{"interface_name", "vlan_id"},
 		UndefinedVariablesBySnippet: map[string][]string{
 			"wan-rules":  {"interface_name"},
