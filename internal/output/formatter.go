@@ -224,6 +224,9 @@ type Formatter interface {
 	FormatTokenCreated(resp models.TokenCreateResponse) error
 	FormatTokenRevoked(name string) error
 
+	// VPN prefix provisioning (network prefix add --value)
+	FormatVpnPrefixProvisioned(p VpnPrefixProvision) error
+
 	// Messages
 	Success(message string)
 	Error(message string)

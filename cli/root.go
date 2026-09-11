@@ -62,6 +62,14 @@ It provides commands for managing devices, organizations, templates, and more.`,
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
+		// An NDCLI_ variable nothing reads used to be ignored in silence,
+		// which is indistinguishable from it having been honoured. Say so —
+		// but never during completion, which runs this whole path on every
+		// Tab press and would interleave the warning with the candidate list.
+		if !isCompletionCommand(cmd) {
+			config.WarnUnboundEnvVars(os.Environ(), os.Stderr)
+		}
+
 		// Static PAT via NDCLI_TOKEN — skips OAuth2 device flow entirely.
 		staticProvider, err := auth.StaticProviderFromEnv()
 		if err != nil {
@@ -260,6 +268,23 @@ func setupOutputAndFormatter(_ *cobra.Command) error {
 	}
 	formatter = output.GetFormatter(format)
 	return nil
+}
+
+// isCompletionCommand reports whether cmd is part of the shell-completion
+// machinery rather than something a user typed.
+//
+// `__complete` is cobra's hidden per-keystroke completion entry point, and it
+// runs the root PersistentPreRunE like any other command — which is how a
+// startup warning ends up inside the completion exchange. `completion` is the
+// visible script generator, whose stdout is sourced by the shell.
+func isCompletionCommand(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd, "completion":
+			return true
+		}
+	}
+	return false
 }
 
 // isTokenMutationCommand returns true when cmd is one of the token subcommands

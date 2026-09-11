@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/adrg/xdg"
 	"github.com/spf13/viper"
@@ -76,7 +78,29 @@ var (
 	cfg            *Config
 	configFilePath string
 	authFilePath   string
+
+	// explicitlySet records the keys this process assigned through
+	// UpdateValue. viper.IsSet cannot stand in for it: for a key that has a
+	// default, IsSet is true whether or not anyone ever set the key, and Save
+	// needs to tell "cleared this session" apart from "never configured".
+	explicitMu    sync.Mutex
+	explicitlySet = map[string]bool{}
 )
+
+// markExplicitlySet records that key was assigned by this process.
+func markExplicitlySet(key string) {
+	explicitMu.Lock()
+	defer explicitMu.Unlock()
+	explicitlySet[key] = true
+}
+
+// wasExplicitlySet reports whether this process assigned key, including
+// assigning it the empty string.
+func wasExplicitlySet(key string) bool {
+	explicitMu.Lock()
+	defer explicitMu.Unlock()
+	return explicitlySet[key]
+}
 
 // Load loads configuration from file and environment variables
 func Load(customPath string) error {
@@ -151,27 +175,18 @@ func setDefaults() {
 	viper.SetDefault("debug.enabled", DefaultDebugEnabled)
 	viper.SetDefault("debug.log_file", DefaultDebugLogFile)
 
-	// Explicit env var bindings for nested config keys
-	// Note: OAuth2 settings are fetched from NDManager at login time
+	// auth.* has no compiled default, but viper.Unmarshal only picks up an
+	// environment value for a key it already knows about — without these the
+	// NDCLI_AUTH_* bindings would exist and still do nothing (issue #202).
+	viper.SetDefault("auth.storage", "")
+	viper.SetDefault("auth.path", "")
+	viper.SetDefault("auth.account", "")
 
-	// Controlplane settings
-	viper.BindEnv("controlplane.host", "NDCLI_CONTROLPLANE_HOST")
-	viper.BindEnv("controlplane.ssl_verify", "NDCLI_CONTROLPLANE_SSL_VERIFY")
-
-	// Pathfinder settings
-	viper.BindEnv("pathfinder.host", "NDCLI_PATHFINDER_HOST")
-	viper.BindEnv("pathfinder.ssl_verify", "NDCLI_PATHFINDER_SSL_VERIFY")
-
-	// Organization settings
-	viper.BindEnv("organization.name", "NDCLI_ORGANIZATION_NAME")
-
-	// Output settings
-	viper.BindEnv("output.format", "NDCLI_OUTPUT_FORMAT")
-	viper.BindEnv("output.timezone", "NDCLI_OUTPUT_TIMEZONE")
-
-	// Debug settings
-	viper.BindEnv("debug.enabled", "NDCLI_DEBUG_ENABLED")
-	viper.BindEnv("debug.log_file", "NDCLI_DEBUG_LOG_FILE")
+	// Environment bindings for nested config keys. envBindings (env.go) is the
+	// single source of truth for which keys have one, and drives both this and
+	// the warning for variables that have none. oauth2.* is deliberately not
+	// bound — see the comment there.
+	bindEnvVars()
 }
 
 // Get returns the current configuration
@@ -250,34 +265,45 @@ func Save() error {
 		existingConfig["output"].(map[string]interface{})["timezone"] = timezone
 	}
 
-	// Update auth settings (only if there are values to save)
-	authStorage := viper.GetString("auth.storage")
-	authPath := viper.GetString("auth.path")
-	authAccount := viper.GetString("auth.account")
+	// Update auth settings.
+	//
+	// Only fields this process actually assigned through UpdateValue are
+	// written. Reading viper.GetString here instead would pick up an
+	// environment-resolved value and bake it into the file, turning a session
+	// override into a permanent setting: `NDCLI_AUTH_STORAGE=file ndcli config
+	// set output.timezone ...` would pin credentials to plaintext on disk for
+	// good, long after the variable is gone, from a command that has nothing
+	// to do with authentication. Whatever is already in the file is left
+	// exactly as it is — this never rewrites a value it did not set.
+	//
+	// Assigning the empty string is how a field is cleared (logout does it for
+	// auth.account through KeyringStorage.Clear), so that removes the key.
+	// viper.IsSet cannot stand in for wasExplicitlySet: these keys carry
+	// defaults now, so IsSet is true whether or not anyone ever set them.
+	authWrites := map[string]string{}
+	for _, key := range []string{"auth.storage", "auth.path", "auth.account"} {
+		if !wasExplicitlySet(key) {
+			continue
+		}
+		authWrites[strings.TrimPrefix(key, "auth.")] = viper.GetString(key)
+	}
 
-	if authStorage != "" || authPath != "" || authAccount != "" {
-		if existingConfig["auth"] == nil {
-			existingConfig["auth"] = map[string]interface{}{}
+	if len(authWrites) > 0 {
+		authMap, _ := existingConfig["auth"].(map[string]interface{})
+		if authMap == nil {
+			authMap = map[string]interface{}{}
 		}
-		authMap := existingConfig["auth"].(map[string]interface{})
-
-		if authStorage != "" {
-			authMap["storage"] = authStorage
-		}
-		if authPath != "" {
-			authMap["path"] = authPath
-		}
-		if authAccount != "" {
-			authMap["account"] = authAccount
-		}
-	} else if viper.IsSet("auth.account") && authAccount == "" {
-		// Account was explicitly cleared, remove the auth section if empty
-		if existingConfig["auth"] != nil {
-			authMap := existingConfig["auth"].(map[string]interface{})
-			delete(authMap, "account")
-			if len(authMap) == 0 {
-				delete(existingConfig, "auth")
+		for field, value := range authWrites {
+			if value == "" {
+				delete(authMap, field)
+				continue
 			}
+			authMap[field] = value
+		}
+		if len(authMap) == 0 {
+			delete(existingConfig, "auth")
+		} else {
+			existingConfig["auth"] = authMap
 		}
 	}
 
@@ -300,6 +326,7 @@ func Save() error {
 // UpdateValue updates a specific configuration value
 func UpdateValue(key string, value interface{}) error {
 	viper.Set(key, value)
+	markExplicitlySet(key)
 	if err := Save(); err != nil {
 		return err
 	}

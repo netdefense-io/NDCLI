@@ -40,6 +40,10 @@ func Run(args []string, version string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Before the alt-screen takes over, so the warning is on the terminal the
+	// user comes back to rather than painted over by the first frame.
+	config.WarnUnboundEnvVars(os.Environ(), os.Stderr)
+
 	svc, cleanup, err := buildService()
 	if err != nil {
 		return err

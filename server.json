@@ -3,7 +3,7 @@
   "name": "io.github.netdefense-io/netdefense-mcp",
   "title": "NetDefense for OPNsense MCP Server",
   "description": "NetDefense for OPNsense MCP server: 129 tools for devices, orgs, tasks, backups & networks.",
-  "version": "1.29.3",
+  "version": "1.30.0",
   "websiteUrl": "https://netdefense.io/docs/mcp/",
   "repository": {
     "url": "https://github.com/netdefense-io/NDCLI",
@@ -13,9 +13,9 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/netdefense-io/ndcli-releases/releases/download/v1.29.3/netdefense-mcp_1.29.3.mcpb",
-      "version": "1.29.3",
-      "fileSha256": "ff2e3ad86ccf15f6f922d9c4be6f7b11dae3a838aad1e0db4b7ff2d41a1bbad9",
+      "identifier": "https://github.com/netdefense-io/ndcli-releases/releases/download/v1.30.0/netdefense-mcp_1.30.0.mcpb",
+      "version": "1.30.0",
+      "fileSha256": "903d2c8c0ca9db90ac4427d89700d96614f9a7c3975d12280ae5ac06a74eb208",
       "transport": {
         "type": "stdio"
       },

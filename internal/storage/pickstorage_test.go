@@ -31,9 +31,11 @@ func TestPickStorage(t *testing.T) {
 				"system keyring is not available",
 				"plaintext file",
 				"config.yaml",
-				// The instruction has to be the nested YAML that actually
-				// works: `auth.storage` is a viper dotted key, and no
-				// `ndcli config set` subcommand writes it.
+				// The instruction has to be something that actually works:
+				// `auth.storage` is a viper dotted key, and no `ndcli config
+				// set` subcommand writes it. Both routes that do work are
+				// named — the environment variable and the nested YAML.
+				"NDCLI_AUTH_STORAGE=file",
 				"auth:\n            storage: file",
 				"ndcli auth migrate",
 			},

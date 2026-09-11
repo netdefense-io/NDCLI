@@ -35,6 +35,10 @@ func NewServer() (*Server, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// stderr is this process's log channel (stdout carries the MCP protocol),
+	// so an inert NDCLI_ variable is reported the same way as anywhere else.
+	config.WarnUnboundEnvVars(os.Environ(), os.Stderr)
+
 	// Static PAT via NDCLI_TOKEN — skips OAuth2/keyring entirely, mirroring
 	// the branch in cli/root.go and internal/tui/run.go. A malformed token
 	// fails startup loudly rather than silently falling back to the keyring

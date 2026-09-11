@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -141,6 +143,9 @@ type netPrefixKeyInput struct {
 	Variable     string `json:"variable"`
 	Publish      *bool  `json:"publish,omitempty"`
 	Confirm      bool   `json:"confirm,omitempty"`
+	// Value mirrors the CLI's --value flag: supplying CIDRs provisions the
+	// variable chain instead of requiring it to exist already.
+	Value []string `json:"value,omitempty"`
 }
 
 // applyClear maps a (value, clear) pair back to the service-layer pointer
@@ -458,6 +463,7 @@ func (s *Server) registerNetworkTools() {
 				"device":       stringProperty("Device name"),
 				"variable":     stringProperty("Variable name to publish"),
 				"publish":      boolProperty("Whether to advertise the prefix to peers (default true)"),
+				"value":        stringArrayProperty("CIDR blocks to publish. Supplying these creates the organization-scope variable and the device-scope override, then publishes; omit them when the variable already exists. An existing variable holding a different value is never overwritten."),
 			},
 			"required": []string{"network", "device", "variable"},
 		},
@@ -1037,6 +1043,37 @@ func (s *Server) handleNetworkPrefixAdd(ctx context.Context, req *mcp.CallToolRe
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
+	if len(input.Value) > 0 {
+		result, err := s.svc.NetworkPrefixProvision(apiCtx, org, input.Network, input.Device, input.Variable, input.Value, input.Publish)
+		if err != nil {
+			return s.errorResult(provisionError(err))
+		}
+		// published is deliberately tri-state, mirroring
+		// output.VpnPrefixProvision.Published: null means the prefix already
+		// existed and reading it back failed, so nobody observed the flag.
+		// Reporting a state we did not confirm is the same failure as calling
+		// a running command finished — and this surface's consumer is a model,
+		// the reader least able to notice a confident wrong answer.
+		var published interface{}
+		if result.Prefix != nil {
+			published = result.Prefix.Publish
+		}
+
+		data := map[string]interface{}{
+			"value":                   result.Value,
+			"org_variable_created":    result.OrgVariableCreated,
+			"device_variable_created": result.DeviceVariableCreated,
+			"prefix_created":          result.PrefixCreated,
+			"published":               published,
+			"action":                  "provisioned",
+		}
+		if result.Prefix != nil {
+			data["prefix"] = vpnPrefixSummary(result.Prefix)
+		}
+		return s.successResult(data,
+			provisionMessage(input.Variable, input.Device, input.Network, result.Value, result.PrefixCreated, published))
+	}
+
 	p, err := s.svc.NetworkPrefixAdd(apiCtx, org, input.Network, input.Device, input.Variable, input.Publish)
 	if err != nil {
 		return s.errorResult(err)
@@ -1045,6 +1082,66 @@ func (s *Server) handleNetworkPrefixAdd(ctx context.Context, req *mcp.CallToolRe
 		"prefix": vpnPrefixSummary(p),
 		"action": "added",
 	}, fmt.Sprintf("Prefix '%s' added to %s in %s", input.Variable, input.Device, input.Network))
+}
+
+// provisionMessage renders the prose half of a provisioning result. It says
+// only what was established: a prefix that already existed was not published
+// by this call, and a publish flag nobody read back is reported as unread
+// rather than as a value.
+//
+// The structured fields carry the result; this exists so the sentence beside
+// them cannot contradict it. It is not shared with internal/output's renderer
+// on purpose — that one is human-facing prose with bullets and a "Note:"
+// label, and MCP parity is about a caller being able to reach the same
+// outcome and read the same facts, not about identical wording.
+func provisionMessage(variable, device, network, value string, created bool, published interface{}) string {
+	switch {
+	case created:
+		return fmt.Sprintf("Prefix '%s' (%s) published on %s in %s", variable, value, device, network)
+	case published == nil:
+		return fmt.Sprintf("Prefix '%s' (%s) already exists on %s in %s; its publish flag could not be read back and is unknown",
+			variable, value, device, network)
+	case published == false:
+		return fmt.Sprintf("Prefix '%s' (%s) already exists on %s in %s, with publish=false: it is not advertised to peers",
+			variable, value, device, network)
+	default:
+		return fmt.Sprintf("Prefix '%s' (%s) already exists on %s in %s", variable, value, device, network)
+	}
+}
+
+// provisionError prepares a NetworkPrefixProvision failure for errorResult.
+//
+// Two things have to survive. The service leaves VariableMismatchHint as a
+// marker rather than naming a CLI command an MCP caller cannot run, so the
+// tool name is substituted here. And the machine-readable code has to reach
+// the response: errorResult reads it from a type switch on the *concrete*
+// type, so an error flattened through fmt.Errorf — or left as a
+// *NetworkPrefixProvisionError that merely wraps a *service.Error — arrives
+// with error.code empty, for a bad CIDR and a genuine mismatch alike. The
+// sibling branch below passes its error through untouched and does get a code;
+// this keeps the two consistent.
+//
+// Rewrapping only where errors.As confirms there is a code to carry mirrors
+// namedOverwriteFlag in cli/ticket.go: the typed error is what means
+// something, the rendered string is only how it reads.
+func provisionError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var svcErr *service.Error
+	if !errors.As(err, &svcErr) {
+		// Nothing coded to preserve; hand back the original rather than
+		// flattening it into a string.
+		return err
+	}
+
+	return &service.Error{
+		Code: svcErr.Code,
+		Message: strings.Replace(err.Error(),
+			service.VariableMismatchHint, "change it with ndcli.variable.set", 1),
+		Err: err,
+	}
 }
 
 func (s *Server) handleNetworkPrefixUpdate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
