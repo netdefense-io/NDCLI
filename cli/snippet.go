@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -83,12 +85,21 @@ var snippetDeleteCmd = &cobra.Command{
 }
 
 var snippetPullCmd = &cobra.Command{
-	Use:   "pull [device] [name]",
+	Use:   "pull [device] [match-key]",
 	Short: "Pull snippet content from a device",
 	Long: `Pull snippet content from a device's configuration.
 
 This creates an asynchronous task that retrieves the specified configuration
 from the device and optionally stores it as a snippet in the database.
+
+The positional argument is the MATCH KEY — what identifies the object on the
+device — and may contain any characters, spaces included. Rule descriptions
+almost always do.
+
+The created snippet's name is derived from the match key unless --name is
+given: lowercased, with runs of anything outside [a-z0-9._-] collapsed to a
+single hyphen. Pass --name when the derived name is not what you want, or when
+the match key has nothing usable to derive from.
 
 Matching behavior:
 - For USER: Exact name match on the username
@@ -101,7 +112,8 @@ Matching behavior:
 - For UNBOUND_DOMAIN_FORWARD: Match by domain name (e.g., internal.corp)
 - For UNBOUND_HOST_ALIAS: Match by hostname.domain (e.g., www.local)
 - For UNBOUND_ACL: Match by ACL name (e.g., lan-clients)
-- For ZABBIX_SETTINGS: Singleton — name is used only as the destination snippet name;
+- For ZABBIX_SETTINGS: Singleton — there is nothing to match on the device, so
+  the match key only feeds the derived snippet name (--name sets it exactly);
   the agent returns the full Zabbix Agent settings tree
 - For ZABBIX_USERPARAMETER: Exact UserParameter key (e.g., nd-cpu-temp)
 - For ZABBIX_ALIAS: Exact item-alias key (e.g., nd-uname)
@@ -142,10 +154,26 @@ func init() {
 	snippetCreateCmd.Flags().Int("priority", 1000, "Snippet priority 1-60000 (default 1000)")
 
 	// Pull flags
+	snippetPullCmd.Flags().String("name", "", "Name for the created snippet (letters, digits, dot, underscore, hyphen; derived from the match key when omitted)")
 	snippetPullCmd.Flags().String("type", "ALIAS", "Config type to pull: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
 	snippetPullCmd.Flags().Bool("auto-create", false, "Create snippet in DB if it doesn't exist")
 	snippetPullCmd.Flags().Bool("overwrite", false, "Update snippet in DB if it already exists")
 	snippetPullCmd.Flags().BoolP("wait", "w", false, "Wait for task to complete")
+}
+
+// namedSnippetNameFlag fills in the CLI's own way of setting the snippet name.
+// The service leaves a marker because an MCP caller has no flags to pass; here,
+// naming the flag is the useful advice.
+func namedSnippetNameFlag(err error) error {
+	var svcErr *service.Error
+	if !errors.As(err, &svcErr) || !strings.Contains(svcErr.Message, service.SnippetNameHint) {
+		return err
+	}
+	return &service.Error{
+		Code:    svcErr.Code,
+		Message: strings.Replace(svcErr.Message, service.SnippetNameHint, "--name", 1),
+		Err:     err,
+	}
 }
 
 func runSnippetList(cmd *cobra.Command, args []string) error {
@@ -330,22 +358,31 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	deviceName := args[0]
-	name := args[1]
+	matchKey := args[1]
 
+	snippetName, _ := cmd.Flags().GetString("name")
 	configType, _ := cmd.Flags().GetString("type")
 	autoCreate, _ := cmd.Flags().GetBool("auto-create")
 	overwrite, _ := cmd.Flags().GetBool("overwrite")
 	wait, _ := cmd.Flags().GetBool("wait")
 
+	// Fail before the round trip rather than as a server rejection after one.
+	if snippetName != "" {
+		if err := service.ValidateSnippetName(snippetName); err != nil {
+			return err
+		}
+	}
+
 	ctx := context.Background()
 	pull, err := svc.SnippetPull(ctx, org, deviceName, service.SnippetPullOpts{
-		Name:       name,
-		ConfigType: configType,
-		AutoCreate: autoCreate,
-		Overwrite:  overwrite,
+		Name:        matchKey,
+		SnippetName: snippetName,
+		ConfigType:  configType,
+		AutoCreate:  autoCreate,
+		Overwrite:   overwrite,
 	})
 	if err != nil {
-		return err
+		return namedSnippetNameFlag(err)
 	}
 	color.Green("✓ Pull task created: %s", pull.Task)
 
@@ -363,7 +400,15 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 		}
 		switch task.Status {
 		case models.TaskStatusCompleted:
-			color.Green("✓ Snippet pulled successfully: %s", name)
+			// Report the snippet the server actually created, not the match
+			// key: with a derived name the two now differ, and naming the
+			// match key here would tell the user a snippet exists under a
+			// name that does not.
+			created := pull.Name
+			if created == "" {
+				created = matchKey
+			}
+			color.Green("✓ Snippet pulled successfully: %s", created)
 			if task.Message != "" {
 				fmt.Println()
 				color.Cyan("Content:")

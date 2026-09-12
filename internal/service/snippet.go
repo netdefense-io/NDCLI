@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
@@ -215,10 +218,84 @@ func (s *Service) SnippetDelete(ctx context.Context, org, name string) error {
 
 // SnippetPullOpts collects the optional flags accepted by /devices/{d}/pull.
 type SnippetPullOpts struct {
-	Name       string
-	ConfigType string
-	AutoCreate bool
-	Overwrite  bool
+	// Name is the device-side match key, not the snippet's name. It is
+	// matched against whatever identifies the object on the device — a
+	// username, an alias name, a rule *description* — so it may contain any
+	// characters, spaces included. Rule descriptions almost always do
+	// (Community #10).
+	Name string
+	// SnippetName names the snippet that gets created, and is constrained to
+	// the platform's identifier charset. Empty means the server derives one
+	// from Name.
+	SnippetName string
+	ConfigType  string
+	AutoCreate  bool
+	Overwrite   bool
+}
+
+// snippetNamePattern is the charset NDManager accepts for a snippet name. The
+// client checks it so a bad --name fails before a round trip rather than as a
+// server rejection after one.
+var snippetNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// snippetNameMaxLen matches NDManager's own bound.
+const snippetNameMaxLen = 255
+
+// snippetNameDerivePattern matches every run the broker collapses to a single
+// hyphen when deriving a snippet name: anything outside its charset.
+var snippetNameDerivePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
+
+// SnippetNameHint is the placeholder each front-end replaces with its own way
+// of setting the name — `--name` in the CLI, `snippet_name` over MCP. The
+// service cannot name either without being wrong on the other surface.
+const SnippetNameHint = "<set-the-name-with>"
+
+// DeriveSnippetName reproduces the broker's derivation exactly: lowercase,
+// runs of anything outside [a-z0-9._-] collapsed to one hyphen, leading and
+// trailing hyphens trimmed, truncated to the length bound.
+//
+// It is duplicated from the server on purpose and for one purpose only:
+// telling the user *before* a request that the derivation will produce
+// nothing. The derived name is never sent — the server derives the name it
+// stores, so there is a single source of truth for what actually gets
+// created and no way for the two to disagree about it.
+func DeriveSnippetName(matchKey string) string {
+	derived := snippetNameDerivePattern.ReplaceAllString(strings.ToLower(matchKey), "-")
+	derived = strings.Trim(derived, "-")
+	if len(derived) > snippetNameMaxLen {
+		derived = derived[:snippetNameMaxLen]
+	}
+	return derived
+}
+
+// ValidateSnippetName reports whether name is usable as a snippet name.
+//
+// The message names the charset rather than echoing a regex: a user who typed
+// a space needs to know spaces are fine in the match key and not in the name,
+// which is the whole distinction this flag exists to draw.
+func ValidateSnippetName(name string) error {
+	if name == "" {
+		return &Error{Code: CodeInvalidInput, Message: "snippet name cannot be empty"}
+	}
+	// Counted in runes, not bytes: len() on a multi-byte name would report a
+	// number the user cannot reconcile with what they typed. The charset check
+	// below rejects non-ASCII anyway, so this only ever fires for a genuinely
+	// long ASCII name — but the message has to be honest either way.
+	if n := utf8.RuneCountInString(name); n > snippetNameMaxLen {
+		return &Error{
+			Code:    CodeInvalidInput,
+			Message: fmt.Sprintf("snippet name is %d characters; the maximum is %d", n, snippetNameMaxLen),
+		}
+	}
+	if !snippetNamePattern.MatchString(name) {
+		return &Error{
+			Code: CodeInvalidInput,
+			Message: fmt.Sprintf(
+				"snippet name %q may only contain letters, digits, dot, underscore and hyphen — the match key may contain spaces, the snippet name may not",
+				name),
+		}
+	}
+	return nil
 }
 
 // SnippetPullResult carries the task identification returned by the pull
@@ -239,11 +316,40 @@ func (s *Service) SnippetPull(ctx context.Context, org, deviceName string, opts 
 		return nil, &Error{Code: CodeInvalidInput, Message: "device name is required"}
 	}
 	if opts.Name == "" {
-		return nil, &Error{Code: CodeInvalidInput, Message: "snippet name is required"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "match key is required"}
+	}
+	if opts.SnippetName != "" {
+		if err := ValidateSnippetName(opts.SnippetName); err != nil {
+			return nil, err
+		}
+	} else if opts.AutoCreate || opts.Overwrite {
+		// A pull that will create or update a snippet needs a name for it.
+		// The server derives one, but only after dispatching a task to the
+		// device — so an underivable match key costs a round trip and a
+		// device task, and then fails with a message about the object rather
+		// than about the name. Worse, if the object does not exist the user
+		// only ever sees "not found" and never learns that --name is the way
+		// through.
+		//
+		// A display-only pull creates nothing, so it needs no name and is
+		// left alone.
+		if DeriveSnippetName(opts.Name) == "" {
+			return nil, &Error{
+				Code: CodeInvalidInput,
+				Message: fmt.Sprintf(
+					"Could not derive a snippet name from '%s': nothing survives outside a-z, 0-9, '.', '_', and '-'. Pass %s to set the snippet name explicitly.",
+					opts.Name, SnippetNameHint),
+			}
+		}
 	}
 
 	q := url.Values{}
 	q.Set("name", opts.Name)
+	// Omitted entirely when empty: the server derives a name from the match
+	// key, and sending an empty snippet_name would be a different request.
+	if opts.SnippetName != "" {
+		q.Set("snippet_name", opts.SnippetName)
+	}
 	if opts.ConfigType != "" {
 		q.Set("config_type", opts.ConfigType)
 	}

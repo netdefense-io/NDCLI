@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -63,6 +65,7 @@ type snippetPullInput struct {
 	Organization string `json:"organization,omitempty"`
 	Device       string `json:"device"`
 	Name         string `json:"name"`
+	SnippetName  string `json:"snippet_name,omitempty"`
 	ConfigType   string `json:"config_type,omitempty"`
 	AutoCreate   bool   `json:"auto_create,omitempty"`
 	Overwrite    bool   `json:"overwrite,omitempty"`
@@ -193,7 +196,8 @@ func (s *Server) registerSnippetTools() {
 			"properties": map[string]interface{}{
 				"organization": organizationProperty(),
 				"device":       stringProperty("Device name"),
-				"name":         stringProperty("Snippet name on the device (matching is type-specific)"),
+				"name":         stringProperty("Match key identifying the object on the device (matching is type-specific). May contain any characters, including spaces — rule descriptions usually do."),
+				"snippet_name": stringProperty("Name for the created snippet: letters, digits, dot, underscore and hyphen, 1-255 characters. Derived from the match key when omitted."),
 				"config_type":  stringEnumProperty("Config type to pull (default ALIAS)", snippetTypeEnum),
 				"auto_create":  boolProperty("Create snippet in DB if it doesn't exist"),
 				"overwrite":    boolProperty("Update snippet in DB if it already exists"),
@@ -420,6 +424,22 @@ func (s *Server) handleSnippetDelete(ctx context.Context, req *mcp.CallToolReque
 	}, fmt.Sprintf("Snippet '%s' deleted", input.Name))
 }
 
+// namedSnippetNameParam is the MCP counterpart to cli's namedSnippetNameFlag:
+// the marker becomes the parameter an MCP caller can actually set. It rebuilds
+// a *service.Error rather than wrapping, because errorResult reads the code
+// from a type switch on the concrete type.
+func namedSnippetNameParam(err error) error {
+	var svcErr *service.Error
+	if !errors.As(err, &svcErr) || !strings.Contains(svcErr.Message, service.SnippetNameHint) {
+		return err
+	}
+	return &service.Error{
+		Code:    svcErr.Code,
+		Message: strings.Replace(svcErr.Message, service.SnippetNameHint, "snippet_name", 1),
+		Err:     err,
+	}
+}
+
 func (s *Server) handleSnippetPull(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err := s.svc.RequireAuth(); err != nil {
 		return s.errorResult(err)
@@ -441,13 +461,14 @@ func (s *Server) handleSnippetPull(ctx context.Context, req *mcp.CallToolRequest
 	defer cancel()
 
 	pull, err := s.svc.SnippetPull(apiCtx, org, input.Device, service.SnippetPullOpts{
-		Name:       input.Name,
-		ConfigType: input.ConfigType,
-		AutoCreate: input.AutoCreate,
-		Overwrite:  input.Overwrite,
+		Name:        input.Name,
+		SnippetName: input.SnippetName,
+		ConfigType:  input.ConfigType,
+		AutoCreate:  input.AutoCreate,
+		Overwrite:   input.Overwrite,
 	})
 	if err != nil {
-		return s.errorResult(err)
+		return s.errorResult(namedSnippetNameParam(err))
 	}
 	return s.successResult(map[string]interface{}{
 		"task":        pull.Task,
