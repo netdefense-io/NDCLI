@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
@@ -144,13 +145,92 @@ func (s *Service) TaskCancel(ctx context.Context, taskID string) error {
 // server registers a ScheduledTask spec instead of creating tasks immediately;
 // use RunRegisterSpec for that path so the two response types stay separate.
 type RunOpts struct {
-	Type        string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL, FIRMWARE_UPGRADE
-	Payload     map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version, FIRMWARE_UPGRADE: mode/reboot/check_first/dry_run
-	Devices     []string               // repeatable
-	OUs         []string               // repeatable
-	AllDevices  bool                   // mutually exclusive with Devices/OUs
-	ScheduledAt string                 // RFC3339; empty = run immediately; mutually exclusive with Schedule
-	Schedule    string                 // schedule name; when set, call RunRegisterSpec instead
+	Type       string                 // PING, SHUTDOWN, REBOOT, RESTART, PLUGIN_INSTALL, FIRMWARE_UPGRADE
+	Payload    map[string]interface{} // type-specific; PING: target+count, PLUGIN_INSTALL: target_version, FIRMWARE_UPGRADE: mode/reboot/check_first/dry_run
+	Devices    []string               // repeatable
+	OUs        []string               // repeatable
+	AllDevices bool                   // mutually exclusive with Devices/OUs
+	// ScheduledAt is an `--at`-style scheduling input: a relative offset
+	// (`30m`, `2h`), an RFC3339 instant with an explicit offset or `Z`, or a
+	// bare timestamp interpreted in ScheduledAtLocation. Empty = run
+	// immediately. Mutually exclusive with Schedule.
+	//
+	// Run normalizes it to UTC RFC3339 before it reaches the wire — front-ends
+	// must not send a wall-clock value with the zone dropped (issue #217).
+	ScheduledAt string
+	// ScheduledAtLocation interprets a bare ScheduledAt timestamp. nil means
+	// time.Local. Front-ends pass output.Location() (the configured NDCLI
+	// timezone) or, over MCP, the caller-supplied IANA zone.
+	ScheduledAtLocation *time.Location
+	Schedule            string // schedule name; when set, call RunRegisterSpec instead
+}
+
+// scheduledAtSkew is the backward tolerance on a scheduling instant: clock
+// drift between the client and NDManager must not reject a legitimate "now",
+// but an obviously stale timestamp is a typo worth refusing.
+const scheduledAtSkew = 30 * time.Second
+
+// ScheduledAt is a resolved scheduling instant: the absolute time to send on
+// the wire, the same instant rendered in the timezone that produced it, and
+// the name of that timezone. Front-ends echo all three so the user can check
+// the schedule against the timezone they meant.
+type ScheduledAt struct {
+	UTC   time.Time // the absolute instant, in UTC
+	Zoned time.Time // the same instant in the timezone used to resolve it
+	Zone  string    // display name of that timezone (IANA name, abbreviation, or UTC±HH:MM)
+}
+
+// RFC3339UTC is the wire form: the instant as UTC with a `Z` suffix.
+func (s ScheduledAt) RFC3339UTC() string { return s.UTC.Format(time.RFC3339) }
+
+// RFC3339Zoned renders the instant in the timezone used to resolve it.
+func (s ScheduledAt) RFC3339Zoned() string { return s.Zoned.Format(time.RFC3339) }
+
+// ResolveScheduledAt parses an `--at`-style scheduling input into an absolute
+// instant, rejecting anything already in the past. loc interprets bare
+// timestamps (nil = time.Local); an input carrying its own zone — a relative
+// offset, or RFC3339 with an explicit offset or `Z` — ignores loc.
+//
+// label names the input in error messages: "--at" for the CLI flag, "at" for
+// the MCP parameter. An empty input resolves to (nil, nil).
+//
+// This is the single normalization path for every front-end. Sending a
+// wall-clock string straight through is what made MCP-scheduled tasks fire at
+// the UTC reading of a local time (issue #217).
+func ResolveScheduledAt(at string, loc *time.Location, label string) (*ScheduledAt, error) {
+	if strings.TrimSpace(at) == "" {
+		return nil, nil
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	zoned, err := helpers.ParseFutureTimeZoned(at, loc)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("%s: %v", label, err)}
+	}
+	if zoned.Before(time.Now().Add(-scheduledAtSkew)) {
+		return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("%s is in the past", label)}
+	}
+	return &ScheduledAt{UTC: zoned.UTC(), Zoned: zoned, Zone: zoneDisplayName(zoned)}, nil
+}
+
+// zoneDisplayName names the zone an instant carries. A location parsed from an
+// explicit RFC3339 offset has neither an IANA name nor an abbreviation, so it
+// falls back to the offset itself.
+//
+// One cosmetic dependency on the host: time.Parse attaches time.Local rather
+// than a synthetic fixed zone when the input's numeric offset happens to equal
+// this process's own current offset, so such an instant is named by the host's
+// abbreviation instead of "UTC±HH:MM". Only this display field is affected —
+// never the UTC instant on the wire.
+func zoneDisplayName(t time.Time) string {
+	if name := t.Location().String(); name != "" && name != "Local" {
+		return name
+	}
+	if abbr, _ := t.Zone(); abbr != "" {
+		return abbr
+	}
+	return "UTC" + t.Format("-07:00")
 }
 
 var validRunTypes = map[string]bool{
@@ -183,6 +263,9 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 	if opts.AllDevices && (len(opts.Devices) > 0 || len(opts.OUs) > 0) {
 		return nil, &Error{Code: CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
 	}
+	if opts.Schedule != "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "a one-shot run cannot carry a schedule name — use RunRegisterSpec to register a recurring spec"}
+	}
 
 	body := map[string]interface{}{
 		"type": taskType,
@@ -195,8 +278,14 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 	if opts.Payload != nil && len(opts.Payload) > 0 {
 		body["payload"] = opts.Payload
 	}
-	if opts.ScheduledAt != "" {
-		body["scheduled_at"] = opts.ScheduledAt
+	// Normalize here, not in the front-ends: the wire value must be an
+	// absolute UTC instant no matter which surface built the opts.
+	resolved, err := ResolveScheduledAt(opts.ScheduledAt, opts.ScheduledAtLocation, "scheduled_at")
+	if err != nil {
+		return nil, err
+	}
+	if resolved != nil {
+		body["scheduled_at"] = resolved.RFC3339UTC()
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/organizations/%s/tasks", url.PathEscape(org))
@@ -221,6 +310,12 @@ func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts)
 	}
 	if opts.Schedule == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "schedule name is required for spec registration"}
+	}
+	// A recurring spec has no single anchor instant, and the registration body
+	// carries no scheduled_at at all. Accepting both would let a caller be
+	// shown a one-time instant for something that will never fire at it.
+	if strings.TrimSpace(opts.ScheduledAt) != "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "at and schedule are mutually exclusive: a recurring spec has no one-time scheduled instant"}
 	}
 	taskType := strings.ToUpper(opts.Type)
 	if !validRunTypes[taskType] {

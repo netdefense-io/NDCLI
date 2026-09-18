@@ -3,11 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
@@ -180,28 +178,26 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 				return &service.Error{Code: service.CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
 			}
 
-			if at != "" {
-				t, err := helpers.ParseFutureTime(at, output.Location())
-				if err != nil {
-					return &service.Error{Code: service.CodeInvalidInput, Message: fmt.Sprintf("--at: %v", err)}
-				}
-				// Allow a small backward skew so clock drift doesn't bite,
-				// but reject obviously stale timestamps that look like typos.
-				if t.Before(time.Now().Add(-30 * time.Second)) {
-					return &service.Error{Code: service.CodeInvalidInput, Message: "--at is in the past"}
-				}
-				at = t.UTC().Format(time.RFC3339)
+			// Parsing, the past-time check and the UTC normalization all live
+			// in the service layer, so the MCP surface cannot drift from this
+			// one (issue #217). Bare timestamps mean the configured timezone.
+			// Service.Run resolves the raw value again on its way to the wire;
+			// this early call exists only so a bad --at is reported against the
+			// flag the user typed rather than against the wire field name.
+			if _, err := service.ResolveScheduledAt(at, output.Location(), "--at"); err != nil {
+				return err
 			}
 
 			scheduleName, _ := cmd.Flags().GetString("schedule")
 
 			opts := service.RunOpts{
-				Type:        taskType,
-				Devices:     devices,
-				OUs:         ous,
-				AllDevices:  all,
-				ScheduledAt: at,
-				Schedule:    scheduleName,
+				Type:                taskType,
+				Devices:             devices,
+				OUs:                 ous,
+				AllDevices:          all,
+				ScheduledAt:         at,
+				ScheduledAtLocation: output.Location(),
+				Schedule:            scheduleName,
 			}
 			if extra != nil {
 				if err := extra(cmd, &opts); err != nil {

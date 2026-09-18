@@ -11,6 +11,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
@@ -53,6 +54,18 @@ func NewServer() (*Server, error) {
 	var apiClient *api.Client
 	var svc *service.Service
 	cfg := config.Get()
+
+	// Apply the configured display timezone, mirroring cli/root.go's
+	// setupOutputAndFormatter. Without this the MCP surface resolved bare
+	// timestamps against the host OS zone while the CLI used the configured
+	// one — the same input, two different instants (issue #217).
+	timezone := cfg.Output.Timezone
+	if timezone == "" {
+		timezone = config.DefaultTimezone
+	}
+	if err := output.ApplyConfiguredTimezone(timezone); err != nil {
+		logger.Printf("Warning: invalid timezone %q in config, using system local", timezone)
+	}
 
 	if staticProvider != nil {
 		// authMgr stays nil — there is no keyring/OAuth2 session in static-PAT
@@ -270,13 +283,25 @@ func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 
 // previewResult creates a preview result for destructive operations without confirm
 func (s *Server) previewResult(action, target string) (*mcp.CallToolResult, error) {
+	return s.previewResultWithData(action, target, nil)
+}
+
+// previewResultWithData is previewResult plus extra named fields describing
+// what the confirmed call would do. A preview the model restates to the user
+// has to carry the facts it should restate — a scheduled run's resolved
+// instant, for one — as data rather than prose.
+func (s *Server) previewResultWithData(action, target string, extra map[string]interface{}) (*mcp.CallToolResult, error) {
+	data := map[string]interface{}{
+		"preview": true,
+		"action":  action,
+		"target":  target,
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
 	response := ToolResponse{
 		Success: true,
-		Data: map[string]interface{}{
-			"preview": true,
-			"action":  action,
-			"target":  target,
-		},
+		Data:    data,
 		Message: fmt.Sprintf("Preview: Would %s '%s'. Set confirm=true to execute.", action, target),
 	}
 	return s.jsonResult(response, false)

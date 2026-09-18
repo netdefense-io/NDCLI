@@ -254,9 +254,8 @@ func setupOutputAndFormatter(_ *cobra.Command) error {
 	if timezone == "" {
 		timezone = config.DefaultTimezone
 	}
-	if err := output.SetTimezone(timezone); err != nil {
+	if err := output.ApplyConfiguredTimezone(timezone); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Invalid timezone '%s', using system local\n", timezone)
-		output.SetTimezone("Local")
 	}
 
 	format := outputFmt

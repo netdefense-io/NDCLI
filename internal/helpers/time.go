@@ -31,7 +31,22 @@ var bareTimestampLayouts = []string{
 // configured timezone.
 var tzSuffix = regexp.MustCompile(`(?:Z|[+\-]\d{2}:\d{2})$`)
 
-// ParseFutureTime parses an --at-style input into an absolute UTC time.
+// IsBareTimestamp reports whether input is a timestamp carrying no timezone
+// information of its own — neither a relative offset (which is anchored to
+// "now") nor an explicit `Z`/`±HH:MM` suffix. Such an input is ambiguous
+// without a location: the MCP surface refuses it unless the caller names one.
+func IsBareTimestamp(input string) bool {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return false
+	}
+	if relativeFuturePattern.MatchString(strings.ToLower(input)) {
+		return false
+	}
+	return !tzSuffix.MatchString(input)
+}
+
+// ParseFutureTimeZoned parses an --at-style input into an absolute instant.
 // Accepted forms:
 //
 //   - Relative offset: `45s`, `30m`, `2h`, `3d`, `1w`  → now + offset (UTC)
@@ -44,9 +59,12 @@ var tzSuffix = regexp.MustCompile(`(?:Z|[+\-]\d{2}:\d{2})$`)
 // configured display timezone via `output.Location()`. Date-only inputs land
 // at midnight in `loc`.
 //
-// Returns the parsed instant as UTC (always). Past-time checks are the
-// caller's responsibility.
-func ParseFutureTime(input string, loc *time.Location) (time.Time, error) {
+// The returned instant keeps the zone it was parsed in — the explicit offset
+// for RFC3339 inputs, `loc` for bare timestamps, UTC for relative offsets — so
+// callers can render it the way the user expressed it. Converting to UTC and
+// checking for a past time are service.ResolveScheduledAt's job; call that
+// rather than this directly.
+func ParseFutureTimeZoned(input string, loc *time.Location) (time.Time, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return time.Time{}, fmt.Errorf("empty time")
@@ -80,10 +98,10 @@ func ParseFutureTime(input string, loc *time.Location) (time.Time, error) {
 	//    instead of being silently reinterpreted as "bare local".
 	if tzSuffix.MatchString(input) {
 		if t, err := time.Parse(time.RFC3339Nano, input); err == nil {
-			return t.UTC(), nil
+			return t, nil
 		}
 		if t, err := time.Parse(time.RFC3339, input); err == nil {
-			return t.UTC(), nil
+			return t, nil
 		}
 		return time.Time{}, fmt.Errorf("invalid timestamp %q: tz suffix present but value is not valid RFC3339", input)
 	}
@@ -91,7 +109,7 @@ func ParseFutureTime(input string, loc *time.Location) (time.Time, error) {
 	// 3. Bare layouts — interpreted in the configured timezone.
 	for _, layout := range bareTimestampLayouts {
 		if t, err := time.ParseInLocation(layout, input, loc); err == nil {
-			return t.UTC(), nil
+			return t, nil
 		}
 	}
 

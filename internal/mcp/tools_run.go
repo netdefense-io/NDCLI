@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
@@ -23,6 +27,7 @@ type runInput struct {
 	OUs          []string `json:"ous,omitempty"`
 	Org          bool     `json:"org,omitempty"`
 	At           string   `json:"at,omitempty"`
+	Timezone     string   `json:"timezone,omitempty"` // IANA name; interprets a bare At timestamp
 	Schedule     string   `json:"schedule,omitempty"` // recurring spec registration
 	// PING
 	Host  string `json:"host,omitempty"`
@@ -38,6 +43,158 @@ type runInput struct {
 	Confirm bool `json:"confirm,omitempty"`
 }
 
+// atParamDescription and timezoneParamDescription are the single source of
+// truth for how the scheduling parameters are advertised: the MCPB manifest
+// and the Smithery server card are both generated from the live tool registry
+// (scripts/gen-mcpb-manifest.py), so this text is what every catalog shows.
+//
+// The wording is deliberately insistent about asking the user. An agent that
+// guesses a timezone schedules a firewall reboot at the wrong hour and nothing
+// in the transcript looks wrong (issue #217).
+const atParamDescription = "Defer execution to a future instant. Three accepted forms: " +
+	"a relative offset (30m, 2h, 3d, 1w); RFC3339 with an explicit UTC offset or Z " +
+	"(2026-05-12T03:00:00-03:00, 2026-05-12T03:00:00Z); or a bare timestamp " +
+	"(2026-05-12 03:00, 2026-05-12T03:00), which REQUIRES the timezone parameter. " +
+	"Scheduling is timezone-sensitive: the user's timezone, the device's local timezone " +
+	"and UTC can differ, so unless the user stated the timezone explicitly, ask which one " +
+	"they mean before calling with confirm=true, and state the resolved UTC time back to " +
+	"them. A relative offset is re-resolved when you call again with confirm=true, " +
+	"so use an absolute form when the exact instant shown in the preview has to be the " +
+	"one scheduled. Omit for an immediate run. Mutually exclusive with schedule."
+
+const timezoneParamDescription = "IANA timezone name (e.g. America/Sao_Paulo, Europe/Lisbon, UTC) " +
+	"used to interpret a bare `at` timestamp. Required when `at` is a bare timestamp; ignored " +
+	"when `at` is a relative offset or already carries an explicit UTC offset or Z."
+
+// resolveRunScheduledAt turns the `at` + `timezone` parameters into an
+// absolute instant, or refuses. Unlike the CLI — which may fall back to the
+// configured timezone because a human typed the value and knows their own
+// clock — the MCP surface refuses a bare timestamp with no timezone: the
+// caller is a model that may be reasoning about the user's timezone, the
+// device's, or UTC, and silently picking one is exactly issue #217.
+// westmostZone is UTC-12:00, the furthest-behind offset in use. A bare
+// timestamp read there is the latest absolute instant any timezone could give
+// it, which is what makes it the right yardstick for "no timezone can help".
+var westmostZone = time.FixedZone("UTC-12:00", -12*60*60)
+
+func resolveRunScheduledAt(at, timezone, schedule string) (*service.ScheduledAt, error) {
+	at = strings.TrimSpace(at)
+	timezone = strings.TrimSpace(timezone)
+	if at == "" {
+		return nil, nil
+	}
+	// A recurring spec has no one-time instant and its registration body
+	// carries no scheduled_at, so a preview echoing one would describe a
+	// firing that never happens. Refuse before the preview, not at execution.
+	if strings.TrimSpace(schedule) != "" {
+		return nil, &service.Error{
+			Code:    service.CodeInvalidInput,
+			Message: "at and schedule are mutually exclusive: at defers a single run, schedule registers a recurring spec that has no one-time instant",
+		}
+	}
+
+	// timezone is consulted only where it changes the answer — a bare
+	// timestamp. Validating it for an input that carries its own zone would
+	// contradict the parameter's own contract ("ignored when...") and turn a
+	// harmless stale value into a hard failure.
+	loc := output.Location()
+	if helpers.IsBareTimestamp(at) {
+		if timezone == "" {
+			// Never ask for a timezone that cannot rescue the input. Resolving
+			// against the westernmost zone is the most favourable reading
+			// available — it makes a given wall-clock the latest instant any
+			// timezone could name — so a failure there is a failure under all
+			// of them, whether the value is unparseable or simply past.
+			if _, err := service.ResolveScheduledAt(at, westmostZone, "at"); err != nil {
+				return nil, err
+			}
+			return nil, &service.Error{
+				Code: service.CodeInvalidInput,
+				Message: fmt.Sprintf(
+					"at: %q carries no timezone, so the instant it names is ambiguous. Pass timezone with an IANA name (NDCLI is configured for %s), or give `at` an explicit UTC offset or Z (2026-05-12T03:00:00-03:00). Confirm with the user which timezone the time refers to before scheduling.",
+					at, configuredTimezoneHint()),
+			}
+		}
+		l, err := time.LoadLocation(timezone)
+		if err != nil {
+			return nil, &service.Error{
+				Code:    service.CodeInvalidInput,
+				Message: fmt.Sprintf("timezone: %q is not a valid IANA timezone name (expected something like America/Sao_Paulo, Europe/Lisbon or UTC)", timezone),
+			}
+		}
+		loc = l
+	}
+
+	return service.ResolveScheduledAt(at, loc, "at")
+}
+
+// configuredTimezoneHint names NDCLI's configured display timezone for the
+// error above. "Local" alone is useless as a suggestion — it is not an IANA
+// name the caller can pass back — so the host's current abbreviation and
+// offset are appended.
+func configuredTimezoneHint() string {
+	name := output.GetTimezone()
+	if name != "Local" {
+		return name
+	}
+	now := time.Now().In(output.Location())
+	abbr, _ := now.Zone()
+	if abbr != "" {
+		return fmt.Sprintf("Local (%s, UTC%s)", abbr, now.Format("-07:00"))
+	}
+	return fmt.Sprintf("Local (UTC%s)", now.Format("-07:00"))
+}
+
+// scheduleEcho renders the resolved instant as named response fields. The
+// model has to be able to restate the schedule to the user without parsing
+// prose, and it has to be able to see the offset it was resolved against —
+// hence the UTC form, the zoned form, the zone name, and "now".
+func scheduleEcho(resolved *service.ScheduledAt) map[string]interface{} {
+	if resolved == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"scheduled_at":          resolved.RFC3339UTC(),
+		"scheduled_at_local":    resolved.RFC3339Zoned(),
+		"scheduled_at_timezone": resolved.Zone,
+		"now_utc":               time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// runResultResponse renders an executed run for both `ndcli.run.*` handlers.
+// One implementation, so the generic path and the firmware-upgrade path cannot
+// describe the same result differently.
+func runResultResponse(result *models.RunResult, resolved *service.ScheduledAt, taskType string) (map[string]interface{}, string) {
+	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
+	for _, t := range result.Tasks {
+		tasks = append(tasks, map[string]interface{}{
+			"task":        t.Task,
+			"device":      t.DeviceName,
+			"device_uuid": t.DeviceUUID,
+			"status":      t.Status,
+			"expires_at":  t.ExpiresAt,
+		})
+	}
+	data := map[string]interface{}{
+		"type":         result.Type,
+		"organization": result.Organization,
+		"scheduled_at": result.ScheduledAt,
+		"total":        result.Total,
+		"tasks":        tasks,
+	}
+	summary := fmt.Sprintf("%d %s task(s) created", result.Total, taskType)
+	if resolved != nil {
+		// Prefer the instant this client resolved over the server echo: it is
+		// the value that was actually sent, and it is guaranteed UTC.
+		for k, v := range scheduleEcho(resolved) {
+			data[k] = v
+		}
+		summary = fmt.Sprintf("%d %s task(s) scheduled for %s (%s %s)",
+			result.Total, taskType, resolved.RFC3339UTC(), resolved.RFC3339Zoned(), resolved.Zone)
+	}
+	return data, summary
+}
+
 // registerRunTools registers the `ndcli run` MCP tools — the
 // LLM-facing twin of the CLI surface in cli/run.go.
 func (s *Server) registerRunTools() {
@@ -46,7 +203,8 @@ func (s *Server) registerRunTools() {
 		"devices":      stringArrayProperty("Target device names (repeatable)"),
 		"ous":          stringArrayProperty("Target OU names; expands to enabled members"),
 		"org":          boolProperty("Target every enabled device in the current org"),
-		"at":           stringProperty("Defer execution. Accepts a relative offset (30m, 2h, 3d, 1w), a bare timestamp interpreted in NDCLI's configured timezone (2026-05-12 03:00), or RFC3339 with explicit tz (2026-05-12T03:00:00Z). Omit for immediate run. Mutually exclusive with schedule."),
+		"at":           stringProperty(atParamDescription),
+		"timezone":     stringProperty(timezoneParamDescription),
 		"schedule":     stringProperty("Register as a recurring spec on this named schedule instead of running immediately. Mutually exclusive with at."),
 		"confirm":      confirmProperty(),
 	}
@@ -184,18 +342,27 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 		return s.errorResult(fmt.Errorf("major firmware upgrades require a reboot (reboot=false is not allowed with mode=major)"))
 	}
 
+	// Resolve the scheduling instant before anything else touches the
+	// network, so an ambiguous `at` is refused without a round trip.
+	resolved, err := resolveRunScheduledAt(input.At, input.Timezone, input.Schedule)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
 	org, err := s.svc.ResolveOrg(input.Organization)
 	if err != nil {
 		return s.errorResult(err)
 	}
 
 	opts := service.RunOpts{
-		Type:        models.TaskTypeFirmwareUpgrade,
-		Devices:     input.Devices,
-		OUs:         input.OUs,
-		AllDevices:  input.Org,
-		ScheduledAt: input.At,
-		Schedule:    input.Schedule,
+		Type:       models.TaskTypeFirmwareUpgrade,
+		Devices:    input.Devices,
+		OUs:        input.OUs,
+		AllDevices: input.Org,
+		Schedule:   input.Schedule,
+	}
+	if resolved != nil {
+		opts.ScheduledAt = resolved.RFC3339UTC()
 	}
 	opts.Payload = map[string]interface{}{
 		"mode":        input.Mode,
@@ -216,7 +383,7 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 		if input.Schedule != "" {
 			action = fmt.Sprintf("register a %s spec on schedule %q for", models.TaskTypeFirmwareUpgrade, input.Schedule)
 		}
-		return s.previewResult(action, scope)
+		return s.previewResultWithData(action, scope, scheduleEcho(resolved))
 	}
 
 	if input.Schedule != "" {
@@ -232,27 +399,8 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 		return s.errorResult(err)
 	}
 
-	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
-	for _, t := range result.Tasks {
-		tasks = append(tasks, map[string]interface{}{
-			"task":        t.Task,
-			"device":      t.DeviceName,
-			"device_uuid": t.DeviceUUID,
-			"status":      t.Status,
-			"expires_at":  t.ExpiresAt,
-		})
-	}
-	summary := fmt.Sprintf("%d %s task(s) created", result.Total, models.TaskTypeFirmwareUpgrade)
-	if result.ScheduledAt != "" {
-		summary = fmt.Sprintf("%d %s task(s) scheduled for %s", result.Total, models.TaskTypeFirmwareUpgrade, result.ScheduledAt)
-	}
-	return s.successResult(map[string]interface{}{
-		"type":         result.Type,
-		"organization": result.Organization,
-		"scheduled_at": result.ScheduledAt,
-		"total":        result.Total,
-		"tasks":        tasks,
-	}, summary)
+	data, summary := runResultResponse(result, resolved, models.TaskTypeFirmwareUpgrade)
+	return s.successResult(data, summary)
 }
 
 func mergeProps(a, b map[string]interface{}) map[string]interface{} {
@@ -290,17 +438,26 @@ func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runIn
 // directly in tests without a live authenticated Service (RequireAuth needs
 // a real *auth.Manager, which can't be faked from this package).
 func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payloadFn func(*runInput) map[string]interface{}, input *runInput) (*mcp.CallToolResult, error) {
+	// Resolve the scheduling instant before anything else touches the
+	// network, so an ambiguous `at` is refused without a round trip.
+	resolved, err := resolveRunScheduledAt(input.At, input.Timezone, input.Schedule)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
 	org, err := s.svc.ResolveOrg(input.Organization)
 	if err != nil {
 		return s.errorResult(err)
 	}
 	opts := service.RunOpts{
-		Type:        taskType,
-		Devices:     input.Devices,
-		OUs:         input.OUs,
-		AllDevices:  input.Org,
-		ScheduledAt: input.At,
-		Schedule:    input.Schedule,
+		Type:       taskType,
+		Devices:    input.Devices,
+		OUs:        input.OUs,
+		AllDevices: input.Org,
+		Schedule:   input.Schedule,
+	}
+	if resolved != nil {
+		opts.ScheduledAt = resolved.RFC3339UTC()
 	}
 	if payloadFn != nil {
 		opts.Payload = payloadFn(input)
@@ -318,7 +475,7 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 		if input.Schedule != "" {
 			action = fmt.Sprintf("register a %s spec on schedule %q for", taskType, input.Schedule)
 		}
-		return s.previewResult(action, scope)
+		return s.previewResultWithData(action, scope, scheduleEcho(resolved))
 	}
 
 	if input.Schedule != "" {
@@ -334,27 +491,8 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 		return s.errorResult(err)
 	}
 
-	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
-	for _, t := range result.Tasks {
-		tasks = append(tasks, map[string]interface{}{
-			"task":        t.Task,
-			"device":      t.DeviceName,
-			"device_uuid": t.DeviceUUID,
-			"status":      t.Status,
-			"expires_at":  t.ExpiresAt,
-		})
-	}
-	summary := fmt.Sprintf("%d %s task(s) created", result.Total, taskType)
-	if result.ScheduledAt != "" {
-		summary = fmt.Sprintf("%d %s task(s) scheduled for %s", result.Total, taskType, result.ScheduledAt)
-	}
-	return s.successResult(map[string]interface{}{
-		"type":         result.Type,
-		"organization": result.Organization,
-		"scheduled_at": result.ScheduledAt,
-		"total":        result.Total,
-		"tasks":        tasks,
-	}, summary)
+	data, summary := runResultResponse(result, resolved, taskType)
+	return s.successResult(data, summary)
 }
 
 func runScopeDescription(in *runInput) string {
