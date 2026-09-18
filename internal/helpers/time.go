@@ -46,6 +46,19 @@ func IsBareTimestamp(input string) bool {
 	return !tzSuffix.MatchString(input)
 }
 
+// HasExplicitZone reports whether input carries a zone designator of its own —
+// a trailing `Z` or `±HH:MM`. Callers use it to name the zone from the input
+// rather than from whatever location the parse happened to attach.
+func HasExplicitZone(input string) bool {
+	return tzSuffix.MatchString(strings.TrimSpace(input))
+}
+
+// IsRelativeOffset reports whether input is a relative offset (`30m`, `2h`),
+// which is anchored to "now" and therefore always resolves in UTC.
+func IsRelativeOffset(input string) bool {
+	return relativeFuturePattern.MatchString(strings.ToLower(strings.TrimSpace(input)))
+}
+
 // ParseFutureTimeZoned parses an --at-style input into an absolute instant.
 // Accepted forms:
 //

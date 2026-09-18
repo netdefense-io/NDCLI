@@ -211,20 +211,39 @@ func ResolveScheduledAt(at string, loc *time.Location, label string) (*Scheduled
 	if zoned.Before(time.Now().Add(-scheduledAtSkew)) {
 		return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("%s is in the past", label)}
 	}
-	return &ScheduledAt{UTC: zoned.UTC(), Zoned: zoned, Zone: zoneDisplayName(zoned)}, nil
+	return &ScheduledAt{UTC: zoned.UTC(), Zoned: zoned, Zone: scheduledZoneName(at, zoned, loc)}, nil
 }
 
-// zoneDisplayName names the zone an instant carries. A location parsed from an
-// explicit RFC3339 offset has neither an IANA name nor an abbreviation, so it
-// falls back to the offset itself.
+// scheduledZoneName names the zone the instant was resolved in, from the shape
+// of the input rather than from the location the parse happened to attach.
 //
-// One cosmetic dependency on the host: time.Parse attaches time.Local rather
-// than a synthetic fixed zone when the input's numeric offset happens to equal
-// this process's own current offset, so such an instant is named by the host's
-// abbreviation instead of "UTC±HH:MM". Only this display field is affected —
-// never the UTC instant on the wire.
-func zoneDisplayName(t time.Time) string {
-	if name := t.Location().String(); name != "" && name != "Local" {
+// That distinction matters: time.Parse attaches time.Local, not a synthetic
+// fixed zone, when an explicit numeric offset happens to equal this process's
+// own current offset — so reading the parsed location would name the same user
+// input differently depending on which host the MCP server runs on. An offset
+// the user wrote is reported as that offset, always.
+func scheduledZoneName(input string, t time.Time, loc *time.Location) string {
+	switch {
+	case helpers.IsRelativeOffset(input):
+		// Anchored to now, resolved in UTC; the location is not involved.
+		return "UTC"
+	case helpers.HasExplicitZone(input):
+		if _, offset := t.Zone(); offset == 0 {
+			return "UTC"
+		}
+		return "UTC" + t.Format("-07:00")
+	default:
+		return locationDisplayName(loc, t)
+	}
+}
+
+// locationDisplayName names the location a bare timestamp was read in. "Local"
+// is not useful on its own, so the host's abbreviation and offset stand in.
+func locationDisplayName(loc *time.Location, t time.Time) string {
+	if loc == nil {
+		loc = time.Local
+	}
+	if name := loc.String(); name != "" && name != "Local" {
 		return name
 	}
 	if abbr, _ := t.Zone(); abbr != "" {

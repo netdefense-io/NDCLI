@@ -58,9 +58,10 @@ const atParamDescription = "Defer execution to a future instant. Three accepted 
 	"Scheduling is timezone-sensitive: the user's timezone, the device's local timezone " +
 	"and UTC can differ, so unless the user stated the timezone explicitly, ask which one " +
 	"they mean before calling with confirm=true, and state the resolved UTC time back to " +
-	"them. A relative offset is re-resolved when you call again with confirm=true, " +
-	"so use an absolute form when the exact instant shown in the preview has to be the " +
-	"one scheduled. Omit for an immediate run. Mutually exclusive with schedule."
+	"them. When confirming a run you previewed, pass the preview's scheduled_at value " +
+	"back as at, so the instant cannot drift — a relative offset like 30m is re-resolved " +
+	"against a new \"now\" on the confirming call. Omit for an immediate run. Mutually " +
+	"exclusive with schedule."
 
 const timezoneParamDescription = "IANA timezone name (e.g. America/Sao_Paulo, Europe/Lisbon, UTC) " +
 	"used to interpret a bare `at` timestamp. Required when `at` is a bare timestamp; ignored " +
@@ -143,6 +144,21 @@ func configuredTimezoneHint() string {
 		return fmt.Sprintf("Local (%s, UTC%s)", abbr, now.Format("-07:00"))
 	}
 	return fmt.Sprintf("Local (UTC%s)", now.Format("-07:00"))
+}
+
+// previewScheduleEcho is scheduleEcho plus the instruction that keeps a
+// previewed instant from drifting: the confirming call re-resolves whatever
+// `at` it is given, so a relative offset previewed now lands somewhere else
+// when confirmed a minute later. Passing the resolved value back pins it.
+func previewScheduleEcho(resolved *service.ScheduledAt) map[string]interface{} {
+	echo := scheduleEcho(resolved)
+	if echo == nil {
+		return nil
+	}
+	echo["confirm_hint"] = fmt.Sprintf(
+		"To schedule exactly this instant, confirm with at=%q (timezone is not needed — the value carries its own). Re-sending a relative offset would resolve against a later \"now\".",
+		resolved.RFC3339UTC())
+	return echo
 }
 
 // scheduleEcho renders the resolved instant as named response fields. The
@@ -383,7 +399,7 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 		if input.Schedule != "" {
 			action = fmt.Sprintf("register a %s spec on schedule %q for", models.TaskTypeFirmwareUpgrade, input.Schedule)
 		}
-		return s.previewResultWithData(action, scope, scheduleEcho(resolved))
+		return s.previewResultWithData(action, scope, previewScheduleEcho(resolved))
 	}
 
 	if input.Schedule != "" {
@@ -475,7 +491,7 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 		if input.Schedule != "" {
 			action = fmt.Sprintf("register a %s spec on schedule %q for", taskType, input.Schedule)
 		}
-		return s.previewResultWithData(action, scope, scheduleEcho(resolved))
+		return s.previewResultWithData(action, scope, previewScheduleEcho(resolved))
 	}
 
 	if input.Schedule != "" {

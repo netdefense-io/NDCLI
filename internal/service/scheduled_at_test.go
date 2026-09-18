@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -220,5 +221,56 @@ func TestRunRegisterSpecRejectsAScheduledAt(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected RunRegisterSpec to refuse a one-time instant")
+	}
+}
+
+// TestResolveScheduledAt_ZoneNameIsHostIndependent: time.Parse attaches
+// time.Local when an explicit offset equals the host's own current offset, so
+// naming the zone from the parsed location would describe identical user input
+// differently on different hosts. The name comes from the offset instead.
+func TestResolveScheduledAt_ZoneNameIsHostIndependent(t *testing.T) {
+	_, hostOffset := time.Now().In(time.Local).Zone()
+	sign := "+"
+	if hostOffset < 0 {
+		sign = "-"
+		hostOffset = -hostOffset
+	}
+	offset := fmt.Sprintf("%s%02d:%02d", sign, hostOffset/3600, (hostOffset%3600)/60)
+
+	at := time.Now().Add(48*time.Hour).In(time.Local).Format("2006-01-02T15:04:05") + offset
+	resolved, err := ResolveScheduledAt(at, time.UTC, "at")
+	if err != nil {
+		t.Fatalf("unexpected error for %q: %v", at, err)
+	}
+	want := "UTC" + offset
+	if offset == "+00:00" || offset == "-00:00" {
+		want = "UTC"
+	}
+	if resolved.Zone != want {
+		t.Fatalf("zone = %q, want %q (must not depend on the host zone)", resolved.Zone, want)
+	}
+}
+
+// TestResolveScheduledAt_RelativeOffsetIsNamedUTC pins the third branch of the
+// classification.
+func TestResolveScheduledAt_RelativeOffsetIsNamedUTC(t *testing.T) {
+	resolved, err := ResolveScheduledAt("2h", mustLoad(t, "America/Sao_Paulo"), "at")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved.Zone != "UTC" {
+		t.Fatalf("zone = %q, want UTC for a relative offset", resolved.Zone)
+	}
+}
+
+// TestResolveScheduledAt_ZuluIsNamedUTC keeps a zero offset from rendering as
+// "UTC+00:00".
+func TestResolveScheduledAt_ZuluIsNamedUTC(t *testing.T) {
+	resolved, err := ResolveScheduledAt("2126-09-22T02:00:00Z", time.UTC, "at")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved.Zone != "UTC" {
+		t.Fatalf("zone = %q, want UTC", resolved.Zone)
 	}
 }

@@ -519,3 +519,47 @@ func TestRunCommand_NearFutureBareTimestampStillAsksForATimezone(t *testing.T) {
 		t.Fatalf("expected a timezone prompt, got success=%v error=%+v", resp.Success, resp.Error)
 	}
 }
+
+// TestRunCommand_PreviewInstantSurvivesTheConfirmingCall: a relative offset is
+// re-resolved on the confirming call, so the preview tells the caller to send
+// the resolved instant back instead. Feeding it back must produce exactly the
+// instant the preview showed.
+func TestRunCommand_PreviewInstantSurvivesTheConfirmingCall(t *testing.T) {
+	s := newTestServer(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an unconfirmed call must not reach the endpoint")
+	})), "acme")
+
+	preview, err := s.runCommand(context.Background(), "poweroff", models.TaskTypeShutdown, nil,
+		&runInput{Devices: []string{"fw-01"}, At: "30m"})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	var resp ToolResponse
+	decodeToolResult(t, preview, &resp)
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected preview shape: %v", resp.Data)
+	}
+	previewed, ok := data["scheduled_at"].(string)
+	if !ok {
+		t.Fatalf("preview carries no scheduled_at: %v", data)
+	}
+	hint, ok := data["confirm_hint"].(string)
+	if !ok || !strings.Contains(hint, previewed) {
+		t.Fatalf("confirm_hint = %v, want it to name the resolved instant %q", data["confirm_hint"], previewed)
+	}
+
+	body := captureRunRequest(t, func(s *Server) {
+		if _, err := s.runCommand(context.Background(), "poweroff", models.TaskTypeShutdown, nil,
+			&runInput{Devices: []string{"fw-01"}, At: previewed, Confirm: true}); err != nil {
+			t.Fatalf("unexpected transport error: %v", err)
+		}
+	})
+	var sent string
+	if err := json.Unmarshal(body["scheduled_at"], &sent); err != nil {
+		t.Fatalf("scheduled_at missing or not a string: %v", err)
+	}
+	if sent != previewed {
+		t.Fatalf("confirmed instant = %q, want the previewed %q", sent, previewed)
+	}
+}
