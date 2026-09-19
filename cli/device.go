@@ -45,8 +45,13 @@ var deviceRenameCmd = &cobra.Command{
 }
 
 var deviceRemoveCmd = &cobra.Command{
-	Use:               "remove [device]",
-	Short:             "Remove a device",
+	Use:   "remove [device]",
+	Short: "Remove a device",
+	Long: `Remove a device.
+
+Removal is permanent and triggers self-decommission on the device.
+
+` + service.DeviceRemoveConsequence,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
 	RunE:              runDeviceRemove,
@@ -231,11 +236,25 @@ func runDeviceRename(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// deviceRemoveWarningLines is the pre-confirmation warning for a removal. It
+// is returned rather than printed so the wording is testable, and it renders
+// service.DeviceRemoveConsequence verbatim rather than a paraphrase, so this
+// surface cannot drift from the MCP tool and the TUI modal.
+func deviceRemoveWarningLines(deviceName string) []string {
+	return []string{
+		fmt.Sprintf("⚠ Removing device '%s':", deviceName),
+		"  " + service.DeviceRemoveConsequence,
+	}
+}
+
 func runDeviceRemove(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
 	deviceName := args[0]
+	for _, line := range deviceRemoveWarningLines(deviceName) {
+		color.New(color.FgRed).Println(line)
+	}
 	if !helpers.Confirm(fmt.Sprintf("Remove device '%s'?", deviceName)) {
 		fmt.Println("Cancelled")
 		return nil

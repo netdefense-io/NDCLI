@@ -14,6 +14,11 @@ type confirmModel struct {
 	typed  string
 }
 
+// blastRadiusWrapWidth wraps the warning text inside the danger modal. The
+// modal has no size of its own, so a long BlastRadius (the device-removal
+// consequences, for one) would otherwise run off the terminal.
+const blastRadiusWrapWidth = 72
+
 func newConfirm(act registry.Action, target string) *confirmModel {
 	return &confirmModel{act: act, target: target}
 }
@@ -62,7 +67,7 @@ func (c *confirmModel) View() string {
 	if c.needsType() {
 		lines = append(lines,
 			"",
-			errStyle.Render("⚠ "+c.act.BlastRadius),
+			errStyle.Width(blastRadiusWrapWidth).Render("⚠ "+c.act.BlastRadius),
 			"",
 			"Type "+keyStyle.Render("yes")+" to confirm: "+c.typed+"▌",
 			"",

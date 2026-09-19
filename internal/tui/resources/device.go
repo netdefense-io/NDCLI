@@ -81,7 +81,8 @@ func (deviceResource) Actions() []registry.Action {
 		{Key: "t", Label: "rebind-token", Shell: []string{"device", "rebind-token", "{id}", "-o", "{org}"}},
 		{Key: "s", Label: "sync", Prompt: "Sync (apply the rendered config) to {id}?"},
 		{Key: "x", Label: "remove", Destructive: true,
-			Prompt: "Remove device {id} from management? This cannot be undone."},
+			Prompt:      "Remove device {id} from management?",
+			BlastRadius: service.DeviceRemoveConsequence},
 	}
 }
 

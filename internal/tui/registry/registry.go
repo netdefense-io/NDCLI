@@ -65,7 +65,10 @@ type Action struct {
 	Prompt string
 	// BlastRadius, when non-empty, upgrades the confirm modal to
 	// type-to-confirm and shows this text as a highlighted warning. Use for
-	// fleet-wide operations (approve-all, sync apply to a whole org).
+	// fleet-wide operations (approve-all, sync apply to a whole org) and for
+	// single-target actions that are irreversible or have consequences a
+	// plain y/n prompt would not convey (device remove wipes the box).
+	// The text is wrapped when rendered, so it may be a full sentence.
 	BlastRadius string
 	// TargetsAll marks an action that ignores the selected row and operates
 	// on the whole resource scope (e.g. approve-all). The app passes an empty

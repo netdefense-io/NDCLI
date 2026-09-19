@@ -97,10 +97,14 @@ func (s *Server) registerDeviceTools() {
 		},
 	}, s.handleDeviceRename)
 
-	// ndcli.device.remove
+	// ndcli.device.remove. The description carries an explicit "ask the user"
+	// clause that other confirm=true tools do not: every other irreversible
+	// tool loses a control-plane record, while this one also wipes and
+	// uninstalls a remote box the model cannot inspect or restore.
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.device.remove",
-		Description: "Remove a device from management. Requires confirm=true to execute.",
+		Name: "ndcli.device.remove",
+		Description: "Remove a device from management. " + service.DeviceRemoveConsequence +
+			" Always ask the user to confirm before calling this with confirm=true. Requires confirm=true to execute.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -390,7 +394,9 @@ func (s *Server) handleDeviceRemove(ctx context.Context, req *mcp.CallToolReques
 		return s.errorResult(err)
 	}
 	if !input.Confirm {
-		return s.previewResult("remove", input.Device)
+		return s.previewResultWithData("remove", input.Device, map[string]interface{}{
+			"consequence": service.DeviceRemoveConsequence,
+		})
 	}
 
 	apiCtx, cancel := contextWithTimeout()
@@ -400,9 +406,13 @@ func (s *Server) handleDeviceRemove(ctx context.Context, req *mcp.CallToolReques
 		return s.errorResult(err)
 	}
 
+	// The consequence rides on the success payload too: a caller that asked
+	// the user out of band and went straight to confirm=true never saw the
+	// preview, and still has to be able to tell them what the box will do.
 	return s.successResult(map[string]interface{}{
-		"device": input.Device,
-		"action": "removed",
+		"device":      input.Device,
+		"action":      "removed",
+		"consequence": service.DeviceRemoveConsequence,
 	}, fmt.Sprintf("Device '%s' removed successfully", input.Device))
 }
 
