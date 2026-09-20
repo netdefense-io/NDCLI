@@ -74,12 +74,26 @@ func isStrippedRune(r rune) bool {
 // a pointer).
 //
 // Kinds that can't be inspected without risking a panic on arbitrary
-// decoded data (interface, chan, func, and unexported/unaddressable
-// fields) are left untouched — a safe no-op rather than a new crash
-// surface. Map values obtained via MapIndex aren't addressable, so only
-// leaf string values in a map are rewritten (via SetMapIndex); nested
-// structs/pointers inside a map value are not sanitized. No current
-// model needs that, but it's a known limitation.
+// decoded data (chan, func, and unexported/unaddressable fields) are left
+// untouched — a safe no-op rather than a new crash surface.
+//
+// Interfaces ARE unwrapped, because a model that keeps unmodeled keys as
+// cargo decodes into map[string]interface{} — Device.Facts and
+// SoftwarePolicyContent's extra keys — and every value in such a map
+// reports Kind() == Interface no matter what is dynamically stored in it.
+// Skipping them meant agent- and server-supplied strings reaching the
+// formatters with their escape sequences intact, which is the one thing
+// this package exists to prevent. Unwrapping reaches the two shapes JSON
+// actually produces inside an interface: a string (rewritten in place),
+// and a map or slice (a reference type, so recursing mutates what the
+// caller holds). Anything else is left alone.
+//
+// One gap remains, unchanged: a map with a typed non-interface value kind
+// — map[string]SomeStruct, say — still has only its leaf strings rewritten,
+// because a value read with MapIndex is not addressable and a struct read
+// out of one cannot be written back field by field. No model has that shape
+// today. A future one would need the same write-back treatment the string
+// and interface branches get here.
 func Struct(v reflect.Value) {
 	if !v.IsValid() {
 		return
@@ -105,27 +119,83 @@ func Struct(v reflect.Value) {
 		}
 	case reflect.Map:
 		sanitizeMap(v)
+	case reflect.Interface:
+		sanitizeInterface(v)
 	case reflect.String:
 		if v.CanSet() {
 			v.SetString(String(v.String()))
 		}
 	default:
-		// bool, numeric, interface, chan, func, etc. — nothing to sanitize.
+		// bool, numeric, chan, func, etc. — nothing to sanitize.
+	}
+}
+
+// sanitizeInterface handles an addressable interface value — a slice
+// element of []interface{}, or a struct field declared as interface{}.
+// A string is replaced in place; a map or slice is recursed into, which
+// reaches the caller's data because both are reference types. An
+// unaddressable interface (one read out of a map) is handled by
+// sanitizeMap instead, which can write back through SetMapIndex.
+func sanitizeInterface(v reflect.Value) {
+	if v.IsNil() {
+		return
+	}
+	elem := v.Elem()
+	switch elem.Kind() {
+	case reflect.String:
+		if v.CanSet() {
+			v.Set(reflect.ValueOf(String(elem.String())))
+		}
+	case reflect.Map, reflect.Slice, reflect.Ptr:
+		Struct(elem)
 	}
 }
 
 // sanitizeMap rewrites string-valued map entries in place. Map values
 // are not addressable, so each value is read, sanitized, and written
 // back via SetMapIndex rather than mutated directly.
+//
+// A map[string]interface{} — what a JSON decode produces for any
+// cargo-carrying field — is the case that matters most here: its values
+// report Kind() == Interface, so the string check alone skipped every one
+// of them. The interface branch unwraps to the two shapes a JSON decode
+// puts inside: a string, written back through SetMapIndex; and a nested
+// map or slice, recursed into, which works without a write-back because
+// both are reference types.
 func sanitizeMap(v reflect.Value) {
 	if v.IsNil() {
 		return
 	}
+	elemType := v.Type().Elem()
 	for _, key := range v.MapKeys() {
 		val := v.MapIndex(key)
-		if val.Kind() != reflect.String {
-			continue
+		switch val.Kind() {
+		case reflect.String:
+			v.SetMapIndex(key, sanitizedStringValue(val.String(), elemType))
+		case reflect.Interface:
+			if val.IsNil() {
+				continue
+			}
+			inner := val.Elem()
+			switch inner.Kind() {
+			case reflect.String:
+				v.SetMapIndex(key, sanitizedStringValue(inner.String(), elemType))
+			case reflect.Map, reflect.Slice, reflect.Ptr:
+				Struct(inner)
+			}
 		}
-		v.SetMapIndex(key, reflect.ValueOf(String(val.String())))
 	}
+}
+
+// sanitizedStringValue builds the reflect.Value to store back into a map
+// whose element type is typ. The conversion matters for a map declared
+// with a named string type (map[string]MyString): SetMapIndex panics on a
+// plain string there. An interface element type needs no conversion —
+// every string is assignable to it.
+func sanitizedStringValue(s string, typ reflect.Type) reflect.Value {
+	rv := reflect.ValueOf(String(s))
+	if typ.Kind() == reflect.String && rv.Type() != typ {
+		return rv.Convert(typ)
+	}
+	return rv
 }

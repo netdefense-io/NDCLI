@@ -125,6 +125,12 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 	if !d.UpdatedAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Updated", FormatTimestamp(d.UpdatedAt.Time))
 	}
+
+	// Agent-reported facts, when the device reports any. A separate titled
+	// box rather than more lines in the block above: the facts come from the
+	// device itself, not from the control plane, and the box is built with
+	// fieldBox, not the hand-padded legacy style around it.
+	writeDeviceFactsBox(f.BaseFormatter, d)
 }
 
 // FormatDevice formats a single device with full details

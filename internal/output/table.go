@@ -219,6 +219,19 @@ func (f *TableFormatter) FormatDevice(device *models.Device) error {
 	fmt.Printf("Created:      %s\n", FormatTimestamp(device.CreatedAt.Time))
 	fmt.Printf("Updated:      %s\n", FormatTimestamp(device.UpdatedAt.Time))
 
+	// Agent-reported facts, when present. The list view (FormatDevices)
+	// deliberately grows no facts column: a fleet's devices mostly share one
+	// timezone, so a column would repeat one value down every row and cost
+	// width the columns that do vary need.
+	// The "Facts:" heading follows the section shape this formatter already
+	// uses for Statistics and Owners: the lines come from the device itself,
+	// not from the control plane, and without a label they read as more
+	// control-plane fields.
+	if facts := deviceFactLines(device); len(facts) > 0 {
+		fmt.Printf("\nFacts:\n")
+		writeDeviceFactLines(os.Stdout, facts, "  ", 11)
+	}
+
 	return nil
 }
 

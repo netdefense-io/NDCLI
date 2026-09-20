@@ -113,3 +113,58 @@ func TestParseResponse_CapsBodySize(t *testing.T) {
 		t.Fatal("expected decode error when body exceeds maxResponseBodyBytes, got nil")
 	}
 }
+
+// TestParseResponse_SanitizesCargoMapStrings covers a decoded
+// map[string]interface{} - the shape every field that keeps unmodeled
+// keys as cargo uses (models.Device.Facts, SoftwarePolicyContent's extra
+// keys). Every value in such a map reports Kind() == Interface, so before
+// the sanitizer learned to unwrap them, agent-reported strings reached the
+// formatters with their escape sequences intact: a device reporting a
+// hostname carrying a clear-screen sequence wiped the operator's screen on
+// `device describe`.
+func TestParseResponse_SanitizesCargoMapStrings(t *testing.T) {
+	resp := newJSONResponse(`{"facts":{
+	  "hostname":"fw\u001b[2J\u001b]0;pwned\u0007",
+	  "timezone":{"name":"Evil\u001b[31m/Zone","utc_offset_sec":-10800},
+	  "interfaces":[{"role":"wan\u001b[1m","if":"em0","enabled":true}],
+	  "count":3
+	}}`)
+
+	var target struct {
+		Facts map[string]interface{} `json:"facts"`
+	}
+	if err := ParseResponse(resp, &target); err != nil {
+		t.Fatalf("ParseResponse returned error: %v", err)
+	}
+
+	host, _ := target.Facts["hostname"].(string)
+	if strings.ContainsAny(host, "\x1b\x07") {
+		t.Fatalf("hostname fact still carries control bytes: %q", host)
+	}
+	if !strings.Contains(host, "fw") {
+		t.Fatalf("printable text was not preserved: %q", host)
+	}
+
+	tz, ok := target.Facts["timezone"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("timezone sub-object missing: %v", target.Facts)
+	}
+	if name, _ := tz["name"].(string); strings.ContainsRune(name, '\x1b') {
+		t.Fatalf("nested map string still carries ESC: %q", name)
+	}
+	if tz["utc_offset_sec"] != float64(-10800) {
+		t.Fatalf("a numeric fact was altered: %v", tz["utc_offset_sec"])
+	}
+
+	ifaces, ok := target.Facts["interfaces"].([]interface{})
+	if !ok || len(ifaces) != 1 {
+		t.Fatalf("interfaces list missing: %v", target.Facts)
+	}
+	entry, _ := ifaces[0].(map[string]interface{})
+	if role, _ := entry["role"].(string); strings.ContainsRune(role, '\x1b') {
+		t.Fatalf("string inside a slice of maps still carries ESC: %q", role)
+	}
+	if entry["enabled"] != true || target.Facts["count"] != float64(3) {
+		t.Fatal("non-string facts must pass through untouched")
+	}
+}

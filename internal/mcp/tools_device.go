@@ -13,12 +13,18 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
+// deviceFactsDescription is the single wording for the agent-reported
+// facts on both device tools, so the two catalogs generated from the live
+// registry cannot describe the same object differently.
+const deviceFactsDescription = "Devices whose agent reports them also carry `facts`: an agent-reported, informational object with the device's own `timezone` (IANA name, UTC offset, abbreviation), `interfaces` (role to physical interface), `opnsense`/`os` versions and `hostname`. Facts are absent on older agents and on devices that have not connected since upgrading, so treat a missing `facts` as unknown, never as a default."
+
 // registerDeviceTools registers all device-related tools.
 func (s *Server) registerDeviceTools() {
 	// ndcli.device.list
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.device.list",
-		Description: "List managed firewall devices in an organization with optional filtering",
+		Name: "ndcli.device.list",
+		Description: "List managed firewall devices in an organization with optional filtering. " +
+			deviceFactsDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -42,8 +48,9 @@ func (s *Server) registerDeviceTools() {
 
 	// ndcli.device.describe
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.device.describe",
-		Description: "Get detailed information about a specific device",
+		Name: "ndcli.device.describe",
+		Description: "Get detailed information about a specific device. " +
+			deviceFactsDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -557,8 +564,13 @@ func (s *Server) handleDeviceSnippets(ctx context.Context, req *mcp.CallToolRequ
 }
 
 // deviceSummary is the compact device representation used in list responses.
+//
+// These handlers build their map by hand rather than marshalling
+// models.Device, so a new field on the model does NOT reach the MCP surface
+// on its own — it has to be added here and in deviceFull, or the CLI's json
+// formatter shows it and the MCP caller never sees it.
 func deviceSummary(d *models.Device) map[string]interface{} {
-	return map[string]interface{}{
+	m := map[string]interface{}{
 		"name":                 d.Name,
 		"uuid":                 d.UUID,
 		"status":               d.Status,
@@ -569,11 +581,23 @@ func deviceSummary(d *models.Device) map[string]interface{} {
 		"drift_checked_at":     d.DriftCheckedAt,
 		"created_at":           d.CreatedAt,
 	}
+	addDeviceFacts(m, d)
+	return m
+}
+
+// addDeviceFacts attaches the agent-reported facts, and only when the device
+// reports some. The whole map goes through untouched, unknown keys included:
+// the caller is a model, and a fact this binary has no accessor for is still
+// something it can read.
+func addDeviceFacts(m map[string]interface{}, d *models.Device) {
+	if d.HasFacts() {
+		m["facts"] = d.Facts
+	}
 }
 
 // deviceFull is the detailed device representation used in describe responses.
 func deviceFull(d *models.Device) map[string]interface{} {
-	return map[string]interface{}{
+	m := map[string]interface{}{
 		"name":                 d.Name,
 		"uuid":                 d.UUID,
 		"status":               d.Status,
@@ -586,4 +610,6 @@ func deviceFull(d *models.Device) map[string]interface{} {
 		"drift_checked_at":     d.DriftCheckedAt,
 		"created_at":           d.CreatedAt,
 	}
+	addDeviceFacts(m, d)
+	return m
 }

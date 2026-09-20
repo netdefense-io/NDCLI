@@ -13,6 +13,23 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
+// isTaskCreation reports whether a request is the POST that actually creates
+// tasks, as opposed to the device read the scheduling tools now make to echo
+// the target device's own timezone. The invariant these tests protect is
+// "no task is created without confirm", not "no request leaves the process":
+// the device read is a GET, it mutates nothing, and it is skipped entirely for
+// multi-device targets and for runs with no scheduled instant.
+func isTaskCreation(r *http.Request) bool {
+	return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/tasks")
+}
+
+// deviceLookupNotFound answers the scheduling tools' device read with a 404,
+// which they tolerate by adding nothing to the echo. Tests that care about
+// the echo itself serve a device with facts instead (run_device_timezone_test.go).
+func deviceLookupNotFound(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNotFound)
+}
+
 // specRegisterJSON is a minimal, valid ScheduledTaskRegisterResult payload.
 func specRegisterJSON(code, scheduleName string) map[string]interface{} {
 	return map[string]interface{}{
@@ -148,6 +165,10 @@ func captureRunRequest(t *testing.T, fn func(s *Server)) map[string]json.RawMess
 	t.Helper()
 	var body map[string]json.RawMessage
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
@@ -251,6 +272,10 @@ func TestRunCommand_BareTimestampWithTimezone(t *testing.T) {
 
 func TestRunCommand_InvalidTimezoneIsRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent for an invalid timezone")
 	}))
 	defer srv.Close()
@@ -300,6 +325,10 @@ func TestRunCommand_RelativeOffsetIsSentAsUTC(t *testing.T) {
 
 func TestRunCommand_PastAtIsRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent for a past at")
 	}))
 	defer srv.Close()
@@ -322,6 +351,10 @@ func TestRunCommand_PastAtIsRefused(t *testing.T) {
 // instant as data — in UTC, in the timezone used, and against "now".
 func TestRunCommand_PreviewEchoesTheResolvedInstant(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("an unconfirmed call must not reach the endpoint")
 	}))
 	defer srv.Close()
@@ -388,6 +421,10 @@ func TestRunCommand_ResponseEchoesTheResolvedInstant(t *testing.T) {
 // would describe a firing that never happens. Refused before the preview.
 func TestRunCommand_AtWithScheduleIsRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent when at and schedule are combined")
 	}))
 	defer srv.Close()
@@ -446,6 +483,10 @@ func TestRunCommand_TimezoneIgnoredForAnchoredInput(t *testing.T) {
 // burns a round trip retrying with one.
 func TestRunCommand_UnparseableAtSaysSo(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent for an unparseable at")
 	}))
 	defer srv.Close()
@@ -474,6 +515,10 @@ func TestRunCommand_UnparseableAtSaysSo(t *testing.T) {
 // rescue it, and following that advice costs a round trip.
 func TestRunCommand_PastBareTimestampSaysSo(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent for a past at")
 	}))
 	defer srv.Close()
@@ -502,6 +547,10 @@ func TestRunCommand_PastBareTimestampSaysSo(t *testing.T) {
 // exactly the ambiguity the timezone parameter exists to resolve.
 func TestRunCommand_NearFutureBareTimestampStillAsksForATimezone(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("no request should be sent for an ambiguous at")
 	}))
 	defer srv.Close()
@@ -526,6 +575,10 @@ func TestRunCommand_NearFutureBareTimestampStillAsksForATimezone(t *testing.T) {
 // instant the preview showed.
 func TestRunCommand_PreviewInstantSurvivesTheConfirmingCall(t *testing.T) {
 	s := newTestServer(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTaskCreation(r) {
+			deviceLookupNotFound(w)
+			return
+		}
 		t.Error("an unconfirmed call must not reach the endpoint")
 	})), "acme")
 

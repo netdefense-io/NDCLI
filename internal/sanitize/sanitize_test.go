@@ -133,3 +133,79 @@ func TestStruct_NilPointerAndEmptyMapDoNotPanic(t *testing.T) {
 func TestStruct_InvalidValueIsNoOp(t *testing.T) {
 	Struct(reflect.Value{})
 }
+
+// TestStructSanitizesCargoMaps covers the shape a model uses to keep
+// unmodeled keys — map[string]interface{}, as in Device.Facts and
+// SoftwarePolicyContent's extra keys. Every value in such a map reports
+// Kind() == Interface, so the string check alone skipped all of them and
+// agent-supplied escape sequences reached the formatters intact.
+func TestStructSanitizesCargoMaps(t *testing.T) {
+	esc := "fw\x1b[2J\x1b]0;pwned\x07"
+	clean := "fw[2J]0;pwned"
+
+	payload := map[string]interface{}{
+		"hostname": esc,
+		"timezone": map[string]interface{}{"name": esc, "utc_offset_sec": float64(-10800)},
+		"interfaces": []interface{}{
+			map[string]interface{}{"role": esc, "if": "em0", "enabled": true},
+		},
+		"count": float64(3),
+		"flag":  true,
+		"null":  nil,
+	}
+	target := struct {
+		Facts map[string]interface{}
+	}{Facts: payload}
+
+	Struct(reflect.ValueOf(&target))
+
+	if got := target.Facts["hostname"]; got != clean {
+		t.Fatalf("top-level string not sanitized: %q", got)
+	}
+	tz := target.Facts["timezone"].(map[string]interface{})
+	if got := tz["name"]; got != clean {
+		t.Fatalf("nested map string not sanitized: %q", got)
+	}
+	if tz["utc_offset_sec"] != float64(-10800) {
+		t.Fatalf("a non-string value was altered: %v", tz["utc_offset_sec"])
+	}
+	ifaces := target.Facts["interfaces"].([]interface{})
+	entry := ifaces[0].(map[string]interface{})
+	if got := entry["role"]; got != clean {
+		t.Fatalf("string inside a slice of maps not sanitized: %q", got)
+	}
+	if entry["enabled"] != true || target.Facts["count"] != float64(3) || target.Facts["flag"] != true {
+		t.Fatal("non-string values must pass through untouched")
+	}
+	if target.Facts["null"] != nil {
+		t.Fatal("a null value must stay null")
+	}
+}
+
+// TestStructSanitizesStringsInsideInterfaceSlices: a bare []interface{}
+// of strings is addressable element by element, so it is rewritten in
+// place rather than through a map write-back.
+func TestStructSanitizesStringsInsideInterfaceSlices(t *testing.T) {
+	target := struct{ Items []interface{} }{
+		Items: []interface{}{"a\x1b[31mb", float64(1), nil},
+	}
+	Struct(reflect.ValueOf(&target))
+	if target.Items[0] != "a[31mb" {
+		t.Fatalf("string in an interface slice not sanitized: %q", target.Items[0])
+	}
+	if target.Items[1] != float64(1) || target.Items[2] != nil {
+		t.Fatal("non-string elements must pass through untouched")
+	}
+}
+
+// TestSanitizeMapHandlesNamedStringValueTypes: SetMapIndex panics when
+// handed a plain string for a map whose element type is a named string
+// type, so the write-back converts.
+func TestSanitizeMapHandlesNamedStringValueTypes(t *testing.T) {
+	type label string
+	target := struct{ M map[string]label }{M: map[string]label{"k": "v\x1b[0m"}}
+	Struct(reflect.ValueOf(&target))
+	if target.M["k"] != "v[0m" {
+		t.Fatalf("named string map value not sanitized: %q", target.M["k"])
+	}
+}

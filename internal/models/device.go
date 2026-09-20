@@ -23,6 +23,11 @@ type Device struct {
 	DriftCheckedAt *FlexibleTime `json:"drift_checked_at,omitempty"`
 	CreatedAt      FlexibleTime  `json:"created_at"`
 	UpdatedAt      FlexibleTime  `json:"updated_at"`
+	// Facts are agent-reported, optional and informational. Unknown keys
+	// are cargo: the map is carried through to JSON output untouched so a
+	// newer agent's facts are never dropped by an older CLI. See
+	// device_facts.go for the typed accessors and the rules.
+	Facts map[string]interface{} `json:"facts,omitempty"`
 }
 
 // IsSynced returns true if the device has a synced hash

@@ -55,6 +55,15 @@ func (f *SimpleFormatter) FormatDevice(device *models.Device) error {
 	if device.DriftStatus != "" {
 		fmt.Fprintf(f.Writer, "  Drift: %s\n", DriftStatusDisplay(device.DriftStatus))
 	}
+	// Agent-reported facts, when present, under their own heading: the
+	// fields above come from the control plane and these come from the
+	// device, and one more nesting level is how this formatter already
+	// separates a group from the block that contains it. The list view keeps
+	// its one-line-per-device shape and gains nothing.
+	if facts := deviceFactLines(device); len(facts) > 0 {
+		fmt.Fprintf(f.Writer, "  Facts:\n")
+		writeDeviceFactLines(f.Writer, facts, "    ", 0)
+	}
 	return nil
 }
 
