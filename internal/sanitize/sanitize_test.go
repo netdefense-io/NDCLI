@@ -209,3 +209,84 @@ func TestSanitizeMapHandlesNamedStringValueTypes(t *testing.T) {
 		t.Fatalf("named string map value not sanitized: %q", target.M["k"])
 	}
 }
+
+// TestStruct_SanitizesMapKeys pins the key half of sanitizeMap. Keys arrive
+// from the same untrusted payload as values and human-facing formatters print
+// them — `ndcli device describe` names the agent-reported fact keys it has no
+// layout for — so a key carrying a clear-screen sequence reached the terminal
+// while only values were rewritten.
+func TestStruct_SanitizesMapKeys(t *testing.T) {
+	m := map[string]any{
+		"host\x1bname": "fw01",
+		"nested":       map[string]any{"in\x07ner": "value"},
+	}
+	Struct(reflect.ValueOf(&m))
+
+	if _, ok := m["hostname"]; !ok {
+		t.Errorf("expected the cleaned key \"hostname\"; got keys %v", keysOf(m))
+	}
+	if _, ok := m["host\x1bname"]; ok {
+		t.Error("the original control-carrying key is still present")
+	}
+	inner, ok := m["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested map lost its type: %T", m["nested"])
+	}
+	if _, ok := inner["inner"]; !ok {
+		t.Errorf("expected the cleaned nested key \"inner\"; got keys %v", keysOf(inner))
+	}
+}
+
+// TestStruct_MapKeyCollisionKeepsRewrittenEntry pins the documented outcome
+// when two distinct keys clean to the same string: the rewritten entry wins,
+// which is what the server would have produced had it sent the clean key.
+func TestStruct_MapKeyCollisionKeepsRewrittenEntry(t *testing.T) {
+	m := map[string]string{
+		"hostname":     "clean",
+		"host\x1bname": "rewritten",
+	}
+	Struct(reflect.ValueOf(&m))
+
+	if len(m) != 1 {
+		t.Fatalf("expected the two keys to collapse into one, got %v", m)
+	}
+	if m["hostname"] != "rewritten" {
+		t.Errorf("expected the rewritten entry to win, got %q", m["hostname"])
+	}
+}
+
+// TestStruct_SanitizesTypedReferenceMapValues covers a map whose value type
+// is neither a string nor an interface. SyncError.UndefinedVariablesBySnippet
+// is exactly this shape, and every human formatter prints both halves of it.
+// The value read out of the map is unaddressable, but a slice element reached
+// through it is not, so the recursion rewrites the caller's data in place.
+func TestStruct_SanitizesTypedReferenceMapValues(t *testing.T) {
+	m := map[string][]string{
+		"snip\x1bpet": {"var\x1biable", "clean"},
+	}
+	Struct(reflect.ValueOf(&m))
+
+	got, ok := m["snippet"]
+	if !ok {
+		t.Fatalf("expected the cleaned key \"snippet\"; got keys %v", keysOfSlices(m))
+	}
+	if got[0] != "variable" {
+		t.Errorf("slice element behind a map value was not sanitized: %q", got[0])
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func keysOfSlices(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

@@ -88,12 +88,14 @@ func isStrippedRune(r rune) bool {
 // and a map or slice (a reference type, so recursing mutates what the
 // caller holds). Anything else is left alone.
 //
-// One gap remains, unchanged: a map with a typed non-interface value kind
-// — map[string]SomeStruct, say — still has only its leaf strings rewritten,
-// because a value read with MapIndex is not addressable and a struct read
-// out of one cannot be written back field by field. No model has that shape
-// today. A future one would need the same write-back treatment the string
-// and interface branches get here.
+// One gap remains: a map whose value kind is a struct or an array —
+// map[string]SomeStruct, say — is left alone, because a value read with
+// MapIndex is not addressable and neither shape can be written back field
+// by field. A map of slices, pointers or maps has no such problem: those
+// are reference kinds, so what the unaddressable value refers to is still
+// settable and sanitizeMap recurses into it. No model has the struct or
+// array shape today, and internal/output's sanitizer coverage guard fails
+// if one is added.
 func Struct(v reflect.Value) {
 	if !v.IsValid() {
 		return
@@ -151,9 +153,9 @@ func sanitizeInterface(v reflect.Value) {
 	}
 }
 
-// sanitizeMap rewrites string-valued map entries in place. Map values
-// are not addressable, so each value is read, sanitized, and written
-// back via SetMapIndex rather than mutated directly.
+// sanitizeMap rewrites string-valued map entries in place, and string keys
+// along with them. Map values are not addressable, so each value is read,
+// sanitized, and written back via SetMapIndex rather than mutated directly.
 //
 // A map[string]interface{} — what a JSON decode produces for any
 // cargo-carrying field — is the case that matters most here: its values
@@ -167,24 +169,59 @@ func sanitizeMap(v reflect.Value) {
 		return
 	}
 	elemType := v.Type().Elem()
+	keyType := v.Type().Key()
 	for _, key := range v.MapKeys() {
 		val := v.MapIndex(key)
 		switch val.Kind() {
 		case reflect.String:
 			v.SetMapIndex(key, sanitizedStringValue(val.String(), elemType))
 		case reflect.Interface:
-			if val.IsNil() {
-				continue
+			if !val.IsNil() {
+				inner := val.Elem()
+				switch inner.Kind() {
+				case reflect.String:
+					v.SetMapIndex(key, sanitizedStringValue(inner.String(), elemType))
+				case reflect.Map, reflect.Slice, reflect.Ptr:
+					Struct(inner)
+				}
 			}
-			inner := val.Elem()
-			switch inner.Kind() {
-			case reflect.String:
-				v.SetMapIndex(key, sanitizedStringValue(inner.String(), elemType))
-			case reflect.Map, reflect.Slice, reflect.Ptr:
-				Struct(inner)
-			}
+		case reflect.Map, reflect.Slice, reflect.Ptr:
+			// A typed reference-kind value — map[string][]string, say —
+			// needs no write-back: the value read here is unaddressable,
+			// but what it points at is not. A slice element reached
+			// through it is still settable, as is a pointer's target, so
+			// recursing mutates the caller's data.
+			Struct(val)
 		}
+		sanitizeMapKey(v, key, keyType)
 	}
+}
+
+// sanitizeMapKey rewrites a string map key that carries control characters,
+// re-storing its value under the cleaned key. Keys are server data exactly
+// like values — an unmodeled fact key, a role name — and human-facing
+// formatters print them: `device describe` names the fact keys it has no
+// layout for. A key cannot be mutated in place, so the entry is deleted and
+// re-added; when the cleaned key collides with one already present, the
+// rewritten entry wins, which is the same outcome the server would have
+// produced had it sent the clean key in the first place.
+//
+// Iteration is safe because MapKeys returns a snapshot taken before any of
+// this runs, and every key added here is already clean.
+func sanitizeMapKey(v, key reflect.Value, keyType reflect.Type) {
+	if key.Kind() != reflect.String {
+		return
+	}
+	clean := String(key.String())
+	if clean == key.String() {
+		return
+	}
+	val := v.MapIndex(key)
+	if !val.IsValid() {
+		return
+	}
+	v.SetMapIndex(key, reflect.Value{})
+	v.SetMapIndex(sanitizedStringValue(clean, keyType), val)
 }
 
 // sanitizedStringValue builds the reflect.Value to store back into a map
