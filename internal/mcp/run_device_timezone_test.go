@@ -105,8 +105,8 @@ func TestSchedulingEchoNamesTheDeviceTimezone(t *testing.T) {
 
 // TestSchedulingEchoWarnsOnTimezoneMismatch is the point of the feature: the
 // caller asked for a zone the device is not in, and finds that out before the
-// firewall reboots at the wrong hour (issue #217's failure mode). The warning
-// says so; it does not substitute the device's zone.
+// firewall reboots at the wrong hour. The warning says so; it does not
+// substitute the device's zone.
 func TestSchedulingEchoWarnsOnTimezoneMismatch(t *testing.T) {
 	srv, _ := deviceFactsServer(t, saoPauloFacts)
 	s := newTestServer(t, srv, "acme")

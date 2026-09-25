@@ -58,7 +58,7 @@ func NewServer() (*Server, error) {
 	// Apply the configured display timezone, mirroring cli/root.go's
 	// setupOutputAndFormatter. Without this the MCP surface resolved bare
 	// timestamps against the host OS zone while the CLI used the configured
-	// one — the same input, two different instants (issue #217).
+	// one — the same input, two different instants.
 	timezone := cfg.Output.Timezone
 	if timezone == "" {
 		timezone = config.DefaultTimezone

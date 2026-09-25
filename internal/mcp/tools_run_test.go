@@ -180,10 +180,9 @@ func captureRunRequest(t *testing.T, fn func(s *Server)) map[string]json.RawMess
 	return body
 }
 
-// TestRunCommand_ExplicitOffsetIsSentAsUTC is the regression for issue #217:
-// an `at` carrying a -03:00 offset used to be forwarded verbatim, and the
-// control plane stored the wall-clock reading as UTC — the task fired three
-// hours early.
+// TestRunCommand_ExplicitOffsetIsSentAsUTC: an `at` carrying a -03:00 offset
+// used to be forwarded verbatim, and the control plane stored the
+// wall-clock reading as UTC — the task fired three hours early.
 func TestRunCommand_ExplicitOffsetIsSentAsUTC(t *testing.T) {
 	body := captureRunRequest(t, func(s *Server) {
 		input := &runInput{
@@ -390,7 +389,7 @@ func TestRunCommand_PreviewEchoesTheResolvedInstant(t *testing.T) {
 func TestRunCommand_ResponseEchoesTheResolvedInstant(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// Echo the buggy naive form the control plane returned in #217 — the
+		// Echo the buggy naive form the control plane used to return — the
 		// client must still report the instant it actually sent.
 		json.NewEncoder(w).Encode(runResultJSON("SHUTDOWN", "2126-09-21T23:00:00"))
 	}))

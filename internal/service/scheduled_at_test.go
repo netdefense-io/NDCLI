@@ -21,9 +21,9 @@ func mustLoad(t *testing.T, name string) *time.Location {
 	return loc
 }
 
-// TestResolveScheduledAt_ExplicitOffsetKeepsTheInstant is the core of issue
-// #217: a wall-clock time with a -03:00 offset must become the UTC instant it
-// names, not the same digits relabelled as UTC.
+// TestResolveScheduledAt_ExplicitOffsetKeepsTheInstant is the core
+// regression case: a wall-clock time with a -03:00 offset must become the
+// UTC instant it names, not the same digits relabelled as UTC.
 func TestResolveScheduledAt_ExplicitOffsetKeepsTheInstant(t *testing.T) {
 	resolved, err := ResolveScheduledAt("2126-09-21T23:00:00-03:00", time.UTC, "at")
 	if err != nil {

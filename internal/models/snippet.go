@@ -72,7 +72,7 @@ const AuthOrderConsistencyRule = `every name must be an auth server delivered to
 
 // AuthPrerequisites is the exact minimum-version/consent line every
 // AUTH_SERVER/AUTH_ORDER-facing surface states.
-const AuthPrerequisites = "ndagent 1.19.0 or later, OPNsense 26.1.6 or later, reject_dangerous_snippets off"
+const AuthPrerequisites = "ndagent 1.19.2 or later, OPNsense 26.1.6 or later, reject_dangerous_snippets off"
 
 // SnippetListResponse represents a paginated list of snippets
 type SnippetListResponse struct {

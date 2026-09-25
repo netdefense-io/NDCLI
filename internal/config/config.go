@@ -177,7 +177,7 @@ func setDefaults() {
 
 	// auth.* has no compiled default, but viper.Unmarshal only picks up an
 	// environment value for a key it already knows about — without these the
-	// NDCLI_AUTH_* bindings would exist and still do nothing (issue #202).
+	// NDCLI_AUTH_* bindings would exist and still do nothing.
 	viper.SetDefault("auth.storage", "")
 	viper.SetDefault("auth.path", "")
 	viper.SetDefault("auth.account", "")

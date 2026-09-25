@@ -180,7 +180,7 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 
 			// Parsing, the past-time check and the UTC normalization all live
 			// in the service layer, so the MCP surface cannot drift from this
-			// one (issue #217). Bare timestamps mean the configured timezone.
+			// one. Bare timestamps mean the configured timezone.
 			// Service.Run resolves the raw value again on its way to the wire;
 			// this early call exists only so a bad --at is reported against the
 			// flag the user typed rather than against the wire field name.

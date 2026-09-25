@@ -156,7 +156,7 @@ type RunOpts struct {
 	// immediately. Mutually exclusive with Schedule.
 	//
 	// Run normalizes it to UTC RFC3339 before it reaches the wire — front-ends
-	// must not send a wall-clock value with the zone dropped (issue #217).
+	// must not send a wall-clock value with the zone dropped.
 	ScheduledAt string
 	// ScheduledAtLocation interprets a bare ScheduledAt timestamp. nil means
 	// time.Local. Front-ends pass output.Location() (the configured NDCLI
@@ -196,7 +196,7 @@ func (s ScheduledAt) RFC3339Zoned() string { return s.Zoned.Format(time.RFC3339)
 //
 // This is the single normalization path for every front-end. Sending a
 // wall-clock string straight through is what made MCP-scheduled tasks fire at
-// the UTC reading of a local time (issue #217).
+// the UTC reading of a local time.
 func ResolveScheduledAt(at string, loc *time.Location, label string) (*ScheduledAt, error) {
 	if strings.TrimSpace(at) == "" {
 		return nil, nil

@@ -21,8 +21,8 @@ const envPrefix = "NDCLI_"
 //
 // Every key here also needs a viper.SetDefault. viper.Unmarshal only sees an
 // environment value for a key it already knows about, which is why auth.*
-// stayed empty (issue #202) even where a binding would have existed: the nine
-// keys that did work all had defaults, and auth.* had none.
+// stayed empty even where a binding would have existed: the nine keys that
+// did work all had defaults, and auth.* had none.
 //
 // oauth2.* is deliberately absent. Those settings are fetched from NDManager
 // at login, and validateOAuth2Domain (internal/auth/manager.go) refuses a
@@ -31,7 +31,7 @@ const envPrefix = "NDCLI_"
 // phishing domain. An environment override would be a way to talk that check
 // into a different answer from a place that is easy to set and easy to miss,
 // so the variables stay unbound — and the warning below tells anyone who sets
-// one that it does nothing, which is the actual complaint in #202.
+// one that it does nothing.
 var envBindings = map[string]string{
 	"auth.account":            "NDCLI_AUTH_ACCOUNT",
 	"auth.path":               "NDCLI_AUTH_PATH",

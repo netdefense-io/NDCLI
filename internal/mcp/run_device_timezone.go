@@ -12,12 +12,12 @@ import (
 // Device-timezone echo on the scheduling tools.
 //
 // A scheduled run has three candidate timezones — the user's, the device's
-// and UTC — and issue #217 was the control plane picking one of them
-// silently. So this shows the device's, it never adopts it: the instant sent
-// to NDManager is the one resolveRunScheduledAt produced from what the caller
-// passed, unchanged by anything here. The echo only tells the model what the
-// same instant reads as on the box it is about to act on, and warns when that
-// differs from what was asked for.
+// and UTC — and silently picking one of them on the control plane is the
+// failure mode this guards against. So this shows the device's, it never
+// adopts it: the instant sent to NDManager is the one resolveRunScheduledAt
+// produced from what the caller passed, unchanged by anything here. The echo
+// only tells the model what the same instant reads as on the box it is about
+// to act on, and warns when that differs from what was asked for.
 //
 // It applies only when the target is exactly one device. An OU or org-wide
 // run can span devices in several timezones, and naming one of them as "the"

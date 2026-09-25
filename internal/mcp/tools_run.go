@@ -50,7 +50,7 @@ type runInput struct {
 //
 // The wording is deliberately insistent about asking the user. An agent that
 // guesses a timezone schedules a firewall reboot at the wrong hour and nothing
-// in the transcript looks wrong (issue #217).
+// in the transcript looks wrong.
 const atParamDescription = "Defer execution to a future instant. Three accepted forms: " +
 	"a relative offset (30m, 2h, 3d, 1w); RFC3339 with an explicit UTC offset or Z " +
 	"(2026-05-12T03:00:00-03:00, 2026-05-12T03:00:00Z); or a bare timestamp " +
@@ -79,7 +79,8 @@ const timezoneParamDescription = "IANA timezone name (e.g. America/Sao_Paulo, Eu
 // configured timezone because a human typed the value and knows their own
 // clock — the MCP surface refuses a bare timestamp with no timezone: the
 // caller is a model that may be reasoning about the user's timezone, the
-// device's, or UTC, and silently picking one is exactly issue #217.
+// device's, or UTC, and silently picking one is the bug this refusal
+// prevents.
 // westmostZone is UTC-12:00, the furthest-behind offset in use. A bare
 // timestamp read there is the latest absolute instant any timezone could give
 // it, which is what makes it the right yardstick for "no timezone can help".

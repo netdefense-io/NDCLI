@@ -119,15 +119,13 @@ func TestPickStorage(t *testing.T) {
 	}
 }
 
-// TestPickStorageKeepsWindowsFallbackUsersLoggedIn covers the upgrade path for
-// anyone whose config was switched to `auth.storage: file` by the automatic
-// Windows oversize fallback (#74), which this release removes.
-//
-// The fallback persisted auth.storage=file before writing tokens to disk, so
-// those users are identified purely by that config value. Backend selection is
-// untouched by the removal: they keep resolving to FileStorage and keep reading
-// the same host-scoped auth file, rather than being bounced to an empty keyring
-// and silently logged out.
+// TestPickStorageKeepsWindowsFallbackUsersLoggedIn covers the compatibility
+// path for anyone whose config carries `auth.storage: file` because an
+// automatic Windows fallback wrote it before persisting tokens to disk. That
+// fallback no longer runs, but those users are identified purely by the
+// config value it left behind: they must keep resolving to FileStorage and
+// keep reading the same host-scoped auth file, rather than being bounced to
+// an empty keyring and silently logged out.
 func TestPickStorageKeepsWindowsFallbackUsersLoggedIn(t *testing.T) {
 	for _, keyringAvailable := range []bool{true, false} {
 		var buf bytes.Buffer
