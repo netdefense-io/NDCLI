@@ -72,11 +72,13 @@ type snippetPullInput struct {
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
-var snippetTypeEnum = []string{
-	"USER", "GROUP", "ALIAS", "RULE",
-	"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD", "UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
-	"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
-}
+// authSuOrgNote is appended to every snippet tool description whose
+// operation can escalate to org:su for a stored AUTH_SERVER/AUTH_ORDER
+// snippet (create, update_content, rename, set_priority, delete): both
+// types are elevated by construction — NDManager requires org:su for
+// their content regardless of the caller's usual clearance for other
+// snippet types.
+const authSuOrgNote = " AUTH_SERVER and AUTH_ORDER content always requires org:su, regardless of the caller's usual clearance for other snippet types."
 
 // registerSnippetTools registers every snippet tool.
 func (s *Server) registerSnippetTools() {
@@ -87,7 +89,7 @@ func (s *Server) registerSnippetTools() {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization":   organizationProperty(),
-				"type":           stringEnumProperty("Filter by snippet type", snippetTypeEnum),
+				"type":           stringEnumProperty("Filter by snippet type", models.SnippetCreatableTypes),
 				"name":           stringProperty("Filter by name (regex)"),
 				"sort_by":        stringProperty("Sort field and direction (default priority:asc)"),
 				"page":           intProperty("Page number", 1),
@@ -115,13 +117,13 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.create",
-		Description: "Create a new snippet. Content must be supplied inline.",
+		Description: "Create a new snippet. Content must be supplied inline." + authSuOrgNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization": organizationProperty(),
 				"name":         stringProperty("Snippet name"),
-				"type":         stringEnumProperty("Snippet type", snippetTypeEnum),
+				"type":         stringEnumProperty("Snippet type", models.SnippetCreatableTypes),
 				"content":      stringProperty("Snippet content as JSON matching the type's schema (single-line or pretty-printed; the server stores the canonical form)"),
 				"priority":     intProperty("Priority 1-60000 (default 1000)", 1000),
 			},
@@ -131,7 +133,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.update_content",
-		Description: "Replace a snippet's content. Requires confirm=true.",
+		Description: "Replace a snippet's content. Requires confirm=true." + authSuOrgNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -146,7 +148,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.rename",
-		Description: "Rename a snippet. Requires confirm=true.",
+		Description: "Rename a snippet. Requires confirm=true." + authSuOrgNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -161,7 +163,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.set_priority",
-		Description: "Update a snippet's priority (1-60000). Requires confirm=true.",
+		Description: "Update a snippet's priority (1-60000). Requires confirm=true." + authSuOrgNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -176,7 +178,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.delete",
-		Description: "Delete a snippet. Requires confirm=true.",
+		Description: "Delete a snippet. Requires confirm=true." + authSuOrgNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -198,7 +200,7 @@ func (s *Server) registerSnippetTools() {
 				"device":       stringProperty("Device name"),
 				"name":         stringProperty("Match key identifying the object on the device (matching is type-specific). May contain any characters, including spaces — rule descriptions usually do."),
 				"snippet_name": stringProperty("Name for the created snippet: letters, digits, dot, underscore and hyphen, 1-255 characters. Derived from the match key when omitted."),
-				"config_type":  stringEnumProperty("Config type to pull (default ALIAS)", snippetTypeEnum),
+				"config_type":  stringEnumProperty("Config type to pull (default ALIAS)", models.SnippetPullableTypes),
 				"auto_create":  boolProperty("Create snippet in DB if it doesn't exist"),
 				"overwrite":    boolProperty("Update snippet in DB if it already exists"),
 				"confirm":      confirmProperty(),

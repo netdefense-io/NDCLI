@@ -3,8 +3,11 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // syncMessageEnvelope mirrors the JSON shape NDBroker stores in
@@ -25,6 +28,19 @@ type syncResultEntry struct {
 	Action string `json:"action"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+	// Code, Before, After, Available and Risks are additive fields NDAgent
+	// reports only for the AUTH_SERVER/AUTH_ORDER family (SyncAPIItemResult)
+	// — every other family's results carry none of them.
+	// Code is the structured outcome code a consumer keys on instead of
+	// parsing Error. Before/After are an auth_facility item's kept/written
+	// order (names only). Available is the resolution set an unresolved
+	// order entry was checked against, reported only on a refusal. Risks is
+	// the auth_local_server warning's structured risk list.
+	Code      string   `json:"code,omitempty"`
+	Before    []string `json:"before,omitempty"`
+	After     []string `json:"after,omitempty"`
+	Available []string `json:"available,omitempty"`
+	Risks     []string `json:"risks,omitempty"`
 }
 
 type syncValidationEntry struct {
@@ -47,6 +63,15 @@ func FormatTaskMessage(raw string) string {
 	if err := json.Unmarshal([]byte(raw), &env); err != nil {
 		return raw
 	}
+	// Task.Message is JSON-as-a-string: the outer api.DecodeJSON/
+	// sanitize.Struct pass on the Task only ran sanitize.String on that
+	// outer string field, so any \uXXXX escape inside it (a device-
+	// controlled name, an AUTH result's before/after/available/risks)
+	// was still literal escape text at that point, not yet the control
+	// byte it decodes to. This second Unmarshal is what turns the escape
+	// into a live byte, so it needs its own sanitize pass before
+	// anything here reaches a formatter.
+	sanitize.Struct(reflect.ValueOf(&env))
 	// Heuristic: treat as a SYNC envelope only when at least one of the
 	// structured fields is populated. A bare {"message": "..."} string
 	// could be anything, so don't claim the format unless it carries
@@ -86,10 +111,16 @@ func FormatTaskMessage(raw string) string {
 
 func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 	type row struct {
-		Symbol string
-		Type   string
-		Name   string
-		Err    string
+		Symbol    string
+		Type      string
+		Name      string
+		Err       string
+		Action    string
+		Code      string
+		Before    []string
+		After     []string
+		Available []string
+		Risks     []string
 	}
 	rows := make([]row, 0, len(results))
 	typeWidth := 0
@@ -99,7 +130,10 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 		if len(typeLabel) > typeWidth {
 			typeWidth = len(typeLabel)
 		}
-		rows = append(rows, row{Symbol: sym, Type: typeLabel, Name: r.Name, Err: r.Error})
+		rows = append(rows, row{
+			Symbol: sym, Type: typeLabel, Name: r.Name, Err: r.Error, Action: r.Action,
+			Code: r.Code, Before: r.Before, After: r.After, Available: r.Available, Risks: r.Risks,
+		})
 	}
 
 	// Stable order: errors first, then by type/name. Keeps the eye on
@@ -123,7 +157,41 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 		} else {
 			fmt.Fprintf(b, "  %s %s%s  %s\n", r.Symbol, r.Type, pad, r.Name)
 		}
+		for _, extra := range authResultDetailLines(r.Action, r.Code, r.Before, r.After, r.Available, r.Risks) {
+			fmt.Fprintf(b, "      %s\n", extra)
+		}
 	}
+}
+
+// authResultDetailLines renders the additive AUTH_SERVER/AUTH_ORDER result
+// fields a plain Type/Action/Status/Error line doesn't otherwise show:
+// Before/After (an auth_facility item's kept/written order), Available
+// (the resolution set an unresolved order entry was checked against, on a
+// refusal only), Risks (an auth_local_server warning's structured risk
+// list) and Code (the structured outcome code). Names only, never values.
+//
+// Two things are suppressed as noise rather than detail: the helper
+// reports code "OK" on every successful write/unchanged/delete (not only
+// AUTH_SERVER's own success — see symbolForResult's non-AUTH callers),
+// so printing it would put a redundant "code: OK" under nearly every
+// AUTH_SERVER/AUTH_ORDER row; and an "unchanged" facility's before/after
+// are always identical by definition, so showing both says nothing the
+// "=" symbol on the row above doesn't already say.
+func authResultDetailLines(action, code string, before, after, available, risks []string) []string {
+	var lines []string
+	if (len(before) > 0 || len(after) > 0) && action != "unchanged" {
+		lines = append(lines, fmt.Sprintf("before: [%s]  after: [%s]", strings.Join(before, ", "), strings.Join(after, ", ")))
+	}
+	if len(available) > 0 {
+		lines = append(lines, "available: "+strings.Join(available, ", "))
+	}
+	if len(risks) > 0 {
+		lines = append(lines, "risks: "+strings.Join(risks, ", "))
+	}
+	if code != "" && code != "OK" {
+		lines = append(lines, "code: "+code)
+	}
+	return lines
 }
 
 // symbolForResult maps a result entry's action to a one-character
@@ -137,6 +205,23 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 // rather than "this build does not know that word" — and it is why an
 // installed package was invisible in `task describe` for a while.
 func symbolForResult(r syncResultEntry) string {
+	// AUTH_SERVER/AUTH_ORDER warnings (ORDER_NAMES_LOCAL_SERVER,
+	// PRIVILEGED_LOCAL_USERS_SHADOWABLE, ...) are never failures —
+	// NetDefense makes no guardrail claim about a server or user
+	// it did not create. This has to be checked before the generic
+	// "any non-success/ok status is a failure" rule below, or a warning
+	// would render as ✗ and read as broken.
+	//
+	// Scoped to the auth_* type family on purpose — every AUTH result
+	// Type carries that prefix (auth_server, auth_facility,
+	// auth_local_server, auth_warning, ...; see
+	// TestSymbolForResult_AuthActionsAndWarningStatus). Reading Status
+	// alone would let any future or untested non-AUTH family that ever
+	// reports "warning" fall through to the same ⚠, silently overriding
+	// this function's own fail-loud default for an unrecognised status.
+	if r.Status == "warning" && strings.HasPrefix(r.Type, "auth_") {
+		return "⚠"
+	}
 	if r.Status != "" && r.Status != "success" && r.Status != "ok" {
 		return "✗"
 	}
@@ -148,6 +233,11 @@ func symbolForResult(r syncResultEntry) string {
 		return "~"
 	case "delete", "deleted":
 		return "-"
+	// AUTH_SERVER/AUTH_ORDER (only reached with status success/ok/"")
+	case "unchanged":
+		return "="
+	case "written":
+		return "~"
 
 	// Package reconcile
 	case "installed":

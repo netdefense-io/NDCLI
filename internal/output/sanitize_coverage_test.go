@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -310,38 +309,6 @@ func TestFormatters_EmitNoControlSequences(t *testing.T) {
 			})
 		}
 	}
-}
-
-// captureStdout redirects os.Stdout for the duration of fn and returns what
-// was written there. These tests do not run in parallel, so the swap is safe.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	orig := os.Stdout
-	os.Stdout = w
-	// Restored with defer rather than after fn: a t.Fatal inside fn would
-	// runtime.Goexit past a bare restore, leaving every later test in this
-	// binary writing into a closed pipe. Closing w twice on the normal path
-	// is harmless.
-	defer func() {
-		os.Stdout = orig
-		w.Close()
-		r.Close()
-	}()
-
-	done := make(chan string, 1)
-	go func() {
-		b, _ := io.ReadAll(r)
-		done <- string(b)
-	}()
-
-	fn()
-
-	w.Close()
-	return <-done
 }
 
 // callFormatter invokes one formatter method reflectively. A panic is a

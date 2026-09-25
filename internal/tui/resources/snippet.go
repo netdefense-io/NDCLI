@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
@@ -51,12 +52,7 @@ func (snippetResource) Actions() []registry.Action {
 	return []registry.Action{
 		{Key: "n", Label: "create", TargetsAll: true, Form: []registry.FormField{
 			{Key: "name", Label: "Name", Required: true},
-			{Key: "type", Label: "Type", Default: "USER", Options: []string{
-				"USER", "GROUP", "ALIAS", "RULE",
-				"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD",
-				"UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
-				"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
-			}},
+			{Key: "type", Label: "Type", Default: "USER", Options: models.SnippetCreatableTypes},
 			{Key: "content", Label: "Content", Required: true},
 			{Key: "priority", Label: "Priority", Default: "1000"},
 		}},

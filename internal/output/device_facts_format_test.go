@@ -3,7 +3,6 @@ package output
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
@@ -122,27 +121,14 @@ func TestSimpleFormatDeviceRendersFacts(t *testing.T) {
 // directly, so a buffer on the formatter would come back empty.
 func renderDeviceTable(t *testing.T, d *models.Device) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-
-	f := NewTableFormatter()
-	formatErr := f.FormatDevice(d)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
+	var formatErr error
+	out := captureStdout(t, func() {
+		formatErr = NewTableFormatter().FormatDevice(d)
+	})
 	if formatErr != nil {
 		t.Fatal(formatErr)
 	}
-	return buf.String()
+	return out
 }
 
 func TestTableFormatDeviceRendersFacts(t *testing.T) {
@@ -178,27 +164,15 @@ func TestTableFormatDeviceWithoutFactsRendersNoFactLines(t *testing.T) {
 // columns that vary need.
 func TestTableFormatDevicesGrowsNoFactsColumn(t *testing.T) {
 	d := deviceWithFacts(t)
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout := os.Stdout
-	os.Stdout = w
-	f := NewTableFormatter()
-	formatErr := f.FormatDevices([]models.Device{*d}, 1, nil)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = stdout
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
+	var formatErr error
+	out := captureStdout(t, func() {
+		formatErr = NewTableFormatter().FormatDevices([]models.Device{*d}, 1, nil)
+	})
 	if formatErr != nil {
 		t.Fatal(formatErr)
 	}
-	if strings.Contains(buf.String(), "America/Sao_Paulo") {
-		t.Fatalf("the device list must not carry a facts column:\n%s", buf.String())
+	if strings.Contains(out, "America/Sao_Paulo") {
+		t.Fatalf("the device list must not carry a facts column:\n%s", out)
 	}
 }
 
@@ -208,40 +182,28 @@ func TestJSONFormatDeviceCarriesRawFacts(t *testing.T) {
 	d := deviceWithFacts(t)
 	d.Facts["ntp"] = map[string]interface{}{"synced": true}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout := os.Stdout
-	os.Stdout = w
-	f := NewJSONFormatter()
-	formatErr := f.FormatDevice(d)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = stdout
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
+	var formatErr error
+	out := captureStdout(t, func() {
+		formatErr = NewJSONFormatter().FormatDevice(d)
+	})
 	if formatErr != nil {
 		t.Fatal(formatErr)
 	}
 
 	var round map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &round); err != nil {
-		t.Fatalf("json output did not parse: %v\n%s", err, buf.String())
+	if err := json.Unmarshal([]byte(out), &round); err != nil {
+		t.Fatalf("json output did not parse: %v\n%s", err, out)
 	}
 	facts, ok := round["facts"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("facts missing from json output:\n%s", buf.String())
+		t.Fatalf("facts missing from json output:\n%s", out)
 	}
 	if _, ok := facts["ntp"]; !ok {
-		t.Fatalf("an unknown fact must survive to json output:\n%s", buf.String())
+		t.Fatalf("an unknown fact must survive to json output:\n%s", out)
 	}
 	tz, ok := facts["timezone"].(map[string]interface{})
 	if !ok || tz["name"] != "America/Sao_Paulo" {
-		t.Fatalf("timezone fact missing from json output:\n%s", buf.String())
+		t.Fatalf("timezone fact missing from json output:\n%s", out)
 	}
 }
 

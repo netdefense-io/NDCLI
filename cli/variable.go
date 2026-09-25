@@ -4,16 +4,93 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
+
+// Secret value input, at every scope (org/ou/template/device).
+//
+// A variable's value can be an AUTH_SERVER's ldap_bindpw secret reference
+// target, or an override of one — a value nobody should have to type as a
+// literal command-line argument, where it sits in shell history and in
+// `ps` output for the life of the process. `--value-stdin` and, absent
+// that, an interactive no-echo prompt are the two ways in that never do
+// that.
+
+// readValueFromStdin reads the whole of stdin and trims exactly one
+// trailing newline (a bare "\n", or "\r\n" counted as the one newline it
+// represents) — the shape a shell redirect or `echo | ndcli ...` leaves,
+// and a value with no trailing newline is passed through unchanged.
+//
+// Refuses when stdin is a terminal rather than reading from it: with
+// nothing piped in, io.ReadAll would sit on a raw terminal read, echoing
+// every character the operator types (and requiring Ctrl-D to finish) —
+// exactly the on-screen secret exposure --value-stdin exists to avoid.
+// Piping or redirecting a value in is the intended use; the no-echo
+// prompt (promptSecretValue) is the interactive alternative.
+func readValueFromStdin() (string, error) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("--value-stdin needs piped or redirected input — stdin is a terminal, which would echo the value as you type it; omit --value-stdin to be prompted without echo instead")
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("failed to read value from stdin: %w", err)
+	}
+	return trimOneTrailingNewline(string(data)), nil
+}
+
+func trimOneTrailingNewline(s string) string {
+	if strings.HasSuffix(s, "\n") {
+		s = s[:len(s)-1]
+		s = strings.TrimSuffix(s, "\r")
+	}
+	return s
+}
+
+// promptSecretValue prompts on stderr and reads one line from the
+// controlling terminal without echoing it, the same convention
+// `backup encryption-key` uses.
+func promptSecretValue(label string) (string, error) {
+	fmt.Fprintf(os.Stderr, "%s: ", label)
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("failed to read value: %w", err)
+	}
+	return string(b), nil
+}
+
+// resolveVariableValueInput implements `variable ... create`'s value
+// entry: a positional argument wins when given; --value-stdin reads all of
+// stdin instead; with neither, an interactive terminal is prompted (no
+// echo) rather than erroring immediately, since a value is always
+// required to create a variable.
+func resolveVariableValueInput(cmd *cobra.Command, positional string, havePositional bool) (string, error) {
+	useStdin, _ := cmd.Flags().GetBool("value-stdin")
+	if useStdin {
+		if havePositional {
+			return "", fmt.Errorf("--value-stdin cannot be combined with a value argument")
+		}
+		return readValueFromStdin()
+	}
+	if havePositional {
+		return positional, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("no value given — pass it as an argument, use --value-stdin, or run interactively to be prompted")
+	}
+	return promptSecretValue("Value")
+}
 
 // variableScopeMeta tells the cobra builders how each scope is named on the
 // CLI surface. The actual URL/parameter logic lives in service.
@@ -181,18 +258,19 @@ func makeVarDescribeHandler(meta variableScopeMeta) func(*cobra.Command, []strin
 // makeVarCreateCommand creates a create command for a scope
 func makeVarCreateCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
-	var args cobra.PositionalArgs
+	var minArgs, maxArgs int
 	if meta.requiresEntity {
 		use = fmt.Sprintf("create [%s] [name] [value]", meta.entityName)
 		short = fmt.Sprintf("Create a %s variable", meta.displayName)
-		args = cobra.ExactArgs(3)
+		minArgs, maxArgs = 2, 3
 	} else {
 		use = "create [name] [value]"
 		short = fmt.Sprintf("Create an %s-level variable", meta.displayName)
-		args = cobra.ExactArgs(2)
+		minArgs, maxArgs = 1, 2
 	}
-	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarCreateHandler(meta)}
+	cmd := &cobra.Command{Use: use, Short: short, Args: cobra.RangeArgs(minArgs, maxArgs), RunE: makeVarCreateHandler(meta)}
 	cmd.Flags().String("description", "", "Variable description")
+	cmd.Flags().Bool("value-stdin", false, "Read the value from stdin instead of a [value] argument (for secret values); omit both to be prompted interactively without echo")
 	if meta.scope == service.VarScopeOrg {
 		cmd.Flags().Bool("secret", false, "Mark variable as secret (value will be redacted in API responses)")
 	}
@@ -207,11 +285,22 @@ func makeVarCreateHandler(meta variableScopeMeta) func(*cobra.Command, []string)
 		requireAuth()
 		org := requireOrganization()
 
-		var entity, varName, value string
+		var entity, varName, positionalValue string
+		var havePositionalValue bool
 		if meta.requiresEntity {
-			entity, varName, value = args[0], args[1], args[2]
+			entity, varName = args[0], args[1]
+			if len(args) > 2 {
+				positionalValue, havePositionalValue = args[2], true
+			}
 		} else {
-			varName, value = args[0], args[1]
+			varName = args[0]
+			if len(args) > 1 {
+				positionalValue, havePositionalValue = args[1], true
+			}
+		}
+		value, err := resolveVariableValueInput(cmd, positionalValue, havePositionalValue)
+		if err != nil {
+			return err
 		}
 		description, _ := cmd.Flags().GetString("description")
 		secret := false
@@ -262,6 +351,7 @@ func makeVarSetCommand(meta variableScopeMeta) *cobra.Command {
 	}
 	cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: makeVarSetHandler(meta)}
 	cmd.Flags().String("value", "", "New value for the variable")
+	cmd.Flags().Bool("value-stdin", false, "Read the new value from stdin instead of --value (for secret values)")
 	cmd.Flags().String("description", "", "New description for the variable")
 	if meta.requiresEntity {
 		cmd.ValidArgsFunction = getEntityThenVariableCompleter(string(meta.scope))
@@ -269,6 +359,42 @@ func makeVarSetCommand(meta variableScopeMeta) *cobra.Command {
 		cmd.ValidArgsFunction = completeOrgVariables
 	}
 	return cmd
+}
+
+// resolveVariableSetValueInput implements `variable ... set`'s value entry:
+// --value and --value-stdin are mutually exclusive; with neither given, a
+// --description on its own is a description-only update (returns a nil
+// value, unchanged); with nothing given at all, an interactive terminal is
+// prompted for a new value (no echo) rather than erroring immediately — the
+// same fallback `create` uses, so a secret value never has to be typed as
+// --value.
+func resolveVariableSetValueInput(cmd *cobra.Command, descriptionGiven bool) (*string, error) {
+	valueStdin, _ := cmd.Flags().GetBool("value-stdin")
+	if cmd.Flags().Changed("value") && valueStdin {
+		return nil, fmt.Errorf("--value and --value-stdin are mutually exclusive")
+	}
+	switch {
+	case cmd.Flags().Changed("value"):
+		v, _ := cmd.Flags().GetString("value")
+		return &v, nil
+	case valueStdin:
+		v, err := readValueFromStdin()
+		if err != nil {
+			return nil, err
+		}
+		return &v, nil
+	}
+	if descriptionGiven {
+		return nil, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil, fmt.Errorf("at least one of --value, --value-stdin or --description must be provided")
+	}
+	v, err := promptSecretValue("New value")
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 func makeVarSetHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
@@ -284,17 +410,15 @@ func makeVarSetHandler(meta variableScopeMeta) func(*cobra.Command, []string) er
 		}
 
 		opts := service.VariableSetOpts{}
-		if cmd.Flags().Changed("value") {
-			v, _ := cmd.Flags().GetString("value")
-			opts.Value = &v
-		}
 		if cmd.Flags().Changed("description") {
 			v, _ := cmd.Flags().GetString("description")
 			opts.Description = &v
 		}
-		if opts.Value == nil && opts.Description == nil {
-			return fmt.Errorf("at least one of --value or --description must be provided")
+		value, err := resolveVariableSetValueInput(cmd, opts.Description != nil)
+		if err != nil {
+			return err
 		}
+		opts.Value = value
 		if _, err := svc.VariableSet(context.Background(), meta.scope, org, entity, varName, opts); err != nil {
 			return err
 		}

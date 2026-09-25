@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 // pullQuery runs SnippetPull against a stub and returns the query the client
@@ -99,6 +101,53 @@ func TestSnippetPullRejectsABadSnippetNameBeforeSending(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "match key may contain spaces") {
 		t.Errorf("the message should draw the distinction the flag exists for:\n%s", err.Error())
+	}
+}
+
+// TestSnippetPullRejectsAUTHTypesBeforeSending guards the client-side fail-
+// closed for AUTH_SERVER/AUTH_ORDER: there is no AUTH PULL, and
+// NDManager 422s it too, but neither the CLI --type flag nor the MCP
+// config_type argument is validated against an enum before reaching this
+// service call — the flag is a free string, and the MCP go-sdk never
+// checks arguments against InputSchema on its own. The device must never
+// even be dispatched a task for it.
+func TestSnippetPullRejectsAUTHTypesBeforeSending(t *testing.T) {
+	for _, authType := range []string{"AUTH_SERVER", "AUTH_ORDER"} {
+		t.Run(authType, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("a request was sent for a non-pullable type %s: %s %s", authType, r.Method, r.URL)
+			}))
+			defer srv.Close()
+
+			_, err := newTestService(t, srv).SnippetPull(context.Background(), "acme", "fw01", SnippetPullOpts{
+				Name:       "Corp-AD",
+				ConfigType: authType,
+			})
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			var svcErr *Error
+			if !errors.As(err, &svcErr) || svcErr.Code != CodeInvalidInput {
+				t.Fatalf("expected %s, got %#v", CodeInvalidInput, err)
+			}
+			if !strings.Contains(err.Error(), authType) {
+				t.Errorf("message should name the rejected type, got: %s", err.Error())
+			}
+		})
+	}
+}
+
+// TestSnippetPullAllowsEveryPullableTypeThrough is the negative-space check
+// for the AUTH_SERVER/AUTH_ORDER rejection above: every type on the real
+// pullable list must still reach the API unmodified.
+func TestSnippetPullAllowsEveryPullableTypeThrough(t *testing.T) {
+	for _, pullable := range models.SnippetPullableTypes {
+		t.Run(pullable, func(t *testing.T) {
+			q := pullQuery(t, SnippetPullOpts{Name: "x", ConfigType: pullable})
+			if got := q.Get("config_type"); got != pullable {
+				t.Errorf("config_type = %q, want %q", got, pullable)
+			}
+		})
 	}
 }
 

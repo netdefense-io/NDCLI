@@ -268,6 +268,17 @@ func DeriveSnippetName(matchKey string) string {
 	return derived
 }
 
+// isPullableType reports whether typ is one of models.SnippetPullableTypes,
+// matched exactly (case-sensitive, like every other snippet type check).
+func isPullableType(typ string) bool {
+	for _, t := range models.SnippetPullableTypes {
+		if t == typ {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateSnippetName reports whether name is usable as a snippet name.
 //
 // The message names the charset rather than echoing a regex: a user who typed
@@ -317,6 +328,22 @@ func (s *Service) SnippetPull(ctx context.Context, org, deviceName string, opts 
 	}
 	if opts.Name == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "match key is required"}
+	}
+	if opts.ConfigType != "" && !isPullableType(opts.ConfigType) {
+		// Both CLI surfaces (`snippet pull --type`, the MCP config_type
+		// enum) already advertise only models.SnippetPullableTypes, but
+		// neither enforces it: the flag is a free string, and the MCP
+		// go-sdk's AddTool never validates arguments against InputSchema.
+		// AUTH_SERVER/AUTH_ORDER fail closed at every PULL entry point,
+		// since there is no AUTH PULL — NDManager also 422s this, but
+		// refusing here means the device is never even dispatched a task
+		// for it.
+		return nil, &Error{
+			Code: CodeInvalidInput,
+			Message: fmt.Sprintf(
+				"%q cannot be pulled — pullable types are: %s",
+				opts.ConfigType, strings.Join(models.SnippetPullableTypes, ", ")),
+		}
 	}
 	if opts.SnippetName != "" {
 		if err := ValidateSnippetName(opts.SnippetName); err != nil {

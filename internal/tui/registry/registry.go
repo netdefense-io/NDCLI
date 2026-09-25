@@ -49,6 +49,16 @@ type FormField struct {
 	// list is empty the app aborts the action with a "no <field> available"
 	// message instead of opening an unusable form.
 	OptionsFrom string
+	// Mask, when true, renders the typed value as one bullet per rune
+	// instead of plaintext (a secret variable's value, for example) — the
+	// same no-echo intent as the CLI's interactive prompt. Typing and
+	// backspace behave exactly as for an unmasked field; only the
+	// rendering changes. Accepted residual: the bullet count still
+	// reveals the value's length, standard for password-style inputs —
+	// the CLI's own no-echo prompt (term.ReadPassword) shows nothing at
+	// all, which this form widget cannot match without losing all typing
+	// feedback.
+	Mask bool
 }
 
 // Action is an operation a Resource exposes from its list view, surfaced as a

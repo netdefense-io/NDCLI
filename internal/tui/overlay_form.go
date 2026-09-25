@@ -109,11 +109,14 @@ func (f *formModel) View() string {
 	for i, fld := range f.act.Form {
 		label := mutedStyle.Render(fitCell(fld.Label, 12))
 		var val string
-		if len(fld.Options) > 0 {
+		switch {
+		case len(fld.Options) > 0:
 			val = "‹ " + f.values[i] + " ›"
-		} else if f.values[i] == "" && fld.Placeholder != "" {
+		case f.values[i] == "" && fld.Placeholder != "":
 			val = dimStyle.Render(fld.Placeholder)
-		} else {
+		case fld.Mask:
+			val = strings.Repeat("•", len([]rune(f.values[i])))
+		default:
 			val = f.values[i]
 		}
 		if i == f.cursor {

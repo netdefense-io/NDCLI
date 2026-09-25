@@ -54,13 +54,18 @@ func (r ScopedVarResource) Fetch(ctx context.Context, svc *service.Service, org 
 
 func (ScopedVarResource) Actions() []registry.Action {
 	return []registry.Action{
+		// Value is masked unconditionally, not only when Secret is set to
+		// "yes" in the same form: the two fields have no way to react to
+		// each other here, and masking a plain value costs nothing (the
+		// CLI's own interactive prompt makes the same call for every
+		// value, secret or not).
 		{Key: "n", Label: "new", TargetsAll: true, Form: []registry.FormField{
 			{Key: "name", Label: "Name", Required: true},
-			{Key: "value", Label: "Value", Required: true},
+			{Key: "value", Label: "Value", Required: true, Mask: true},
 			{Key: "secret", Label: "Secret", Options: []string{"no", "yes"}},
 		}},
 		{Key: "e", Label: "edit", Form: []registry.FormField{
-			{Key: "value", Label: "New value", Required: true},
+			{Key: "value", Label: "New value", Required: true, Mask: true},
 		}},
 		{Key: "x", Label: "delete", Destructive: true, Prompt: "Delete variable {id}?"},
 	}

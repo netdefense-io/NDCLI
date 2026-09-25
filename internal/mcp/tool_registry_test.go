@@ -4,10 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/netdefense-io/NDCLI/internal/config"
 )
 
 // registeredToolNames enumerates the server's tools the way a real client
@@ -17,25 +13,8 @@ import (
 func registeredToolNames(t *testing.T) []string {
 	t.Helper()
 
-	s := &Server{
-		mcpServer: mcp.NewServer(&mcp.Implementation{Name: "ndcli", Version: config.Version}, nil),
-	}
-	s.registerAll()
-
+	cs := connectTestClient(t)
 	ctx := context.Background()
-	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	ss, err := s.mcpServer.Connect(ctx, serverTransport, nil)
-	if err != nil {
-		t.Fatalf("server connect: %v", err)
-	}
-	defer ss.Close()
-
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).
-		Connect(ctx, clientTransport, nil)
-	if err != nil {
-		t.Fatalf("client connect: %v", err)
-	}
-	defer cs.Close()
 
 	var names []string
 	for tool, err := range cs.Tools(ctx, nil) {

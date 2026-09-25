@@ -208,7 +208,7 @@ func (s *Service) DeviceRename(ctx context.Context, org, name, newName string) e
 // CLI prompt and help text, the MCP tool description and preview, and the TUI
 // confirm modal — so a caller can never delete a device believing it is
 // reversible.
-const DeviceRemoveConsequence = "Permanently deletes the device. On its next contact the device removes all NetDefense-managed configuration (firewall rules, aliases, VPN, users, package repositories), uninstalls the NetDefense agent and repository, and cannot be restored. Re-adding it requires a fresh installation."
+const DeviceRemoveConsequence = "Permanently deletes the device. On its next contact the device removes all NetDefense-managed configuration (firewall rules, aliases, VPN, users, external authentication servers, package repositories), uninstalls the NetDefense agent and repository, and cannot be restored. Re-adding it requires a fresh installation."
 
 // DeviceRemove deletes a device from management. The caller is responsible
 // for any user-facing confirmation prompt.

@@ -2,7 +2,6 @@ package output
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 
@@ -106,25 +105,12 @@ func TestDetailedFormatter_EntryCounts(t *testing.T) {
 // testing anything.
 func renderPolicies(t *testing.T, policies ...models.SoftwarePolicy) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-
-	f := NewTableFormatter()
-	formatErr := f.FormatSoftwarePolicies(policies)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
+	var formatErr error
+	out := captureStdout(t, func() {
+		formatErr = NewTableFormatter().FormatSoftwarePolicies(policies)
+	})
 	if formatErr != nil {
 		t.Fatal(formatErr)
 	}
-	return buf.String()
+	return out
 }

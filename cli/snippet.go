@@ -32,9 +32,68 @@ var snippetListCmd = &cobra.Command{
 var snippetCreateCmd = &cobra.Command{
 	Use:   "create [name]",
 	Short: "Create a new snippet",
+	Long:  snippetCreateLong,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSnippetCreate,
 }
+
+// snippetCreateLong documents AUTH_SERVER and AUTH_ORDER inline, since
+// their content is free-form JSON with no dedicated flags of its own.
+// models.AuthOrderConsistencyRule and models.AuthPrerequisites are the
+// two sentences other surfaces (MCP tools, docs) must state identically,
+// so they are shared constants rather than literals here.
+const snippetCreateLong = `Create a new snippet.
+
+AUTH_SERVER and AUTH_ORDER content:
+
+AUTH_SERVER defines one external authentication server (LDAP or Active
+Directory) that NetDefense will create and manage on a device
+(type: "ldap"). Content keys mirror OPNsense's own field names (host,
+ldap_port, ldap_basedn, ...). ldap_bindpw must be exactly ${VAR_NAME},
+naming an org-scope secret variable created with
+'ndcli variable org create AD_BIND_PW --secret --value-stdin' (pipe or
+redirect the password in; omit --value-stdin to be prompted for it
+without echo instead) — a literal password is rejected. Single-quote the
+${...} reference so your own shell does not try to expand it before
+ndcli ever sees it, e.g.:
+
+  ndcli snippet create my-ad --type AUTH_SERVER --content '{"ldap_bindpw":"${AD_BIND_PW}", ...}'
+
+Cleartext LDAP ("TCP - Standard") requires an explicit human
+acknowledgement in the content (nd_allow_cleartext_ldap: true) — it sends
+every user's password unencrypted. Prefer StartTLS or SSL.
+
+AUTH_ORDER defines a login-order policy for one facility. v1 defines only
+"webadmin", which controls the web GUI and password login over SSH, the
+console, su and sudo — one OPNsense setting. Key-based SSH, the Local API
+and a device connect session are not affected.
+
+  {"facilities": {"webadmin": {"order": ["Local Database", "Corp-AD"]}}}
+
+- "Local Database" must always be first in a webadmin order — enforced on
+  write, so local-database accounts keep working even when every external
+  server is unreachable.
+- Consistency rule: ` + models.AuthOrderConsistencyRule + `. A mistyped
+  name is caught when the device syncs, not when this snippet is saved.
+- A server configured by hand on the device (one NetDefense did not
+  create) can be named in an order policy, but it gets none of
+  NetDefense's guardrails — no reserved-name exclusion, no Limit-groups
+  requirement, no protected-group check, no cleartext acknowledgement.
+  Check it yourself before naming it.
+- Recovery if password login breaks: push a policy with
+  {"facilities": {"webadmin": {"order": ["Local Database"]}}} (needs
+  reject_dangerous_snippets off on the device), open a device connect
+  session while the device allows full remote access (remote_access_policy
+  = full) with an org:rw or org:su account, or use key-based SSH or a
+  local console password.
+
+Attaching or detaching an AUTH_SERVER/AUTH_ORDER snippet, its template, or
+moving a device into an OU that carries one, only needs org:rw — even
+though authoring the content itself needs org:su. That lets an org:rw
+user place an org:su-authored policy, a webadmin reset included, onto
+more devices.
+
+Prerequisites: ` + models.AuthPrerequisites + `.`
 
 var snippetDescribeCmd = &cobra.Command{
 	Use:               "describe [name]",
@@ -137,7 +196,7 @@ func init() {
 	snippetCmd.AddCommand(snippetPullCmd)
 
 	// List flags
-	snippetListCmd.Flags().String("type", "", "Filter by type: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
+	snippetListCmd.Flags().String("type", "", "Filter by type: "+models.SnippetTypesHelp(models.SnippetCreatableTypes))
 	snippetListCmd.Flags().String("name", "", "Filter by name (regex pattern)")
 	snippetListCmd.Flags().String("sort-by", "priority:asc", "Sort field and direction (priority, name, created_at, updated_at)")
 	snippetListCmd.Flags().Int("page", 1, "Page number")
@@ -148,14 +207,14 @@ func init() {
 	snippetListCmd.Flags().String("updated-before", "", "Filter by updated date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 
 	// Create flags
-	snippetCreateCmd.Flags().String("type", "", "Snippet type (required): USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
+	snippetCreateCmd.Flags().String("type", "", "Snippet type (required): "+models.SnippetTypesHelp(models.SnippetCreatableTypes))
 	snippetCreateCmd.Flags().String("content", "", "Snippet content (required)")
 	snippetCreateCmd.Flags().String("file", "", "Read content from file instead of --content")
 	snippetCreateCmd.Flags().Int("priority", 1000, "Snippet priority 1-60000 (default 1000)")
 
 	// Pull flags
 	snippetPullCmd.Flags().String("name", "", "Name for the created snippet (letters, digits, dot, underscore, hyphen; derived from the match key when omitted)")
-	snippetPullCmd.Flags().String("type", "ALIAS", "Config type to pull: USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS")
+	snippetPullCmd.Flags().String("type", "ALIAS", "Config type to pull: "+models.SnippetTypesHelp(models.SnippetPullableTypes))
 	snippetPullCmd.Flags().Bool("auto-create", false, "Create snippet in DB if it doesn't exist")
 	snippetPullCmd.Flags().Bool("overwrite", false, "Update snippet in DB if it already exists")
 	snippetPullCmd.Flags().BoolP("wait", "w", false, "Wait for task to complete")
@@ -174,6 +233,17 @@ func namedSnippetNameFlag(err error) error {
 		Message: strings.Replace(svcErr.Message, service.SnippetNameHint, "--name", 1),
 		Err:     err,
 	}
+}
+
+// requireSnippetType is the create command's own --type validation, pulled
+// out as a pure function so the error text — built from
+// models.SnippetCreatableTypes — is testable without cobra/auth/org
+// plumbing.
+func requireSnippetType(snippetType string) error {
+	if snippetType == "" {
+		return fmt.Errorf("--type is required (%s)", models.SnippetTypesHelp(models.SnippetCreatableTypes))
+	}
+	return nil
 }
 
 func runSnippetList(cmd *cobra.Command, args []string) error {
@@ -212,8 +282,8 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 	priority, _ := cmd.Flags().GetInt("priority")
 
-	if snippetType == "" {
-		return fmt.Errorf("--type is required (USER, GROUP, ALIAS, RULE, UNBOUND_HOST_OVERRIDE, UNBOUND_DOMAIN_FORWARD, UNBOUND_HOST_ALIAS, UNBOUND_ACL, ZABBIX_SETTINGS, ZABBIX_USERPARAMETER, ZABBIX_ALIAS)")
+	if err := requireSnippetType(snippetType); err != nil {
+		return err
 	}
 	if file != "" {
 		data, err := os.ReadFile(file)

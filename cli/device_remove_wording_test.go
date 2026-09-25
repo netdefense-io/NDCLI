@@ -28,6 +28,18 @@ func TestDeviceRemoveWarningLines_StatesTheOnBoxConsequences(t *testing.T) {
 	}
 }
 
+// TestDeviceRemoveConsequence_MatchesTheCanonicalSentence pins the shared
+// constant against a literal copy of the canonical decommission sentence,
+// rather than only against itself the way every other surface's test
+// does — every one of those tests would keep passing if the constant
+// itself drifted.
+func TestDeviceRemoveConsequence_MatchesTheCanonicalSentence(t *testing.T) {
+	const canonical = "Permanently deletes the device. On its next contact the device removes all NetDefense-managed configuration (firewall rules, aliases, VPN, users, external authentication servers, package repositories), uninstalls the NetDefense agent and repository, and cannot be restored. Re-adding it requires a fresh installation."
+	if service.DeviceRemoveConsequence != canonical {
+		t.Errorf("DeviceRemoveConsequence drifted from the canonical sentence:\ngot:  %s\nwant: %s", service.DeviceRemoveConsequence, canonical)
+	}
+}
+
 // TestDeviceRemoveHelp_SaysPermanentAndSelfDecommission keeps --help honest:
 // the long help has to carry the same finality as the prompt, because a
 // scripted caller reads the help and never sees the prompt.

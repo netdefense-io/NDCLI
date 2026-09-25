@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -41,6 +42,38 @@ func newTestServer(t *testing.T, srv *httptest.Server, org string) *Server {
 		svc:             service.New(client, nil, cfg),
 		consoleSessions: newConsoleSessionManager(),
 	}
+}
+
+// connectTestClient builds a *Server with every tool registered, wires it to
+// an in-memory client via mcp.NewInMemoryTransports, and returns the
+// connected client session — the real-protocol round trip both
+// registeredToolNames (tool_registry_test.go) and registeredToolSchema
+// (tools_snippet_types_test.go) drive, so the connection setup lives in one
+// place. Both sides are closed via t.Cleanup.
+func connectTestClient(t *testing.T) *mcp.ClientSession {
+	t.Helper()
+
+	s := &Server{
+		mcpServer: mcp.NewServer(&mcp.Implementation{Name: "ndcli", Version: config.Version}, nil),
+	}
+	s.registerAll()
+
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	ss, err := s.mcpServer.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).
+		Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { cs.Close() })
+
+	return cs
 }
 
 // decodeToolResult unmarshals the JSON text content of a CallToolResult into

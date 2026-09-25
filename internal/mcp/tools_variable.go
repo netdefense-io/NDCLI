@@ -3,10 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -82,6 +85,45 @@ func resolveVariableScope(s, entity string) (service.VariableScope, error) {
 	return scope, nil
 }
 
+// errMCPSecretValueWrite is the refusal for any MCP call that would carry
+// a secret variable's literal value over the tool-call transport — the
+// whole reason `ndcli variable ... --value-stdin` and the interactive
+// no-echo prompt exist is that a value typed into a tool call argument
+// instead sits in the calling LLM's context and transcript for the life
+// of the session.
+var errMCPSecretValueWrite = &service.Error{
+	Code:    service.CodeInvalidInput,
+	Message: "this variable's value is secret — set it with 'ndcli variable <scope> create/set ... --value-stdin' or the interactive prompt, not over MCP",
+}
+
+// resolveVariableSecretStatus reports whether the variable at (scope, org,
+// entity, name) is secret. This is a security control: a confirmed "no
+// such variable" (404) reads as "not secret" — the common
+// case of a caller creating that variable right now — but any other
+// lookup failure (a timeout, a 5xx, a network blip, ...) is returned as
+// an error rather than silently read as "not secret". Failing open on an
+// ambiguous lookup would be exactly the failure mode where the plaintext
+// value this feature exists to keep off the MCP transport goes through
+// anyway; the caller refuses the write on any non-nil error here, the
+// same as it does when the status comes back true.
+//
+// This read and the write it gates are not atomic: another actor could
+// flip the variable's secret flag between this GET and the subsequent
+// create/set. Accepted — NDManager has no compare-and-swap primitive for
+// this field, and the caller who could hit that window is already
+// authorized to change the flag directly.
+func resolveVariableSecretStatus(ctx context.Context, svc *service.Service, scope service.VariableScope, org, entity, name string) (bool, error) {
+	v, err := svc.VariableGet(ctx, scope, org, entity, name)
+	if err == nil {
+		return v.Secret, nil
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
 // registerVariableTools registers the variable tool set.
 func (s *Server) registerVariableTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
@@ -118,7 +160,7 @@ func (s *Server) registerVariableTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.variable.create",
-		Description: "Create a variable at a given scope. `secret=true` is honoured only at org scope (the value is then redacted in API responses).",
+		Description: "Create a variable at a given scope. Always refuses `secret=true` — a secret's value must never travel as an MCP tool argument. Also refuses a plain create/override where the org-scope variable of that name is already secret. Create or set a secret variable with 'ndcli variable ... create/set ... --value-stdin' or the interactive prompt instead.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -128,7 +170,7 @@ func (s *Server) registerVariableTools() {
 				"name":         stringProperty("Variable name"),
 				"value":        stringProperty("Variable value"),
 				"description":  stringProperty("Description (optional)"),
-				"secret":       boolProperty("Mark as secret (org scope only — server rejects elsewhere)"),
+				"secret":       boolProperty("Always refused over MCP — org-scope secrets can only be created via the CLI's --value-stdin or interactive prompt"),
 			},
 			"required": []string{"scope", "name", "value"},
 		},
@@ -136,7 +178,7 @@ func (s *Server) registerVariableTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.variable.set",
-		Description: "Update a variable's value and/or description. Requires confirm=true.",
+		Description: "Update a variable's value and/or description. Requires confirm=true. Refuses to write a new value to a variable that is already secret — set it with 'ndcli variable ... --value-stdin' or the interactive prompt instead; a description-only update is unaffected.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -271,6 +313,26 @@ func (s *Server) handleVariableCreate(ctx context.Context, req *mcp.CallToolRequ
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
+	// A literal secret value must never travel as an MCP tool argument:
+	// refuse outright when this call is marking the variable
+	// secret, and — since secret status is inherited by every override —
+	// also when it would silently create an override of an org-scope
+	// variable that is already secret. A lookup failure that isn't a
+	// confirmed 404 fails closed (refuses) rather than proceeding as if
+	// the variable were known not to be secret.
+	if input.Secret {
+		return s.errorResult(errMCPSecretValueWrite)
+	}
+	if scope != service.VarScopeOrg {
+		secret, err := resolveVariableSecretStatus(apiCtx, s.svc, service.VarScopeOrg, org, "", input.Name)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		if secret {
+			return s.errorResult(errMCPSecretValueWrite)
+		}
+	}
+
 	v, err := s.svc.VariableCreate(apiCtx, scope, org, input.Entity, service.VariableCreateOpts{
 		Name:        input.Name,
 		Value:       input.Value,
@@ -303,11 +365,38 @@ func (s *Server) handleVariableSet(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return s.errorResult(err)
 	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	// Same refusal as create: a value write to a variable that is
+	// already secret must go through the CLI's --value-stdin/prompt path,
+	// never an MCP tool argument. A description-only update (Value == nil)
+	// is unaffected. Checked before the confirm gate so an about-to-be-
+	// refused call never even reaches the preview. As in create, a lookup
+	// failure that isn't a confirmed 404 fails closed.
+	//
+	// Consequence: a confirm=false preview of a value write is no longer a
+	// pure local, zero-request call (same tradeoff scheduling's `at`
+	// preview makes for the device-timezone echo) — it now makes the same
+	// GET the confirmed call would, sharing this handler's one apiTimeout
+	// budget with the PATCH that follows on the confirmed call. Accepted:
+	// refusing before the preview matters more than keeping the preview
+	// network-free, and a single JSON GET+PATCH pair sits nowhere near the
+	// 30s budget in practice.
+	if input.Value != nil {
+		secret, err := resolveVariableSecretStatus(apiCtx, s.svc, scope, org, input.Entity, input.Name)
+		if err != nil {
+			return s.errorResult(err)
+		}
+		if secret {
+			return s.errorResult(errMCPSecretValueWrite)
+		}
+	}
+
 	if !input.Confirm {
 		return s.previewResult("update variable", input.Name)
 	}
-	apiCtx, cancel := contextWithTimeout()
-	defer cancel()
 
 	v, err := s.svc.VariableSet(apiCtx, scope, org, input.Entity, input.Name, service.VariableSetOpts{
 		Value:       input.Value,

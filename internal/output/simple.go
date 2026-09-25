@@ -444,6 +444,10 @@ func (f *SimpleFormatter) FormatSyncApply(result *models.SyncApplyResponse) erro
 			} else if len(e.UndefinedVariables) > 0 {
 				fmt.Fprintf(f.Writer, "  Undefined: %s\n", formatVarListSimple(e.UndefinedVariables))
 			}
+			// AUTH_SERVER/AUTH_ORDER build-time issues (AUTH_BUILD_INVALID).
+			for _, ai := range e.AuthIssues {
+				fmt.Fprintf(f.Writer, "  %s\n", formatAuthIssueLine(ai))
+			}
 		}
 	}
 

@@ -78,3 +78,72 @@ func TestSyncApply_ScheduleGatedByConfirm(t *testing.T) {
 		t.Fatalf("expected success, got error: %v", resp.Error)
 	}
 }
+
+// TestSyncApply_RendersAuthIssues guards ndcli.sync.apply's error mapping
+// against dropping auth_issues: an AUTH_BUILD_INVALID device error must
+// carry its auth_issues list through to the tool's result data, not just
+// device/error/code.
+func TestSyncApply_RendersAuthIssues(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/sync/status":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"items": []map[string]interface{}{{"device_name": "e2e-a", "organization": "acme", "in_sync": false}},
+				"total": 1,
+			})
+		case "/api/v1/sync":
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message":          "Sync triggered for 0 device(s); 1 error(s)",
+				"devices_affected": 0,
+				"skipped":          0,
+				"tasks":            []interface{}{},
+				"errors": []map[string]interface{}{
+					{
+						"device_name": "e2e-a",
+						"error":       "AUTH build failed",
+						"code":        "AUTH_BUILD_INVALID",
+						"auth_issues": []map[string]interface{}{
+							{"code": "AUTH_GROUP_NOT_ATTACHED", "message": "group not attached", "group": "IT-Staff", "server": "Corp-AD"},
+						},
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	s := newTestServer(t, srv, "acme")
+	input := &syncApplyInput{Confirm: true}
+
+	result, err := s.syncApply(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map data, got %T", resp.Data)
+	}
+	errs, ok := data["errors"].([]interface{})
+	if !ok || len(errs) != 1 {
+		t.Fatalf("expected exactly one error, got %v", data["errors"])
+	}
+	errEntry, ok := errs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map error entry, got %T", errs[0])
+	}
+	issues, ok := errEntry["auth_issues"].([]interface{})
+	if !ok || len(issues) != 1 {
+		t.Fatalf("expected auth_issues to survive into the tool result, got %v", errEntry["auth_issues"])
+	}
+	issue, ok := issues[0].(map[string]interface{})
+	if !ok || issue["code"] != "AUTH_GROUP_NOT_ATTACHED" || issue["group"] != "IT-Staff" {
+		t.Errorf("auth_issues[0] = %v, want code AUTH_GROUP_NOT_ATTACHED / group IT-Staff", issue)
+	}
+}

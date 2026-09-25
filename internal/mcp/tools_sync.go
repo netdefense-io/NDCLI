@@ -187,6 +187,11 @@ func (s *Server) syncApply(ctx context.Context, input *syncApplyInput) (*mcp.Cal
 			"code":                e.Code,
 			"conflicts":           e.Conflicts,
 			"undefined_variables": e.UndefinedVariables,
+			// auth_issues is present when code is AUTH_BUILD_INVALID — one
+			// entry per AUTH_SERVER/AUTH_ORDER build-time failure, naming
+			// only identifiers (snippet/template/server/group/facility),
+			// never a value.
+			"auth_issues": e.AuthIssues,
 		})
 	}
 	return s.successResult(map[string]interface{}{
