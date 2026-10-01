@@ -20,6 +20,7 @@ import (
 // guards the nil-pointer-in-interface footgun.
 type authManager interface {
 	IsAuthenticated() bool
+	SessionStatus() *models.SessionStatus
 	GetAccessToken() (string, error)
 	ForceRefresh() error
 	GetUserInfo() (*models.UserInfo, error)
@@ -54,16 +55,15 @@ func New(apiClient *api.Client, authMgr *auth.Manager, cfg *config.Config) *Serv
 
 // NewFromProvider constructs a Service from an auth implementation other
 // than the concrete *auth.Manager — e.g. *auth.StaticTokenProvider, used for
-// NDCLI_TOKEN static-PAT auth. Callers with no auth manager at all should
-// use New(client, nil, cfg) instead.
+// NDCLI_TOKEN static-PAT auth by the CLI, the TUI and netdefense-mcp. Callers
+// with no auth manager at all should use New(client, nil, cfg) instead.
 func NewFromProvider(apiClient *api.Client, am authManager, cfg *config.Config) *Service {
 	// Same nil-pointer-in-interface guard New() applies: a typed-nil
 	// concrete pointer passed as am would otherwise box into a non-nil
 	// authManager interface value, silently defeating every s.auth == nil
-	// check downstream. There is exactly one caller today
-	// (internal/mcp/server.go, always passing a real, non-nil
-	// *auth.StaticTokenProvider) but the guard is one line and keeps this
-	// constructor correct if a second caller is added later.
+	// check downstream. Every caller passes a real, non-nil
+	// *auth.StaticTokenProvider today, but the guard is one line and keeps
+	// this constructor correct for the next one.
 	if rv := reflect.ValueOf(am); am != nil && rv.Kind() == reflect.Ptr && rv.IsNil() {
 		am = nil
 	}

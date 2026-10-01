@@ -118,7 +118,7 @@ func (s *Service) ConsoleConnect(ctx context.Context, org, deviceName string, co
 			}
 			return nil, &Error{Code: CodeAPIError, Message: "connect task failed: " + msg}
 
-		case models.TaskStatusCancelled:
+		case models.TaskStatusCanceled:
 			return nil, &Error{Code: CodeAPIError, Message: "connect task was cancelled"}
 
 		case models.TaskStatusExpired:

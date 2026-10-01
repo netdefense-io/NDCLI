@@ -108,8 +108,9 @@ func (w *Wizard) runAuthStep(ctx context.Context) {
 	// Don't use GetManager() singleton as it may have stale config
 	w.authManager = auth.NewManager()
 
-	// Check if already authenticated
-	if w.authManager.IsAuthenticated() {
+	// Check if already authenticated. A refreshable session counts: its expired
+	// access token renews itself on the first request.
+	if w.authManager.SessionStatus().Usable() {
 		userInfo, err := w.authManager.GetUserInfo()
 		if err == nil && userInfo != nil {
 			ShowSuccess(fmt.Sprintf("Already authenticated as: %s", userInfo.Email))

@@ -100,10 +100,11 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 
 	// Report the auth backend actually in use, not just the auth.json path —
 	// when keyring is the backend (the common case on macOS/Linux) auth.json
-	// doesn't exist and listing it is misleading. authManager picks the
+	// doesn't exist and listing it is misleading. The auth manager picks the
 	// backend via storage.pickStorage, which honors `auth.storage` config
-	// plus runtime keyring availability.
-	storageName := authManager.GetStorageName()
+	// plus runtime keyring availability. Read it through svc: authManager is
+	// nil under NDCLI_TOKEN.
+	storageName := svc.AuthStorageName()
 	fmt.Printf("  Auth storage: %s\n", storageName)
 	if storageName == "file" {
 		fmt.Printf("  Auth file:    %s\n", config.GetAuthFilePath())

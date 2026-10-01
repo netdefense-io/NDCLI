@@ -80,6 +80,52 @@ func (st *StoredTokens) IsExpired() bool {
 	return time.Now().Add(60 * time.Second).After(st.ExpiresAt)
 }
 
+// SessionState classifies the credentials stored on this machine. It is
+// computed from local state alone: no network call and no refresh.
+type SessionState string
+
+const (
+	// SessionNone: nothing is stored.
+	SessionNone SessionState = "none"
+	// SessionValid: the access token is usable now.
+	SessionValid SessionState = "valid"
+	// SessionRefreshable: the access token has expired but a refresh token is
+	// stored, so the next authenticated call renews it silently. A working
+	// session, and the normal state after a day away.
+	SessionRefreshable SessionState = "refreshable"
+	// SessionExpired: the access token has expired and there is no refresh
+	// token, so only a new login recovers the session.
+	SessionExpired SessionState = "expired"
+	// SessionStatic: NDCLI_TOKEN supplies a personal access token and no
+	// session is stored.
+	SessionStatic SessionState = "static_token"
+)
+
+// SessionStatus is the typed local view of the stored credentials, and the
+// single source for `auth show`, ndcli.auth.status and ndcli://auth/status.
+type SessionStatus struct {
+	State      SessionState
+	Email      string
+	Name       string
+	Subject    string
+	ExpiresAt  time.Time
+	HasRefresh bool
+}
+
+// Usable reports whether the next authenticated call can succeed without a new
+// login: a valid access token, a refresh token that can mint one, or a static
+// token. It is a claim about stored credentials, not proof the server accepts them.
+func (s *SessionStatus) Usable() bool {
+	if s == nil {
+		return false
+	}
+	switch s.State {
+	case SessionValid, SessionRefreshable, SessionStatic:
+		return true
+	}
+	return false
+}
+
 // AuthMe represents the authenticated user's profile from /api/v1/auth/me
 type AuthMe struct {
 	Email         string               `json:"email"`

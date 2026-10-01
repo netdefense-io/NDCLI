@@ -12,16 +12,16 @@ import (
 )
 
 type taskListInput struct {
-	Organization  string `json:"organization,omitempty"`
-	Status        string `json:"status,omitempty"`
-	Type          string `json:"type,omitempty"`
-	Device        string `json:"device,omitempty"`
-	Expired       *bool  `json:"expired,omitempty"`
-	CreatedAfter  string `json:"created_after,omitempty"`
-	CreatedBefore string `json:"created_before,omitempty"`
-	SortBy        string `json:"sort_by,omitempty"`
-	Page          int    `json:"page,omitempty"`
-	PerPage       int    `json:"per_page,omitempty"`
+	Organization  string     `json:"organization,omitempty"`
+	Status        stringList `json:"status,omitempty"`
+	Type          stringList `json:"type,omitempty"`
+	Device        string     `json:"device,omitempty"`
+	Expired       *bool      `json:"expired,omitempty"`
+	CreatedAfter  string     `json:"created_after,omitempty"`
+	CreatedBefore string     `json:"created_before,omitempty"`
+	SortBy        string     `json:"sort_by,omitempty"`
+	Page          int        `json:"page,omitempty"`
+	PerPage       int        `json:"per_page,omitempty"`
 }
 
 type taskIDInput struct {
@@ -39,8 +39,8 @@ func (s *Server) registerTaskTools() {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization":   organizationProperty(),
-				"status":         stringEnumProperty("Filter by status", []string{"PENDING", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"}),
-				"type":           stringEnumProperty("Filter by task type", []string{"BACKUP", "PING", "PLUGIN_INSTALL", "PULL", "REBOOT", "RESTART", "SHUTDOWN", "SYNC"}),
+				"status":         stringEnumArrayProperty("Only tasks with any of these statuses (omit for all)", models.TaskStatuses),
+				"type":           stringEnumArrayProperty("Only tasks of any of these types (omit for all)", models.TaskTypes),
 				"device":         stringProperty("Filter by device name (regex)"),
 				"expired":        boolProperty("true = only expired, false = only non-expired (omit for both)"),
 				"created_after":  stringProperty("Filter tasks created after (e.g., 30m, 2h, 7d, 2w or ISO 8601)"),
@@ -96,8 +96,8 @@ func (s *Server) handleTaskList(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 
 	opts := service.TaskListOpts{
-		Status:        input.Status,
-		Type:          input.Type,
+		Statuses:      input.Status,
+		Types:         input.Type,
 		Device:        input.Device,
 		CreatedAfter:  input.CreatedAfter,
 		CreatedBefore: input.CreatedBefore,

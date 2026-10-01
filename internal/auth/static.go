@@ -56,8 +56,8 @@ func StaticProviderFromEnv() (*StaticTokenProvider, error) {
 // device flow is bypassed entirely.
 //
 // It also implements the richer method set internal/service.Service expects
-// from an auth manager (IsAuthenticated / GetUserInfo / GetTokenSummary /
-// GetStorageName / Logout), so a *Service constructed over a
+// from an auth manager (IsAuthenticated / SessionStatus / GetUserInfo /
+// GetTokenSummary / GetStorageName / Logout), so a *Service constructed over a
 // StaticTokenProvider behaves correctly under RequireAuth() and friends
 // instead of silently acting "not authenticated" — see
 // internal/service.NewFromProvider.
@@ -85,6 +85,11 @@ func (s *StaticTokenProvider) ForceRefresh() error {
 // exists after NDCLI_TOKEN has passed format validation.
 func (s *StaticTokenProvider) IsAuthenticated() bool {
 	return true
+}
+
+// SessionStatus reports the static-token pseudo session.
+func (s *StaticTokenProvider) SessionStatus() *models.SessionStatus {
+	return &models.SessionStatus{State: models.SessionStatic}
 }
 
 // GetUserInfo has no locally cached identity to report for a static PAT

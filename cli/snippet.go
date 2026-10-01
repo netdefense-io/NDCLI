@@ -491,7 +491,7 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 				errMsg = task.ErrorMessage
 			}
 			return fmt.Errorf("pull task failed: %s", errMsg)
-		case models.TaskStatusCancelled:
+		case models.TaskStatusCanceled:
 			return fmt.Errorf("pull task was cancelled")
 		}
 	}

@@ -109,16 +109,31 @@ func buildService() (*service.Service, func(), error) {
 	}
 	if provider != nil {
 		client := api.NewClientFromConfig(provider)
-		return service.New(client, nil, config.Get()), nil, nil
+		return service.NewFromProvider(client, provider, config.Get()), nil, nil
 	}
 
 	mgr := auth.GetManager()
-	if !mgr.IsAuthenticated() {
+	if err := requireSession(mgr); err != nil {
 		mgr.Close()
-		return nil, nil, fmt.Errorf("not authenticated — run 'ndcli auth login' first")
+		return nil, nil, err
 	}
 	client := api.NewClientFromConfig(mgr)
 	return service.New(client, mgr, config.Get()), mgr.Close, nil
+}
+
+// accessTokenSource is the part of the auth manager requireSession needs.
+type accessTokenSource interface {
+	GetAccessToken() (string, error)
+}
+
+// requireSession fails unless the first request can authenticate. It asks for
+// an access token, which refreshes an expired one, instead of checking for an
+// unexpired one: a session whose access token lapsed overnight still starts.
+func requireSession(tokens accessTokenSource) error {
+	if _, err := tokens.GetAccessToken(); err != nil {
+		return fmt.Errorf("not authenticated — run 'ndcli auth login' first")
+	}
+	return nil
 }
 
 func firstNonEmpty(vals ...string) string {

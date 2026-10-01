@@ -80,9 +80,7 @@ It provides commands for managing devices, organizations, templates, and more.`,
 			if isTokenMutationCommand(cmd) {
 				return fmt.Errorf("token create/revoke requires interactive authentication — unset NDCLI_TOKEN and log in with 'ndcli auth login'")
 			}
-			apiClient = api.NewClientFromConfig(staticProvider)
-			// No auth manager needed for static auth; leave authManager nil.
-			svc = service.New(apiClient, nil, config.Get())
+			initStaticAuth(staticProvider)
 			return setupOutputAndFormatter(cmd)
 		}
 
@@ -230,6 +228,15 @@ func requireOrganization() string {
 		os.Exit(1)
 	}
 	return org
+}
+
+// initStaticAuth wires the API client and service for NDCLI_TOKEN mode.
+// authManager stays nil — there is no OAuth2 session — but the service is built
+// over the provider, as netdefense-mcp does, so auth state read through svc is
+// never a nil manager. cli/ code must go through svc, not authManager.
+func initStaticAuth(provider *auth.StaticTokenProvider) {
+	apiClient = api.NewClientFromConfig(provider)
+	svc = service.NewFromProvider(apiClient, provider, config.Get())
 }
 
 // requireAuth checks if the user is authenticated, attempting token refresh if needed.

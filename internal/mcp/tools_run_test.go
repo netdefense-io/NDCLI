@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -613,5 +614,27 @@ func TestRunCommand_PreviewInstantSurvivesTheConfirmingCall(t *testing.T) {
 	}
 	if sent != previewed {
 		t.Fatalf("confirmed instant = %q, want the previewed %q", sent, previewed)
+	}
+}
+
+// TestFirmwareUpgradeRebootParameter: reboot stays an optional boolean with no
+// schema default, and its description says what completes a reboot=false run.
+// A plain reboot does not install the deferred base and kernel, so an agent
+// must not be led to suggest one.
+func TestFirmwareUpgradeRebootParameter(t *testing.T) {
+	schema := registeredToolSchema(t, "ndcli.run.firmware_upgrade")
+
+	props, _ := schema["properties"].(map[string]any)
+	want := map[string]any{
+		"type": "boolean",
+		"description": "Reboot after applying the upgrade (default true). Set to false to apply packages only " +
+			"and leave base and kernel for a later run; the device stays in a mixed state until a firmware " +
+			"upgrade with reboot=true installs them. Not allowed when mode=major.",
+	}
+	if !reflect.DeepEqual(props["reboot"], want) {
+		t.Errorf("reboot = %#v, want %#v", props["reboot"], want)
+	}
+	if !reflect.DeepEqual(schema["required"], []any{"mode"}) {
+		t.Errorf("required = %#v, want [mode]", schema["required"])
 	}
 }

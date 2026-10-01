@@ -244,7 +244,9 @@ func (c *Client) Logout() error {
 		return err
 	}
 
-	if tokens != nil {
+	// A stored document without oauth2_config leaves no provider to revoke
+	// with; the local session is still cleared below.
+	if tokens != nil && c.provider != nil {
 		// Try to revoke the refresh token first (more important)
 		if tokens.RefreshToken != "" {
 			_ = c.provider.RevokeToken(tokens.RefreshToken, "refresh_token")
@@ -303,6 +305,9 @@ func (c *Client) refresh() error {
 	if refreshToken == "" {
 		return fmt.Errorf("no refresh token available, please login again")
 	}
+	if c.provider == nil {
+		return fmt.Errorf("no OAuth2 configuration stored with the session, please login again")
+	}
 
 	newTokens, err := c.provider.RefreshToken(refreshToken)
 	if err != nil {
@@ -317,10 +322,18 @@ func (c *Client) ForceRefresh() error {
 	return c.refresh()
 }
 
-// IsAuthenticated checks if there are valid tokens stored
+// IsAuthenticated reports whether an UNEXPIRED access token is stored. It is
+// false for an expired access token even when a refresh token would renew it,
+// so it must never gate a command: use SessionStatus to classify the session,
+// or GetAccessToken, which refreshes.
 func (c *Client) IsAuthenticated() bool {
 	token, err := c.tokenManager.GetValidAccessToken()
 	return err == nil && token != ""
+}
+
+// SessionStatus classifies the stored credentials without any network call.
+func (c *Client) SessionStatus() *models.SessionStatus {
+	return c.tokenManager.SessionStatus()
 }
 
 // GetUserInfo returns the stored user information

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,9 +17,13 @@ import (
 // TaskListOpts collects every filter NDManager's /api/v1/tasks endpoint
 // accepts. Empty fields are omitted; ExpiredSet must be true for Expired to
 // be sent (so callers can distinguish "no filter" from "explicitly false").
+//
+// Statuses and Types take the caller's raw input: TaskList validates and
+// normalizes them (see normalizeTaskFilter), so a front-end does no parsing of
+// its own. A task matches when it has any listed status and any listed type.
 type TaskListOpts struct {
-	Status        string
-	Type          string
+	Statuses      []string
+	Types         []string
 	Device        string
 	Expired       bool
 	ExpiredSet    bool
@@ -38,6 +43,49 @@ type TaskListResult struct {
 	PerPage int
 }
 
+// normalizeTaskFilter turns raw type/status filter input into the values to
+// send: each element may itself be comma-separated, is trimmed and upper-cased,
+// resolved through aliases and checked against valid; duplicates collapse.
+// Empty elements are skipped, and "all" — or nothing left — means no filter
+// (nil).
+//
+// NDManager silently drops a value it does not recognise and, when none is
+// left, applies no filter, so a typo would come back as the full list with
+// exit 0. Refuse it here instead, for every front-end.
+func normalizeTaskFilter(kind string, raw, valid []string, aliases map[string]string) ([]string, error) {
+	var out []string
+	all := false
+	for _, item := range raw {
+		for _, v := range strings.Split(item, ",") {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			canon := strings.ToUpper(v)
+			if canon == "ALL" {
+				all = true
+				continue
+			}
+			if alias, ok := aliases[canon]; ok {
+				canon = alias
+			}
+			if !slices.Contains(valid, canon) {
+				return nil, &Error{
+					Code:    CodeInvalidInput,
+					Message: fmt.Sprintf("unknown task %s %q — valid values: %s", kind, v, models.TaskValuesHelp(valid)),
+				}
+			}
+			if !slices.Contains(out, canon) {
+				out = append(out, canon)
+			}
+		}
+	}
+	if all {
+		return nil, nil
+	}
+	return out, nil
+}
+
 // TaskList returns a paginated, filtered list of tasks for the organization.
 func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (*TaskListResult, error) {
 	page := opts.Page
@@ -49,25 +97,35 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 		perPage = 30
 	}
 
-	params := map[string]string{
-		"organization": org,
-		"page":         strconv.Itoa(page),
-		"per_page":     strconv.Itoa(perPage),
+	types, err := normalizeTaskFilter("type", opts.Types, models.TaskTypes, nil)
+	if err != nil {
+		return nil, err
 	}
-	if opts.Status != "" {
-		params["status"] = opts.Status
+	statuses, err := normalizeTaskFilter("status", opts.Statuses, models.TaskStatuses, models.TaskStatusAliases)
+	if err != nil {
+		return nil, err
 	}
-	if opts.Type != "" {
-		params["type"] = opts.Type
+
+	query := url.Values{}
+	if org != "" {
+		query.Set("organization", org)
+	}
+	query.Set("page", strconv.Itoa(page))
+	query.Set("per_page", strconv.Itoa(perPage))
+	for _, v := range statuses {
+		query.Add("status", v)
+	}
+	for _, v := range types {
+		query.Add("type", v)
 	}
 	if opts.Device != "" {
-		params["device_name"] = opts.Device
+		query.Set("device_name", opts.Device)
 	}
 	if opts.ExpiredSet {
-		params["expired"] = strconv.FormatBool(opts.Expired)
+		query.Set("expired", strconv.FormatBool(opts.Expired))
 	}
 	if opts.SortBy != "" {
-		params["sort_by"] = opts.SortBy
+		query.Set("sort_by", opts.SortBy)
 	}
 
 	for _, f := range [][2]string{
@@ -85,10 +143,10 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 				Err:     err,
 			}
 		}
-		params[f[1]] = parsed
+		query.Set(f[1], parsed)
 	}
 
-	resp, err := s.api.Get(ctx, "/api/v1/tasks", params)
+	resp, err := s.api.GetValues(ctx, "/api/v1/tasks", query)
 	if err != nil {
 		return nil, wrapAPI("%v", err)
 	}

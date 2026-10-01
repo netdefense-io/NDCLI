@@ -6,6 +6,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -24,7 +25,15 @@ command to one or more devices, use ` + "`ndcli run`" + `.`,
 var taskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks",
-	RunE:  runTaskList,
+	Long: `List tasks in the organization.
+
+--type and --status each take one value, several values (repeat the flag or
+separate them with commas) or "all" for no filter. A task is listed when it has
+any of the given types and any of the given statuses. Case is ignored; a value
+that is not a known type or status is refused before anything is sent.`,
+	Example: `  ndcli task list --status FAILED,EXPIRED
+  ndcli task list --type SYNC --type BACKUP --created-after 24h`,
+	RunE: runTaskList,
 }
 
 var taskDescribeCmd = &cobra.Command{
@@ -49,8 +58,10 @@ func init() {
 	taskCmd.AddCommand(taskCancelCmd)
 
 	// List flags
-	taskListCmd.Flags().String("status", "", "Filter by status: PENDING, SCHEDULED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED, EXPIRED")
-	taskListCmd.Flags().String("type", "", "Filter by task type: BACKUP, PING, PLUGIN_INSTALL, PULL, REBOOT, RESTART, SHUTDOWN, SYNC")
+	taskListCmd.Flags().StringSlice("status", nil, "Filter by status, repeatable or comma-separated: "+models.TaskValuesHelp(models.TaskStatuses))
+	taskListCmd.Flags().StringSlice("type", nil, "Filter by task type, repeatable or comma-separated: "+models.TaskValuesHelp(models.TaskTypes))
+	_ = taskListCmd.RegisterFlagCompletionFunc("status", completeTaskStatuses)
+	_ = taskListCmd.RegisterFlagCompletionFunc("type", completeTaskTypes)
 	taskListCmd.Flags().String("device", "", "Filter by device name (regex)")
 	taskListCmd.Flags().Bool("expired", false, "Filter by expired status (true=expired only, false=not expired)")
 	taskListCmd.Flags().String("created-after", "", "Filter tasks created after (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
@@ -65,8 +76,8 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	opts := service.TaskListOpts{}
-	opts.Status, _ = cmd.Flags().GetString("status")
-	opts.Type, _ = cmd.Flags().GetString("type")
+	opts.Statuses, _ = cmd.Flags().GetStringSlice("status")
+	opts.Types, _ = cmd.Flags().GetStringSlice("type")
 	opts.Device, _ = cmd.Flags().GetString("device")
 	if cmd.Flags().Changed("expired") {
 		opts.Expired, _ = cmd.Flags().GetBool("expired")

@@ -80,12 +80,29 @@ type SyncApplyInput struct {
 	Device       string `json:"device"`
 }
 
-// TaskListInput is the input for ndcli.task.list
-type TaskListInput struct {
-	Organization string `json:"organization,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Page         int    `json:"page,omitempty"`
-	PerPage      int    `json:"per_page,omitempty"`
+// stringList decodes an argument the schema declares as an array of strings
+// but that a client written against an earlier string-typed schema may still
+// send as one bare string. null decodes to nil.
+type stringList []string
+
+func (l *stringList) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	if len(data) > 0 && data[0] == '"' {
+		var one string
+		if err := json.Unmarshal(data, &one); err != nil {
+			return err
+		}
+		*l = stringList{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return err
+	}
+	*l = many
+	return nil
 }
 
 // parseInput parses the tool arguments into the given struct
@@ -127,6 +144,19 @@ func stringEnumProperty(description string, values []string) map[string]interfac
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+// stringEnumArrayProperty creates a `string[]` property whose items are
+// restricted to values.
+func stringEnumArrayProperty(description string, values []string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":        "array",
+		"description": description,
+		"items": map[string]interface{}{
+			"type": "string",
+			"enum": values,
+		},
 	}
 }
 

@@ -95,6 +95,35 @@ func (tm *TokenManager) GetValidAccessToken() (string, error) {
 	return tokens.AccessToken, nil
 }
 
+// SessionStatus classifies the stored tokens without contacting the provider.
+// GetValidAccessToken cannot answer this: it reports "nothing" for an expired
+// access token even when a refresh token would renew it.
+func (tm *TokenManager) SessionStatus() *models.SessionStatus {
+	tokens, err := tm.LoadTokens()
+	if err != nil || tokens == nil || (tokens.AccessToken == "" && tokens.RefreshToken == "") {
+		return &models.SessionStatus{State: models.SessionNone}
+	}
+
+	st := &models.SessionStatus{
+		ExpiresAt:  tokens.ExpiresAt,
+		HasRefresh: tokens.RefreshToken != "",
+	}
+	switch {
+	case tokens.AccessToken != "" && !tokens.IsExpired():
+		st.State = models.SessionValid
+	case st.HasRefresh:
+		st.State = models.SessionRefreshable
+	default:
+		st.State = models.SessionExpired
+	}
+	if tokens.UserInfo != nil {
+		st.Email = tokens.UserInfo.Email
+		st.Name = tokens.UserInfo.Name
+		st.Subject = tokens.UserInfo.Subject
+	}
+	return st
+}
+
 // GetRefreshToken returns the refresh token if available
 func (tm *TokenManager) GetRefreshToken() (string, error) {
 	tokens, err := tm.LoadTokens()

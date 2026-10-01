@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -35,13 +36,19 @@ var authLoginCmd = &cobra.Command{
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Log out and revoke tokens",
-	RunE:  runAuthLogout,
+	Long: `Log out: revoke the stored refresh token on the server (best effort) and remove the
+stored session. This works even when the access token has already expired.`,
+	RunE: runAuthLogout,
 }
 
 var authShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current authentication status",
-	RunE:  runAuthShow,
+	Long: `Show the stored session: who is signed in, when the access token expires and whether a
+refresh token is available. It reads local state only: it never contacts the server or
+refreshes the token. An expired access token with a refresh token is a working session
+that renews itself on the next command.`,
+	RunE: runAuthShow,
 }
 
 var authMeCmd = &cobra.Command{
@@ -53,6 +60,7 @@ var authMeCmd = &cobra.Command{
 var authRefreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Force refresh the access token",
+	Long:  "Refresh the access token with the stored refresh token. Works when the access token has already expired.",
 	RunE:  runAuthRefresh,
 }
 
@@ -87,9 +95,18 @@ func init() {
 	authDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 }
 
+// errLoginWithStaticToken is why `auth login` refuses to run under NDCLI_TOKEN:
+// the token wins over any stored session, so a login would change nothing.
+var errLoginWithStaticToken = errors.New("cannot log in while NDCLI_TOKEN is set: unset it to authenticate interactively")
+
 func runAuthLogin(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	scopes, _ := cmd.Flags().GetString("scopes")
+
+	// authManager is nil under NDCLI_TOKEN; refuse before anything touches it.
+	if svc.AuthStatus().State == models.SessionStatic {
+		return errLoginWithStaticToken
+	}
 
 	// Check if already authenticated
 	if !force && authManager.IsAuthenticated() {
@@ -190,74 +207,112 @@ func recordLoginAndShowInvites(ctx context.Context, userInfo *models.UserInfo) {
 }
 
 func runAuthLogout(cmd *cobra.Command, args []string) error {
-	if !authManager.IsAuthenticated() {
-		color.Red("✗ Not authenticated")
-		fmt.Println("Run 'ndcli auth login' to authenticate")
+	return logoutSession(color.Output, svc)
+}
+
+// logoutSession clears whatever session is stored. It keys off the stored
+// credentials, not the access token: an expired access token still leaves a
+// refresh token behind, and that is the one worth revoking.
+func logoutSession(w io.Writer, s *service.Service) error {
+	switch s.AuthStatus().State {
+	case models.SessionStatic:
+		fmt.Fprintln(w, "NDCLI_TOKEN is set: there is no stored session to log out of. Unset the variable to stop using it.")
+		return nil
+	case models.SessionNone:
+		color.New(color.FgRed).Fprintln(w, "✗ Not authenticated")
+		fmt.Fprintln(w, "Run 'ndcli auth login' to authenticate")
 		return nil
 	}
 
-	if err := authManager.Logout(); err != nil {
-		return fmt.Errorf("logout failed: %w", err)
+	if err := s.AuthLogout(); err != nil {
+		return err
 	}
 
-	color.Green("✓ Successfully logged out")
+	color.New(color.FgGreen).Fprintln(w, "✓ Successfully logged out")
 	return nil
 }
 
+// runAuthShow reports the stored session. It is deliberately passive: no
+// network call and no refresh, because the refresh token rotates and a status
+// command must not race a running TUI, MCP server or another ndcli for it.
 func runAuthShow(cmd *cobra.Command, args []string) error {
-	// Always show storage backend
-	storageName := authManager.GetStorageName()
-
-	currentHost := config.GetCurrentHost()
-
-	if !authManager.IsAuthenticated() {
-		color.Red("✗ Not authenticated")
-		fmt.Printf("  Host:      %s\n", currentHost)
-		fmt.Printf("  Storage:   %s\n", storageName)
-		fmt.Println("\nRun 'ndcli auth login' to authenticate")
-		return nil
-	}
-
-	summary := authManager.GetTokenSummary()
-	if summary == nil {
-		color.Red("✗ Not authenticated")
-		fmt.Printf("  Host:      %s\n", currentHost)
-		fmt.Printf("  Storage:   %s\n", storageName)
-		fmt.Println("\nRun 'ndcli auth login' to authenticate")
-		return nil
-	}
-
-	color.Cyan("Authentication Status:")
-	fmt.Println()
-
-	if email, ok := summary["email"].(string); ok {
-		fmt.Printf("  Email:     %s\n", email)
-	}
-	if name, ok := summary["name"].(string); ok {
-		fmt.Printf("  Name:      %s\n", name)
-	}
-	if subject, ok := summary["subject"].(string); ok {
-		fmt.Printf("  Subject:   %s\n", subject)
-	}
-	if expiresAt, ok := summary["expires_at"].(string); ok {
-		fmt.Printf("  Expires:   %s\n", expiresAt)
-	}
-	if isExpired, ok := summary["is_expired"].(bool); ok {
-		if isExpired {
-			color.Red("  Status:    Expired")
-		} else {
-			color.Green("  Status:    Valid")
-		}
-	}
-	if hasRefresh, ok := summary["has_refresh"].(bool); ok {
-		if hasRefresh {
-			fmt.Println("  Refresh:   Available")
-		}
-	}
-	fmt.Printf("  Host:      %s\n", currentHost)
-	fmt.Printf("  Storage:   %s\n", storageName)
-
+	renderAuthStatus(color.Output, svc.AuthStatus(), config.GetCurrentHost(), svc.AuthStorageName(), time.Now())
 	return nil
+}
+
+// renderAuthStatus prints one of the five session states. It is a pure function
+// of its inputs so every state can be tested without a keyring.
+func renderAuthStatus(w io.Writer, st *models.SessionStatus, host, storageName string, now time.Time) {
+	footer := func() {
+		fmt.Fprintf(w, "  Host:      %s\n", host)
+		fmt.Fprintf(w, "  Storage:   %s\n", storageName)
+	}
+	expired := func() {
+		fmt.Fprintf(w, "  Expired:   %s (%s)\n", st.ExpiresAt.Format(time.RFC3339), agoSince(now, st.ExpiresAt))
+	}
+
+	switch st.State {
+	case models.SessionStatic:
+		color.New(color.FgCyan).Fprintln(w, "Authentication Status:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  Method:    Personal access token (NDCLI_TOKEN)")
+		footer()
+
+	case models.SessionValid, models.SessionRefreshable:
+		color.New(color.FgCyan).Fprintln(w, "Authentication Status:")
+		fmt.Fprintln(w)
+		if st.Email != "" {
+			fmt.Fprintf(w, "  Email:     %s\n", st.Email)
+		}
+		if st.Name != "" {
+			fmt.Fprintf(w, "  Name:      %s\n", st.Name)
+		}
+		if st.Subject != "" {
+			fmt.Fprintf(w, "  Subject:   %s\n", st.Subject)
+		}
+		if st.State == models.SessionValid {
+			fmt.Fprintf(w, "  Expires:   %s\n", st.ExpiresAt.Format(time.RFC3339))
+			color.New(color.FgGreen).Fprintln(w, "  Status:    Valid")
+		} else {
+			// Yellow, not red: nothing is wrong, the next command renews it.
+			expired()
+			color.New(color.FgYellow).Fprintln(w, "  Status:    Access token expired; it refreshes automatically on the next command")
+		}
+		if st.HasRefresh {
+			fmt.Fprintln(w, "  Refresh:   Available")
+		}
+		footer()
+
+	case models.SessionExpired:
+		color.New(color.FgRed).Fprintln(w, "✗ Session expired")
+		if st.Email != "" {
+			fmt.Fprintf(w, "  Email:     %s\n", st.Email)
+		}
+		expired()
+		footer()
+		fmt.Fprintln(w, "\nRun 'ndcli auth login' to authenticate")
+
+	default:
+		color.New(color.FgRed).Fprintln(w, "✗ Not authenticated")
+		footer()
+		fmt.Fprintln(w, "\nRun 'ndcli auth login' to authenticate")
+	}
+}
+
+// agoSince renders how long before now t was. A token inside the 60 s refresh
+// buffer has not reached its expiry yet and reads as "just now".
+func agoSince(now, t time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 func runAuthMe(cmd *cobra.Command, args []string) error {
@@ -270,15 +325,26 @@ func runAuthMe(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthRefresh(cmd *cobra.Command, args []string) error {
-	if !svc.AuthIsAuthenticated() {
-		color.Red("✗ Not authenticated")
-		fmt.Println("Run 'ndcli auth login' to authenticate")
+	return refreshSession(color.Output, svc)
+}
+
+// refreshSession renews the access token. It must not require an unexpired one:
+// an expired access token is exactly when a refresh is needed.
+func refreshSession(w io.Writer, s *service.Service) error {
+	switch s.AuthStatus().State {
+	case models.SessionStatic:
+		fmt.Fprintln(w, "NDCLI_TOKEN is set: a personal access token has nothing to refresh.")
+		return nil
+	case models.SessionNone:
+		color.New(color.FgRed).Fprintln(w, "✗ Not authenticated")
+		fmt.Fprintln(w, "Run 'ndcli auth login' to authenticate")
 		return nil
 	}
-	if err := svc.AuthRefresh(); err != nil {
+
+	if err := s.AuthRefresh(); err != nil {
 		return err
 	}
-	color.Green("✓ Token refreshed successfully")
+	color.New(color.FgGreen).Fprintln(w, "✓ Token refreshed successfully")
 	return nil
 }
 

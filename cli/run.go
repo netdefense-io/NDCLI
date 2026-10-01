@@ -116,9 +116,10 @@ func init() {
 			if mode != "minor" && mode != "major" {
 				return &service.Error{Code: service.CodeInvalidInput, Message: `--mode must be "minor" or "major"`}
 			}
-			reboot, _ := cmd.Flags().GetBool("reboot")
+			noReboot, _ := cmd.Flags().GetBool("no-reboot")
 			noCheck, _ := cmd.Flags().GetBool("no-check")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			reboot := !noReboot
 
 			if mode == "major" && !reboot {
 				return &service.Error{Code: service.CodeInvalidInput, Message: "major firmware upgrades require a reboot (--no-reboot is not allowed with --mode major)"}
@@ -128,7 +129,7 @@ func init() {
 			if reboot && !dryRun {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will trigger a firmware upgrade and reboot the targeted device(s).\n")
 			} else if !reboot && !dryRun {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will upgrade firmware packages on the targeted device(s) without a reboot. The device(s) will enter a mixed state until a subsequent reboot is performed.\n")
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: this command will upgrade firmware packages on the targeted device(s) without a reboot and leave base and kernel for a later run. The device(s) stay in a mixed state until a firmware upgrade without --no-reboot installs them.\n")
 			}
 
 			opts.Payload = map[string]interface{}{
@@ -140,8 +141,23 @@ func init() {
 			return nil
 		},
 	)
+	firmwareUpgradeCmd.Long = `Upgrade OPNsense firmware on the targeted device(s).
+
+--mode minor applies the pending point release and reboots the device. With
+--no-reboot it applies the package updates only and does not reboot: base and
+kernel updates stay deferred, and the device runs the new packages on the old
+base and kernel until a later upgrade without --no-reboot completes them.
+
+--mode major upgrades to the next series and always reboots, up to twice;
+--no-reboot is refused with --mode major.
+
+--dry-run still creates a task: the device works out what would be applied
+and installs nothing. Read the result with "ndcli task describe <task-id>".`
+	firmwareUpgradeCmd.Example = `  ndcli run firmware-upgrade --device fw-prod-01 --mode minor
+  ndcli run firmware-upgrade --ou edge-routers --mode minor --no-reboot
+  ndcli run firmware-upgrade --device fw-prod-01 --mode minor --dry-run`
 	firmwareUpgradeCmd.Flags().String("mode", "", `Upgrade mode: "minor" (point release) or "major" (series upgrade) (required)`)
-	firmwareUpgradeCmd.Flags().Bool("reboot", true, "Reboot after applying the upgrade (default true; --no-reboot applies packages only, leaving base/kernel deferred)")
+	firmwareUpgradeCmd.Flags().Bool("no-reboot", false, "Apply packages only and skip the reboot; base/kernel updates stay deferred (refused with --mode major)")
 	firmwareUpgradeCmd.Flags().Bool("no-check", false, "Skip the pre-upgrade firmware availability check (check_first=false)")
 	firmwareUpgradeCmd.Flags().Bool("dry-run", false, "Report what would be applied without making any changes")
 	_ = firmwareUpgradeCmd.MarkFlagRequired("mode")

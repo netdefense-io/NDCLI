@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -688,6 +689,35 @@ func fetchTaskCodes(cmd *cobra.Command) ([]string, cobra.ShellCompDirective) {
 		codes = append(codes, t.ID)
 	}
 	return codes, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeValueList completes one element of a repeatable, comma-separated
+// flag value from a fixed list: what precedes the last comma is kept, and
+// values already in it are not offered again.
+func completeValueList(values []string, toComplete string) []string {
+	head, current := "", strings.ToUpper(toComplete)
+	if i := strings.LastIndex(toComplete, ","); i >= 0 {
+		head, current = toComplete[:i+1], strings.ToUpper(toComplete[i+1:])
+	}
+	chosen := make(map[string]bool)
+	for _, v := range strings.Split(head, ",") {
+		chosen[strings.ToUpper(strings.TrimSpace(v))] = true
+	}
+	var out []string
+	for _, v := range values {
+		if !chosen[v] && strings.HasPrefix(v, current) {
+			out = append(out, head+v)
+		}
+	}
+	return out
+}
+
+func completeTaskTypes(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeValueList(models.TaskTypes, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTaskStatuses(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeValueList(models.TaskStatuses, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeTasks completes a task code as the first (and only) arg.

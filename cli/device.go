@@ -424,7 +424,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 			}
 			return fmt.Errorf("connection failed: %s", msg)
 
-		case models.TaskStatusCancelled:
+		case models.TaskStatusCanceled:
 			spinner.Stop()
 			return fmt.Errorf("connection was cancelled")
 

@@ -99,3 +99,24 @@ func TestConsoleConnect_ReadOnlyAbsent(t *testing.T) {
 		t.Fatalf("expected ReadOnly nil when the field is absent, got %v", *res.ReadOnly)
 	}
 }
+
+// TestConsoleConnect_CanceledTaskEndsThePoll: NDManager reports a cancelled
+// connect task as CANCELED (one L). The loop compared against CANCELLED, so it
+// kept polling until the timeout and console_open reported "connect timeout"
+// instead of the cancellation.
+func TestConsoleConnect_CanceledTaskEndsThePoll(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := "PENDING"
+		if r.Method == http.MethodGet {
+			status = "CANCELED"
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"task": "task-123", "status": status})
+	}))
+	defer srv.Close()
+
+	_, err := newTestService(t, srv).ConsoleConnect(context.Background(), "org", "dev", 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "connect task was cancelled") {
+		t.Fatalf("err = %v, want the cancellation, not a timeout", err)
+	}
+}

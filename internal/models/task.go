@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 // Task represents a device task
 type Task struct {
 	ID           string       `json:"task"`
@@ -28,14 +30,15 @@ type TaskListResponse struct {
 	TotalPages int    `json:"pages"`
 }
 
-// TaskStatus constants
+// TaskStatus constants. NDManager writes CANCELED (one L); CANCELLED is only
+// accepted as an input filter.
 const (
 	TaskStatusPending    = "PENDING"
 	TaskStatusScheduled  = "SCHEDULED"
 	TaskStatusInProgress = "IN_PROGRESS"
 	TaskStatusCompleted  = "COMPLETED"
 	TaskStatusFailed     = "FAILED"
-	TaskStatusCancelled  = "CANCELLED"
+	TaskStatusCanceled   = "CANCELED"
 	TaskStatusExpired    = "EXPIRED"
 )
 
@@ -52,6 +55,33 @@ const (
 	TaskTypeSync            = "SYNC"
 	TaskTypePluginInstall   = "PLUGIN_INSTALL"
 )
+
+// TaskTypes is every task type NDManager can return and accept as a list
+// filter (NDDataModels' TaskType enum). It is the single source for `task list
+// --type` help, completion and validation and for the ndcli.task.list enum.
+// Treat it as read-only: it is shared by reference with all of them. It is the
+// listable set, not the creatable one (see service.validRunTypes).
+var TaskTypes = []string{
+	TaskTypeBackup, TaskTypeConnect, TaskTypeFirmwareUpgrade, TaskTypePing, TaskTypePluginInstall,
+	TaskTypePull, TaskTypeReboot, TaskTypeRestart, TaskTypeShutdown, TaskTypeSync,
+}
+
+// TaskStatuses is NDDataModels' TaskStatus enum in lifecycle order, the single
+// source for `task list --status` the way TaskTypes is for --type. Read-only.
+var TaskStatuses = []string{
+	TaskStatusPending, TaskStatusScheduled, TaskStatusInProgress, TaskStatusCompleted,
+	TaskStatusFailed, TaskStatusCanceled, TaskStatusExpired,
+}
+
+// TaskStatusAliases maps a spelling NDManager accepts as a status filter onto
+// the value it writes. Read-only, like TaskTypes.
+var TaskStatusAliases = map[string]string{"CANCELLED": TaskStatusCanceled}
+
+// TaskValuesHelp renders a value list for flag help and error text: a
+// comma-separated list in declaration order.
+func TaskValuesHelp(values []string) string {
+	return strings.Join(values, ", ")
+}
 
 // FirmwareUpgradeData is the result data block reported by NDAgent for
 // FIRMWARE_UPGRADE tasks. The agent stores it serialised as JSON inside

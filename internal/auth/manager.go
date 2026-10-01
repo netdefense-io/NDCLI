@@ -70,9 +70,16 @@ func (m *Manager) Logout() error {
 	return m.client.Logout()
 }
 
-// IsAuthenticated checks if the user is authenticated
+// IsAuthenticated reports whether an unexpired access token is stored. False
+// does not mean the session is unusable (see Client.IsAuthenticated); use
+// SessionStatus to classify it.
 func (m *Manager) IsAuthenticated() bool {
 	return m.client.IsAuthenticated()
+}
+
+// SessionStatus classifies the stored credentials without any network call.
+func (m *Manager) SessionStatus() *models.SessionStatus {
+	return m.client.SessionStatus()
 }
 
 // GetAccessToken returns a valid access token

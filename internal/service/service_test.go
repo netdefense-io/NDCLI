@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
@@ -12,15 +13,22 @@ type stubAuthManager struct {
 	token      string
 	accessErr  error
 	refreshErr error
+	status     *models.SessionStatus
+	logoutErr  error
+	logouts    int
 }
 
 func (s *stubAuthManager) IsAuthenticated() bool                   { return s.token != "" }
+func (s *stubAuthManager) SessionStatus() *models.SessionStatus    { return s.status }
 func (s *stubAuthManager) GetAccessToken() (string, error)         { return s.token, s.accessErr }
 func (s *stubAuthManager) ForceRefresh() error                     { return s.refreshErr }
 func (s *stubAuthManager) GetUserInfo() (*models.UserInfo, error)  { return nil, nil }
 func (s *stubAuthManager) GetTokenSummary() map[string]interface{} { return nil }
 func (s *stubAuthManager) GetStorageName() string                  { return "stub" }
-func (s *stubAuthManager) Logout() error                           { return nil }
+func (s *stubAuthManager) Logout() error {
+	s.logouts++
+	return s.logoutErr
+}
 
 // newServiceWithStubAuth builds a bare *Service wired to the given stub.
 func newServiceWithStubAuth(am authManager) *Service {
@@ -187,5 +195,67 @@ func TestAuthRefresh_ForceRefreshFails(t *testing.T) {
 	}
 	if !errors.Is(err, refreshErr) {
 		t.Errorf("expected wrapped refreshErr, got %v", err)
+	}
+}
+
+// --- AuthStatus / AuthLogout tests ---
+
+func TestAuthStatus_NilManagerIsNone(t *testing.T) {
+	svc := &Service{} // auth is nil
+	st := svc.AuthStatus()
+	if st == nil || st.State != models.SessionNone {
+		t.Fatalf("expected a non-nil SessionNone status, got %+v", st)
+	}
+}
+
+// A manager that has nothing to say must not hand callers a nil to dereference.
+func TestAuthStatus_ManagerReturningNilIsNone(t *testing.T) {
+	svc := newServiceWithStubAuth(&stubAuthManager{})
+	if st := svc.AuthStatus(); st == nil || st.State != models.SessionNone {
+		t.Fatalf("expected a non-nil SessionNone status, got %+v", st)
+	}
+}
+
+func TestAuthStatus_ReturnsTheManagersClassification(t *testing.T) {
+	want := &models.SessionStatus{State: models.SessionRefreshable, Email: "a@example.com", HasRefresh: true}
+	svc := newServiceWithStubAuth(&stubAuthManager{status: want})
+	if got := svc.AuthStatus(); got != want {
+		t.Fatalf("expected the manager's status to pass through, got %+v", got)
+	}
+}
+
+func TestAuthLogout_NilManager(t *testing.T) {
+	svc := &Service{}
+	err := svc.AuthLogout()
+	svcErr, ok := err.(*Error)
+	if !ok || svcErr.Code != CodeNotAuthenticated {
+		t.Fatalf("expected *Error with CodeNotAuthenticated, got %#v", err)
+	}
+}
+
+func TestAuthLogout_ClearsTheSession(t *testing.T) {
+	am := &stubAuthManager{}
+	svc := newServiceWithStubAuth(am)
+	if err := svc.AuthLogout(); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if am.logouts != 1 {
+		t.Errorf("expected exactly one Logout call, got %d", am.logouts)
+	}
+}
+
+func TestAuthLogout_WrapsAFailure(t *testing.T) {
+	cause := errors.New("keyring locked")
+	svc := newServiceWithStubAuth(&stubAuthManager{logoutErr: cause})
+	err := svc.AuthLogout()
+	svcErr, ok := err.(*Error)
+	if !ok || svcErr.Code != CodeAuthFailed {
+		t.Fatalf("expected *Error with CodeAuthFailed, got %#v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("expected the cause to stay reachable through Unwrap, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "logout failed") {
+		t.Errorf("message should say what failed, got %q", err.Error())
 	}
 }

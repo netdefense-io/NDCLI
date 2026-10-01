@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 func TestStaticTokenProvider_GetAccessToken(t *testing.T) {
@@ -32,6 +34,19 @@ func TestStaticTokenProvider_IsAuthenticated(t *testing.T) {
 	p := NewStaticTokenProvider("ndpat_test123")
 	if !p.IsAuthenticated() {
 		t.Error("expected IsAuthenticated to always be true for a static provider")
+	}
+}
+
+func TestStaticTokenProvider_SessionStatus(t *testing.T) {
+	st := NewStaticTokenProvider("ndpat_test123").SessionStatus()
+	if st == nil || st.State != models.SessionStatic {
+		t.Fatalf("expected SessionStatic, got %+v", st)
+	}
+	if !st.Usable() {
+		t.Error("a static token is a usable session")
+	}
+	if st.Email != "" || st.Subject != "" || st.HasRefresh {
+		t.Errorf("a static token carries no identity and no refresh token, got %+v", st)
 	}
 }
 

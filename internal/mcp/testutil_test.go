@@ -32,7 +32,9 @@ func (f *fakeAuthProvider) ForceRefresh() error             { return nil }
 // and business logic beneath RequireAuth is tested via the internal "core"
 // methods the RequireAuth-gated handlers delegate to (createToken,
 // runCommand, firmwareUpgrade, syncApply, ...), which take an already-parsed
-// input and never call RequireAuth themselves.
+// input and never call RequireAuth themselves. A test that needs to control the
+// auth state goes through service.NewFromProvider instead, which takes any auth
+// implementation (see newSessionServer).
 func newTestServer(t *testing.T, srv *httptest.Server, org string) *Server {
 	t.Helper()
 	client := api.NewClient(srv.URL, false, &fakeAuthProvider{})

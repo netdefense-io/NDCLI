@@ -306,7 +306,7 @@ func (s *Server) registerRunTools() {
 	// ndcli.run.firmware_upgrade
 	firmwareUpgradeProps := mergeProps(targetingProps, map[string]interface{}{
 		"mode":        map[string]interface{}{"type": "string", "description": `Upgrade mode: "minor" (point release within current series) or "major" (series upgrade). Required.`, "enum": []string{"minor", "major"}},
-		"reboot":      boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only, leaving base/kernel deferred — the device will enter a mixed state. Not allowed when mode=major."),
+		"reboot":      boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only and leave base and kernel for a later run; the device stays in a mixed state until a firmware upgrade with reboot=true installs them. Not allowed when mode=major."),
 		"check_first": boolProperty("Run a firmware availability check before applying (default true). Set to false to skip the pre-upgrade check."),
 		"dry_run":     boolProperty("Report what would be applied without making any changes (default false)."),
 	})

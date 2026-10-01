@@ -9,9 +9,35 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
-// AuthIsAuthenticated reports whether a token is currently stored.
+// AuthIsAuthenticated reports whether an UNEXPIRED access token is stored. It is
+// false for an expired access token that a refresh token would renew, so it must
+// not gate a command: use AuthStatus to classify the session or RequireAuth to
+// gate one.
 func (s *Service) AuthIsAuthenticated() bool {
 	return s.auth != nil && s.auth.IsAuthenticated()
+}
+
+// AuthStatus classifies the locally stored session with no network call and no
+// refresh. Never nil: no auth manager, or nothing stored, is SessionNone.
+func (s *Service) AuthStatus() *models.SessionStatus {
+	if s.auth != nil {
+		if st := s.auth.SessionStatus(); st != nil {
+			return st
+		}
+	}
+	return &models.SessionStatus{State: models.SessionNone}
+}
+
+// AuthLogout revokes the stored refresh token (best effort: a failed revoke never
+// blocks it) and clears the local session, whatever state the session is in.
+func (s *Service) AuthLogout() error {
+	if s.auth == nil {
+		return &Error{Code: CodeNotAuthenticated, Message: "no auth manager available"}
+	}
+	if err := s.auth.Logout(); err != nil {
+		return &Error{Code: CodeAuthFailed, Message: fmt.Sprintf("logout failed: %v", err), Err: err}
+	}
+	return nil
 }
 
 // AuthStorageName returns the human-readable name of the storage backend

@@ -6,6 +6,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 // NOTE: ndcli auth login / logout / migrate stay CLI-only (interactive
@@ -18,7 +19,7 @@ import (
 func (s *Server) registerAuthTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.auth.status",
-		Description: "Check the current authentication status (storage backend, token info — value never returned).",
+		Description: "Check the current authentication status (storage backend, token info — value never returned). authenticated=true means the next tool call will work; an access token that has expired is renewed automatically when a refresh token is stored. status is one of: authenticated; not_authenticated (nothing stored); session_expired (access token expired and no refresh token — the user must run 'ndcli auth login'); auth_failed (a refresh was attempted and failed).",
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -53,19 +54,27 @@ func (s *Server) registerAuthTools() {
 	}, s.handleConfigShow)
 }
 
-func (s *Server) handleAuthStatus(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	authenticated := s.svc.AuthIsAuthenticated()
-	status := "not_authenticated"
-	if authenticated {
-		// RequireAuth calls GetAccessToken, which attempts a transparent refresh
-		// when the stored access token is expired. A nil return means a valid
-		// token is now available; an error means the refresh also failed.
+// authState is the one place ndcli.auth.status and ndcli://auth/status decide
+// what to report. "authenticated" means the next tool call will work, so a
+// session that can authenticate is proven with RequireAuth, the gate every tool
+// passes through, which renews an expired access token from the refresh token.
+func (s *Server) authState() (authenticated bool, status string) {
+	st := s.svc.AuthStatus()
+	switch {
+	case st.Usable():
 		if err := s.svc.RequireAuth(); err != nil {
-			status = "auth_failed"
-		} else {
-			status = "authenticated"
+			return false, "auth_failed"
 		}
+		return true, "authenticated"
+	case st.State == models.SessionExpired:
+		return false, "session_expired"
+	default:
+		return false, "not_authenticated"
 	}
+}
+
+func (s *Server) handleAuthStatus(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	authenticated, status := s.authState()
 	return s.successResult(map[string]interface{}{
 		"authenticated": authenticated,
 		"status":        status,

@@ -65,7 +65,7 @@ func statusStyle(s string) lipgloss.Style {
 		return okStyle
 	case "stale", "drift", "DRIFT", "PENDING", "SCHEDULED", "IN_PROGRESS", "unknown":
 		return warnStyle
-	case "offline", "error", "ERROR", "FAILED", "EXPIRED", "CANCELLED", "DISABLED":
+	case "offline", "error", "ERROR", "FAILED", "EXPIRED", "CANCELED", "DISABLED":
 		return errStyle
 	default:
 		return lipgloss.NewStyle()

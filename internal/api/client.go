@@ -197,16 +197,21 @@ func (c *Client) handleNetworkError(err error) error {
 
 // Get performs a GET request
 func (c *Client) Get(ctx context.Context, path string, params map[string]string) (*http.Response, error) {
-	if len(params) > 0 {
-		query := url.Values{}
-		for k, v := range params {
-			if v != "" {
-				query.Set(k, v)
-			}
+	query := url.Values{}
+	for k, v := range params {
+		if v != "" {
+			query.Set(k, v)
 		}
-		if encoded := query.Encode(); encoded != "" {
-			path = path + "?" + encoded
-		}
+	}
+	return c.GetValues(ctx, path, query)
+}
+
+// GetValues performs a GET request whose query may repeat a key
+// (?type=SYNC&type=BACKUP), which Get's one-value-per-key map cannot carry.
+// Unlike Get it sends empty values as given.
+func (c *Client) GetValues(ctx context.Context, path string, params url.Values) (*http.Response, error) {
+	if encoded := params.Encode(); encoded != "" {
+		path = path + "?" + encoded
 	}
 	return c.Request(ctx, http.MethodGet, path, nil)
 }

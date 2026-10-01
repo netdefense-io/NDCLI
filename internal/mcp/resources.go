@@ -84,22 +84,15 @@ func (s *Server) handleConfigResource(ctx context.Context, req *mcp.ReadResource
 // (see NewServer / service.NewFromProvider), so going through svc keeps this
 // resource nil-safe without special-casing static-PAT here.
 func (s *Server) handleAuthResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	isAuthenticated := s.svc.AuthIsAuthenticated()
+	authenticated, status := s.authState()
 
-	status := "not_authenticated"
 	var userInfo *models.UserInfo
-
-	if isAuthenticated {
-		if err := s.svc.RequireAuth(); err != nil {
-			status = "token_expired"
-		} else {
-			status = "authenticated"
-			userInfo, _ = s.svc.AuthLocalUser()
-		}
+	if authenticated {
+		userInfo, _ = s.svc.AuthLocalUser()
 	}
 
 	content := map[string]interface{}{
-		"authenticated": isAuthenticated,
+		"authenticated": authenticated,
 		"status":        status,
 		"storage":       s.svc.AuthStorageName(),
 	}
