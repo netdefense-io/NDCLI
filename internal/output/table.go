@@ -879,6 +879,10 @@ func (f *TableFormatter) FormatSyncApply(result *models.SyncApplyResponse) error
 			for _, ai := range e.AuthIssues {
 				fmt.Printf("      %s\n", formatAuthIssueLine(ai))
 			}
+			// TRUST_CA/TRUST_CERT build-time issues; may accompany auth_issues.
+			for _, ti := range e.TrustIssues {
+				fmt.Printf("      %s\n", formatTrustIssueLine(ti))
+			}
 		}
 	}
 

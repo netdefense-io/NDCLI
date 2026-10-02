@@ -192,6 +192,11 @@ func (s *Server) syncApply(ctx context.Context, input *syncApplyInput) (*mcp.Cal
 			// only identifiers (snippet/template/server/group/facility),
 			// never a value.
 			"auth_issues": e.AuthIssues,
+			// trust_issues is the TRUST_CA/TRUST_CERT equivalent (code
+			// TRUST_BUILD_INVALID when it is the only list), naming
+			// snippet/template/name only, never certificate or key
+			// material. A device can carry both lists at once.
+			"trust_issues": e.TrustIssues,
 		})
 	}
 	return s.successResult(map[string]interface{}{

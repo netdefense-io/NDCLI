@@ -29,8 +29,9 @@ type syncResultEntry struct {
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
 	// Code, Before, After, Available and Risks are additive fields NDAgent
-	// reports only for the AUTH_SERVER/AUTH_ORDER family (SyncAPIItemResult)
-	// — every other family's results carry none of them.
+	// reports only for the AUTH_SERVER/AUTH_ORDER family (SyncAPIItemResult),
+	// plus Code alone for the TRUST_CA/TRUST_CERT family — every other
+	// family's results carry none of them.
 	// Code is the structured outcome code a consumer keys on instead of
 	// parsing Error. Before/After are an auth_facility item's kept/written
 	// order (names only). Available is the resolution set an unresolved
@@ -152,10 +153,18 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 
 	for _, r := range rows {
 		pad := strings.Repeat(" ", typeWidth-len(r.Type))
+		name := r.Name
+		// A trust_reload row's name is only the consumer's description; its
+		// action is the reload that ran ("openvpn configure", "ipsec
+		// reload") or "scheduled", which is what says what kind of service
+		// it was. "none" (no known reload) is left to the warning text.
+		if r.Type == "trust_reload" && r.Action != "" && r.Action != "none" {
+			name += " (" + r.Action + ")"
+		}
 		if r.Err != "" {
-			fmt.Fprintf(b, "  %s %s%s  %s — %s\n", r.Symbol, r.Type, pad, r.Name, r.Err)
+			fmt.Fprintf(b, "  %s %s%s  %s — %s\n", r.Symbol, r.Type, pad, name, r.Err)
 		} else {
-			fmt.Fprintf(b, "  %s %s%s  %s\n", r.Symbol, r.Type, pad, r.Name)
+			fmt.Fprintf(b, "  %s %s%s  %s\n", r.Symbol, r.Type, pad, name)
 		}
 		for _, extra := range authResultDetailLines(r.Action, r.Code, r.Before, r.After, r.Available, r.Risks) {
 			fmt.Fprintf(b, "      %s\n", extra)
@@ -169,6 +178,8 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 // (the resolution set an unresolved order entry was checked against, on a
 // refusal only), Risks (an auth_local_server warning's structured risk
 // list) and Code (the structured outcome code). Names only, never values.
+// TRUST_CA/TRUST_CERT items carry only Code, so for them this is the
+// "code: TRUST_..." line alone.
 //
 // Two things are suppressed as noise rather than detail: the helper
 // reports code "OK" on every successful write/unchanged/delete (not only
@@ -208,22 +219,32 @@ func symbolForResult(r syncResultEntry) string {
 	// AUTH_SERVER/AUTH_ORDER warnings (ORDER_NAMES_LOCAL_SERVER,
 	// PRIVILEGED_LOCAL_USERS_SHADOWABLE, ...) are never failures —
 	// NetDefense makes no guardrail claim about a server or user
-	// it did not create. This has to be checked before the generic
-	// "any non-success/ok status is a failure" rule below, or a warning
-	// would render as ✗ and read as broken.
+	// it did not create. Neither are TRUST_CA/TRUST_CERT warnings
+	// (TRUST_RELOAD_FAILED, TRUST_CONSUMER_UNKNOWN): the certificate was
+	// written, and the warning names a service still to restart. This has
+	// to be checked before the generic "any non-success/ok status is a
+	// failure" rule below, or a warning would render as ✗ and read as
+	// broken.
 	//
-	// Scoped to the auth_* type family on purpose — every AUTH result
-	// Type carries that prefix (auth_server, auth_facility,
+	// Scoped to the auth_* and trust_* type families on purpose — every
+	// AUTH result Type carries that prefix (auth_server, auth_facility,
 	// auth_local_server, auth_warning, ...; see
-	// TestSymbolForResult_AuthActionsAndWarningStatus). Reading Status
-	// alone would let any future or untested non-AUTH family that ever
-	// reports "warning" fall through to the same ⚠, silently overriding
-	// this function's own fail-loud default for an unrecognised status.
-	if r.Status == "warning" && strings.HasPrefix(r.Type, "auth_") {
+	// TestSymbolForResult_AuthActionsAndWarningStatus), as does every
+	// TRUST one (trust_ca, trust_cert, trust_reload). Reading Status
+	// alone would let any future or untested family that ever reports
+	// "warning" fall through to the same ⚠, silently overriding this
+	// function's own fail-loud default for an unrecognised status.
+	if r.Status == "warning" && (strings.HasPrefix(r.Type, "auth_") || strings.HasPrefix(r.Type, "trust_")) {
 		return "⚠"
 	}
 	if r.Status != "" && r.Status != "success" && r.Status != "ok" {
 		return "✗"
+	}
+	// A trust_reload item reports a service restarted (or scheduled to
+	// restart) for a renewed CA or certificate; it says so by its type,
+	// whatever verb the action carries.
+	if r.Type == "trust_reload" {
+		return "↻"
 	}
 	switch strings.ToLower(r.Action) {
 	// Config sync

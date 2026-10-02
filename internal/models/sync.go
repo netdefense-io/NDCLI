@@ -70,6 +70,22 @@ type AuthIssue struct {
 	Facility string   `json:"facility,omitempty"`
 }
 
+// TrustIssue is one TRUST_CA/TRUST_CERT build-time failure reported by
+// NDManager for a device. Like AuthIssue, every field is an identifier —
+// snippet, template and object names — never certificate or key material.
+// Name is the CA or certificate's name on the device.
+//
+// Snippet and Template are always a list, never a bare string, the same
+// as AuthIssue's; the trust_issues envelope defines them as lists, and a
+// bare string would fail the decode of the whole sync response.
+type TrustIssue struct {
+	Code     string   `json:"code"`
+	Message  string   `json:"message"`
+	Snippet  []string `json:"snippet,omitempty"`
+	Template []string `json:"template,omitempty"`
+	Name     string   `json:"name,omitempty"`
+}
+
 // SyncError represents a detailed error for a device sync operation
 type SyncError struct {
 	DeviceName                  string              `json:"device_name"`
@@ -81,6 +97,11 @@ type SyncError struct {
 	// AuthIssues carries every AUTH_SERVER/AUTH_ORDER build-time issue for
 	// this device, present when Code is AUTH_BUILD_INVALID.
 	AuthIssues []AuthIssue `json:"auth_issues,omitempty"`
+	// TrustIssues carries every TRUST_CA/TRUST_CERT build-time issue for
+	// this device (Code TRUST_BUILD_INVALID when there are no AUTH issues).
+	// A device can carry both lists at once, so renderers show each one
+	// that is present rather than keying on Code.
+	TrustIssues []TrustIssue `json:"trust_issues,omitempty"`
 }
 
 // SyncApplyResponse represents the response from POST /api/v1/sync

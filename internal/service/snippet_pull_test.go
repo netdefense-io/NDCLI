@@ -114,31 +114,48 @@ func TestSnippetPullRejectsABadSnippetNameBeforeSending(t *testing.T) {
 func TestSnippetPullRejectsAUTHTypesBeforeSending(t *testing.T) {
 	for _, authType := range []string{"AUTH_SERVER", "AUTH_ORDER"} {
 		t.Run(authType, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				t.Errorf("a request was sent for a non-pullable type %s: %s %s", authType, r.Method, r.URL)
-			}))
-			defer srv.Close()
-
-			_, err := newTestService(t, srv).SnippetPull(context.Background(), "acme", "fw01", SnippetPullOpts{
-				Name:       "Corp-AD",
-				ConfigType: authType,
-			})
-			if err == nil {
-				t.Fatal("expected a refusal")
-			}
-			var svcErr *Error
-			if !errors.As(err, &svcErr) || svcErr.Code != CodeInvalidInput {
-				t.Fatalf("expected %s, got %#v", CodeInvalidInput, err)
-			}
-			if !strings.Contains(err.Error(), authType) {
-				t.Errorf("message should name the rejected type, got: %s", err.Error())
-			}
+			assertPullRefusedBeforeSending(t, authType, "Corp-AD")
 		})
 	}
 }
 
+// TestSnippetPullRejectsTRUSTTypesBeforeSending is the same fail-closed
+// for TRUST_CA/TRUST_CERT: there is no TRUST PULL for either type (for
+// TRUST_CERT, the device would read the private key straight out of
+// config.xml).
+func TestSnippetPullRejectsTRUSTTypesBeforeSending(t *testing.T) {
+	for _, trustType := range []string{"TRUST_CA", "TRUST_CERT"} {
+		t.Run(trustType, func(t *testing.T) {
+			assertPullRefusedBeforeSending(t, trustType, "fw-wildcard")
+		})
+	}
+}
+
+func assertPullRefusedBeforeSending(t *testing.T, configType, matchKey string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a request was sent for a non-pullable type %s: %s %s", configType, r.Method, r.URL)
+	}))
+	defer srv.Close()
+
+	_, err := newTestService(t, srv).SnippetPull(context.Background(), "acme", "fw01", SnippetPullOpts{
+		Name:       matchKey,
+		ConfigType: configType,
+	})
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	var svcErr *Error
+	if !errors.As(err, &svcErr) || svcErr.Code != CodeInvalidInput {
+		t.Fatalf("expected %s, got %#v", CodeInvalidInput, err)
+	}
+	if !strings.Contains(err.Error(), configType) {
+		t.Errorf("message should name the rejected type, got: %s", err.Error())
+	}
+}
+
 // TestSnippetPullAllowsEveryPullableTypeThrough is the negative-space check
-// for the AUTH_SERVER/AUTH_ORDER rejection above: every type on the real
+// for the AUTH and TRUST rejections above: every type on the real
 // pullable list must still reach the API unmodified.
 func TestSnippetPullAllowsEveryPullableTypeThrough(t *testing.T) {
 	for _, pullable := range models.SnippetPullableTypes {

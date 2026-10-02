@@ -72,13 +72,14 @@ type snippetPullInput struct {
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
-// authSuOrgNote is appended to every snippet tool description whose
-// operation can escalate to org:su for a stored AUTH_SERVER/AUTH_ORDER
-// snippet (create, update_content, rename, set_priority, delete): both
-// types are elevated by construction — NDManager requires org:su for
-// their content regardless of the caller's usual clearance for other
-// snippet types.
-const authSuOrgNote = " AUTH_SERVER and AUTH_ORDER content always requires org:su, regardless of the caller's usual clearance for other snippet types."
+// suOnlyTypesNote is appended to every snippet tool description whose
+// operation can escalate to org:su for a stored AUTH_SERVER, AUTH_ORDER,
+// TRUST_CA or TRUST_CERT snippet (create, update_content, rename,
+// set_priority, delete): these types are elevated by construction —
+// NDManager requires org:su for them regardless of the caller's usual
+// clearance for other snippet types. Personal access tokens are capped at
+// org:rw, so a server started with NDCLI_TOKEN can never make these calls.
+const suOnlyTypesNote = " AUTH_SERVER, AUTH_ORDER, TRUST_CA and TRUST_CERT snippets always require org:su from an interactive login, regardless of the caller's usual clearance for other snippet types; a personal access token is capped at org:rw and is refused."
 
 // registerSnippetTools registers every snippet tool.
 func (s *Server) registerSnippetTools() {
@@ -117,7 +118,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.create",
-		Description: "Create a new snippet. Content must be supplied inline." + authSuOrgNote,
+		Description: "Create a new snippet. Content must be supplied inline." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -133,7 +134,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.update_content",
-		Description: "Replace a snippet's content. Requires confirm=true." + authSuOrgNote,
+		Description: "Replace a snippet's content. Requires confirm=true." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -148,7 +149,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.rename",
-		Description: "Rename a snippet. Requires confirm=true." + authSuOrgNote,
+		Description: "Rename a snippet. Requires confirm=true." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -163,7 +164,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.set_priority",
-		Description: "Update a snippet's priority (1-60000). Requires confirm=true." + authSuOrgNote,
+		Description: "Update a snippet's priority (1-60000). Requires confirm=true." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -178,7 +179,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.delete",
-		Description: "Delete a snippet. Requires confirm=true." + authSuOrgNote,
+		Description: "Delete a snippet. Requires confirm=true." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

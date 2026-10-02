@@ -1,6 +1,7 @@
 package models
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,34 @@ func TestSnippetPullableTypesExcludesAUTHTypes(t *testing.T) {
 				t.Errorf("SnippetPullableTypes contains %q, which must never be pullable", ty)
 			}
 		}
+	}
+}
+
+// TestSnippetPullableTypesExcludesTRUSTTypes is the TRUST_CA/TRUST_CERT
+// counterpart: there is no TRUST PULL, and for TRUST_CERT one would hand
+// back the private key itself (config.xml stores it in the clear) rather
+// than the ${var} reference the snippet was authored with. Both types must
+// stay creatable (the subset test can't tell a type that was never added
+// from one that was dropped).
+func TestSnippetPullableTypesExcludesTRUSTTypes(t *testing.T) {
+	for _, ty := range []string{"TRUST_CA", "TRUST_CERT"} {
+		if !slices.Contains(SnippetCreatableTypes, ty) {
+			t.Errorf("SnippetCreatableTypes is missing %q", ty)
+		}
+		if slices.Contains(SnippetPullableTypes, ty) {
+			t.Errorf("SnippetPullableTypes contains %q, which must never be pullable", ty)
+		}
+	}
+}
+
+// TestTrustPrerequisites_MatchesTheIntendedWording pins the constant
+// against a literal copy, for the same reason as
+// TestAuthOrderConsistencyRule_MatchesTheIntendedWording: every consumer
+// compares against the constant itself.
+func TestTrustPrerequisites_MatchesTheIntendedWording(t *testing.T) {
+	const want = "ndagent 1.21.0 or later, OPNsense 26.1.11 or later, an unencrypted private key (TRUST_CERT), reject_dangerous_snippets off"
+	if TrustPrerequisites != want {
+		t.Errorf("TrustPrerequisites drifted:\ngot:  %s\nwant: %s", TrustPrerequisites, want)
 	}
 }
 

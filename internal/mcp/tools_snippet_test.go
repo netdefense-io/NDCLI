@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,6 +87,60 @@ func TestSnippetToolDescriptions_StateOrgSuForAUTHTypes(t *testing.T) {
 	}
 }
 
+// TestSnippetToolDescriptions_StateInteractiveOrgSuForTRUSTTypes is the
+// TRUST_CA/TRUST_CERT counterpart: all five write tools must say these
+// types need org:su from an interactive login — a server started with
+// NDCLI_TOKEN runs on a personal access token, which never carries org:su.
+func TestSnippetToolDescriptions_StateInteractiveOrgSuForTRUSTTypes(t *testing.T) {
+	cs := connectTestClient(t)
+	ctx := context.Background()
+
+	want := []string{
+		"ndcli.snippet.create",
+		"ndcli.snippet.update_content",
+		"ndcli.snippet.rename",
+		"ndcli.snippet.set_priority",
+		"ndcli.snippet.delete",
+	}
+	descriptions := map[string]string{}
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			t.Fatalf("tools/list: %v", err)
+		}
+		descriptions[tool.Name] = tool.Description
+	}
+	for _, name := range want {
+		desc, ok := descriptions[name]
+		if !ok {
+			t.Errorf("tool %q is not registered", name)
+			continue
+		}
+		for _, phrase := range []string{"TRUST_CA", "TRUST_CERT", "org:su from an interactive login", "personal access token"} {
+			if !strings.Contains(desc, phrase) {
+				t.Errorf("%s description does not mention %q, got: %s", name, phrase, desc)
+			}
+		}
+	}
+}
+
+// TestSnippetEnums_TRUSTTypesCreatableNeverPullable guards the TRUST types
+// by name in the create enum, and their absence from the pull enum — the
+// structural tests in tools_snippet_types_test.go compare only against
+// the models lists, so they would keep passing if TRUST_CA/TRUST_CERT
+// were dropped from SnippetCreatableTypes or added to SnippetPullableTypes.
+func TestSnippetEnums_TRUSTTypesCreatableNeverPullable(t *testing.T) {
+	create := schemaPropertyEnum(t, registeredToolSchema(t, "ndcli.snippet.create"), "type")
+	pull := schemaPropertyEnum(t, registeredToolSchema(t, "ndcli.snippet.pull"), "config_type")
+	for _, ty := range []string{"TRUST_CA", "TRUST_CERT"} {
+		if !slices.Contains(create, ty) {
+			t.Errorf("ndcli.snippet.create type enum = %v, missing %q", create, ty)
+		}
+		if slices.Contains(pull, ty) {
+			t.Errorf("ndcli.snippet.pull config_type enum contains %q, which must never be pullable", ty)
+		}
+	}
+}
+
 // TestHandleSnippetCreate_SendsAUTHServerType is a plumbing smoke test: the
 // MCP create handler must actually carry type=AUTH_SERVER through to
 // NDManager. Content-shape validation (the field table, the secret
@@ -117,5 +172,47 @@ func TestHandleSnippetCreate_SendsAUTHServerType(t *testing.T) {
 	}
 	if gotType != "AUTH_SERVER" {
 		t.Errorf("request sent type=%q, want AUTH_SERVER", gotType)
+	}
+}
+
+// TestHandleSnippetCreate_SendsTRUSTCertContentUnmodified is the TRUST
+// counterpart of the smoke test above, and also checks the content: a PEM
+// body's newlines and the ${FW_KEY} reference must reach NDManager exactly
+// as given. The content shape and the org:su gate are NDManager's to
+// enforce; the fake server here accepts anything.
+func TestHandleSnippetCreate_SendsTRUSTCertContentUnmodified(t *testing.T) {
+	content := `{"name":"fw-wildcard","crt":"-----BEGIN CERTIFICATE-----\nMIIBfDCCASOg\n-----END CERTIFICATE-----\n","key":"${FW_KEY}"}`
+	var gotType, gotContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotType, _ = body["type"].(string)
+		gotContent, _ = body["content"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"fw-wildcard","type":"TRUST_CERT","priority":1000}`))
+	}))
+	defer srv.Close()
+	s := newStaticAuthTestServerWithAPI(t, srv, "acme")
+
+	args, err := json.Marshal(map[string]string{"name": "fw-wildcard", "type": "TRUST_CERT", "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.handleSnippetCreate(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(args)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %v", resp.Error)
+	}
+	if gotType != "TRUST_CERT" {
+		t.Errorf("request sent type=%q, want TRUST_CERT", gotType)
+	}
+	if gotContent != content {
+		t.Errorf("request content changed in transit:\ngot:  %q\nwant: %q", gotContent, content)
 	}
 }

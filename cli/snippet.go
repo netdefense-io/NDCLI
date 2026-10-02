@@ -37,11 +37,12 @@ var snippetCreateCmd = &cobra.Command{
 	RunE:  runSnippetCreate,
 }
 
-// snippetCreateLong documents AUTH_SERVER and AUTH_ORDER inline, since
-// their content is free-form JSON with no dedicated flags of its own.
-// models.AuthOrderConsistencyRule and models.AuthPrerequisites are the
-// two sentences other surfaces (MCP tools, docs) must state identically,
-// so they are shared constants rather than literals here.
+// snippetCreateLong documents AUTH_SERVER, AUTH_ORDER, TRUST_CA and
+// TRUST_CERT inline, since their content is free-form JSON with no
+// dedicated flags of its own. models.AuthOrderConsistencyRule,
+// models.AuthPrerequisites and models.TrustPrerequisites are the sentences
+// other surfaces (MCP tools, docs) must state identically, so they are
+// shared constants rather than literals here.
 const snippetCreateLong = `Create a new snippet.
 
 AUTH_SERVER and AUTH_ORDER content:
@@ -93,7 +94,67 @@ though authoring the content itself needs org:su. That lets an org:rw
 user place an org:su-authored policy, a webadmin reset included, onto
 more devices.
 
-Prerequisites: ` + models.AuthPrerequisites + `.`
+Prerequisites: ` + models.AuthPrerequisites + `.
+
+TRUST_CA and TRUST_CERT content:
+
+TRUST_CA syncs a CA certificate, and TRUST_CERT a certificate with its
+private key, into each device's trust store (System > Trust). Binding one
+to a service is still done on the device; after a renewal, the device
+reloads the services that use it, or warns when it can't. Leave uuid out:
+NetDefense adds one on create and refuses one supplied there. An edit may
+keep it or leave it out, but never change it.
+
+  TRUST_CA:   {"name": "Corp Root CA", "crt": "<PEM>"}
+  TRUST_CERT: {"name": "fw-wildcard", "crt": "<PEM>", "key": "${FW_KEY}"}
+
+- name is the object's description on the device: 1 to 255 bytes (UTF-8),
+  with no ${ and no control characters. A CA or certificate created by hand
+  under the same name is never adopted or touched; the sync reports
+  NAME_COLLISION_UNMANAGED instead.
+- crt is exactly one PEM CERTIFICATE block, or exactly ${VAR_NAME}.
+  Overriding the crt and key variables per device gives each device its
+  own certificate. The certificate's key must be RSA of 2048 to 4096 bits
+  for a TRUST_CERT or 2048 to 8192 for a TRUST_CA, or EC on P-256, P-384
+  or P-521. A shorter RSA key is refused with TRUST_KEY_WEAK. Anything
+  else, including a longer RSA key, Ed25519, Ed448 and DSA, is refused
+  with TRUST_KEY_UNSUPPORTED.
+- key must be exactly ${VAR_NAME}, naming an org-scope secret variable that
+  holds the certificate's unencrypted PEM private key. A key is never
+  accepted in the content itself. That variable may appear only in
+  TRUST_CERT key fields.
+  Redirect the key file into it; the no-echo prompt reads only one line, so
+  it can't take a PEM key:
+
+    ndcli variable org create FW_KEY --secret --value-stdin < fw-wildcard.key
+
+- Every variable a TRUST snippet uses must be written by a Superuser,
+  including a crt variable and every override.
+
+Wrap a PEM file into JSON content with jq (-R reads it raw, -s keeps the
+whole file as one string), then create the snippet from that file.
+Single-quote the jq program so your shell leaves ${FW_KEY} alone:
+
+  jq -Rs '{name: "Corp Root CA", crt: .}' corp-root-ca.pem > corp-root-ca.json
+  ndcli snippet create corp-root-ca --type TRUST_CA --file corp-root-ca.json
+
+  jq -Rs '{name: "fw-wildcard", crt: ., key: "${FW_KEY}"}' fw-wildcard.crt > fw-wildcard.json
+  ndcli snippet create fw-wildcard --type TRUST_CERT --file fw-wildcard.json
+
+To rotate a certificate, update its key variable and the certificate back
+to back. A sync that runs in between fails with TRUST_KEY_MISMATCH, and the
+device keeps its current pair. A CA renews in place only with the same
+subject and key (otherwise TRUST_CA_REKEYED). A CA rollover is a new
+TRUST_CA snippet whose CA has a new subject DN (for example "... G2"): two
+CAs with one subject and different keys are refused with
+TRUST_CA_DN_CONFLICT.
+
+Superuser only: creating, updating, renaming, re-prioritizing or deleting a
+TRUST_CA or TRUST_CERT snippet needs org:su from an interactive login
+(ndcli auth login). A token is not enough: personal access tokens are
+capped at org:rw.
+
+Prerequisites: ` + models.TrustPrerequisites + `.`
 
 var snippetDescribeCmd = &cobra.Command{
 	Use:               "describe [name]",

@@ -448,6 +448,10 @@ func (f *SimpleFormatter) FormatSyncApply(result *models.SyncApplyResponse) erro
 			for _, ai := range e.AuthIssues {
 				fmt.Fprintf(f.Writer, "  %s\n", formatAuthIssueLine(ai))
 			}
+			// TRUST_CA/TRUST_CERT build-time issues; may accompany auth_issues.
+			for _, ti := range e.TrustIssues {
+				fmt.Fprintf(f.Writer, "  %s\n", formatTrustIssueLine(ti))
+			}
 		}
 	}
 

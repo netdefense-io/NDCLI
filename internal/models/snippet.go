@@ -32,6 +32,7 @@ var SnippetCreatableTypes = []string{
 	"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD", "UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
 	"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
 	"AUTH_SERVER", "AUTH_ORDER",
+	"TRUST_CA", "TRUST_CERT",
 }
 
 // SnippetPullableTypes are the snippet types offered by `snippet pull
@@ -48,6 +49,12 @@ var SnippetCreatableTypes = []string{
 // plaintext — not the ${var} secret reference AUTH_SERVER content is
 // authored with — so pulling it back down would leak the resolved
 // password itself (TestSnippetPullableTypesExcludesAUTHTypes).
+//
+// TRUST_CA and TRUST_CERT must never be added here either: there is no
+// TRUST PULL for either type. For TRUST_CERT a pull would also leak the
+// key — config.xml stores a certificate's private key in the clear, so it
+// would come back instead of the ${var} reference the snippet was authored
+// with (TestSnippetPullableTypesExcludesTRUSTTypes).
 var SnippetPullableTypes = []string{
 	"USER", "GROUP", "ALIAS", "RULE",
 	"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD", "UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
@@ -73,6 +80,12 @@ const AuthOrderConsistencyRule = `every name must be an auth server delivered to
 // AuthPrerequisites is the exact minimum-version/consent line every
 // AUTH_SERVER/AUTH_ORDER-facing surface states.
 const AuthPrerequisites = "ndagent 1.19.2 or later, OPNsense 26.1.6 or later, reject_dangerous_snippets off"
+
+// TrustPrerequisites is the exact minimum-version/consent line every
+// TRUST_CA/TRUST_CERT-facing surface states. A device on an older agent
+// fails its build with TRUST_AGENT_TOO_OLD; one below the OPNsense floor
+// has trust changes refused with TRUST_OPNSENSE_TOO_OLD.
+const TrustPrerequisites = "ndagent 1.21.0 or later, OPNsense 26.1.11 or later, an unencrypted private key (TRUST_CERT), reject_dangerous_snippets off"
 
 // SnippetListResponse represents a paginated list of snippets
 type SnippetListResponse struct {

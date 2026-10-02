@@ -334,10 +334,10 @@ func (s *Service) SnippetPull(ctx context.Context, org, deviceName string, opts 
 		// enum) already advertise only models.SnippetPullableTypes, but
 		// neither enforces it: the flag is a free string, and the MCP
 		// go-sdk's AddTool never validates arguments against InputSchema.
-		// AUTH_SERVER/AUTH_ORDER fail closed at every PULL entry point,
-		// since there is no AUTH PULL — NDManager also 422s this, but
-		// refusing here means the device is never even dispatched a task
-		// for it.
+		// AUTH_SERVER/AUTH_ORDER and TRUST_CA/TRUST_CERT fail closed at
+		// every PULL entry point, since there is no AUTH or TRUST PULL —
+		// NDManager also refuses it, but refusing here means the device is
+		// never even dispatched a task for it.
 		return nil, &Error{
 			Code: CodeInvalidInput,
 			Message: fmt.Sprintf(
