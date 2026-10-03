@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
@@ -206,6 +207,11 @@ func runOrgList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// registrationRestrictedMessage replaces NDManager's terse refusal of an org
+// create while registration is closed.
+const registrationRestrictedMessage = "Registration is currently restricted to invited users. " +
+	"Please contact an administrator to request access."
+
 func runOrgCreate(cmd *cobra.Command, args []string) error {
 	requireAuth()
 
@@ -229,11 +235,10 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 	org, err := svc.OrgCreate(ctx, name, displayName, description)
 	if err != nil {
 		if api.IsRegistrationRestrictedError(err) {
-			color.Red("✗ Registration restricted")
-			fmt.Println()
-			fmt.Println("Registration is currently restricted to invited users.")
-			fmt.Println("Please contact an administrator to request access.")
-			return nil
+			// The organization was not created, so this is an error: it exits
+			// non-zero, and printCommandError renders it with the code the
+			// wrapped API error still carries.
+			return &service.Error{Code: service.CodeAPIError, Message: registrationRestrictedMessage, Err: err}
 		}
 		return err
 	}
@@ -264,7 +269,7 @@ func runOrgDelete(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if !helpers.Confirm(fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.OrgDelete(context.Background(), name); err != nil {
@@ -379,7 +384,7 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 		confirmMsg = fmt.Sprintf("Disable account '%s'?", email)
 	}
 	if !helpers.Confirm(confirmMsg) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 

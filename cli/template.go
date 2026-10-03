@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -205,7 +206,7 @@ func runTemplateDelete(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if !helpers.Confirm(fmt.Sprintf("Delete template '%s'?", name)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.TemplateDelete(context.Background(), org, name); err != nil {

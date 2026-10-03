@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,8 +171,8 @@ func ParseError(resp *http.Response) *APIError {
 	// Every field populated above (Message, Detail, Code,
 	// BlockingResources, Conflicts[].Variable/Message,
 	// UndefinedVariables) came straight from the response body and is
-	// printed verbatim by Error() — Cobra does not SilenceErrors, so this
-	// reaches the operator's terminal on every non-2xx request. Scrub
+	// printed verbatim by Error(), which a failed command prints to stderr, so
+	// this reaches the operator's terminal on every non-2xx request. Scrub
 	// terminal control bytes the same way the 2xx decode path does before
 	// wiring the error back to the caller.
 	sanitize.Struct(reflect.ValueOf(apiErr))
@@ -239,33 +240,39 @@ func statusMessage(code int) string {
 	}
 }
 
+// asAPIError returns the *APIError err holds, looking through any wrapping (a
+// service error, fmt.Errorf's %w). The helpers below all go through it: the
+// service layer hands every API error back wrapped, so a type assertion on
+// the outer error would miss it.
+func asAPIError(err error) (*APIError, bool) {
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
+	return apiErr, ok
+}
+
 // IsAuthError returns true if the error is an authentication error
 func IsAuthError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusUnauthorized
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusUnauthorized
 }
 
 // IsNotFoundError returns true if the error is a not found error
 func IsNotFoundError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusNotFound
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusNotFound
 }
 
 // IsConflictError returns true if the error is a 409 conflict error
 func IsConflictError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusConflict
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusConflict
 }
 
-// GetErrorCode returns the machine-readable error code from an API error
+// GetErrorCode returns the machine-readable code NDManager sent with an error
+// response. It is "" when err holds no API error or the response carried no
+// code.
 func GetErrorCode(err error) string {
-	if apiErr, ok := err.(*APIError); ok {
+	if apiErr, ok := asAPIError(err); ok {
 		return apiErr.Code
 	}
 	return ""
@@ -273,25 +280,19 @@ func GetErrorCode(err error) string {
 
 // IsPlanLimitError returns true if the error is a plan limit or feature not available error
 func IsPlanLimitError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusForbidden &&
-			(apiErr.Code == "PLAN_LIMIT_EXCEEDED" || apiErr.Code == "FEATURE_NOT_AVAILABLE")
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusForbidden &&
+		(apiErr.Code == "PLAN_LIMIT_EXCEEDED" || apiErr.Code == "FEATURE_NOT_AVAILABLE")
 }
 
 // IsFeatureNotAvailableError returns true if the error is a feature not available error
 func IsFeatureNotAvailableError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "FEATURE_NOT_AVAILABLE"
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "FEATURE_NOT_AVAILABLE"
 }
 
 // IsRegistrationRestrictedError returns true if the error is a closed-beta registration restriction
 func IsRegistrationRestrictedError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "REGISTRATION_RESTRICTED"
-	}
-	return false
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "REGISTRATION_RESTRICTED"
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
@@ -265,19 +266,19 @@ func runNetworkMemberRemove(cmd *cobra.Command, args []string) error {
 					prompt := fmt.Sprintf("Remove hub '%s' from VPN '%s'?\n  %d spoke(s) will lose their connection to this hub.",
 						deviceName, vpnName, spokeCount)
 					if !helpers.Confirm(prompt) {
-						fmt.Println("Cancelled")
+						fmt.Fprintln(os.Stderr, "Cancelled")
 						return nil
 					}
 				} else if !helpers.Confirm(fmt.Sprintf("Remove hub '%s' from VPN '%s'?", deviceName, vpnName)) {
-					fmt.Println("Cancelled")
+					fmt.Fprintln(os.Stderr, "Cancelled")
 					return nil
 				}
 			} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
-				fmt.Println("Cancelled")
+				fmt.Fprintln(os.Stderr, "Cancelled")
 				return nil
 			}
 		} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -193,17 +194,14 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if !helpers.Confirm(fmt.Sprintf("Delete OU '%s'?", name)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.OUDelete(context.Background(), org, name); err != nil {
 		var apiErr *api.APIError
 		if errors.As(err, &apiErr) && len(apiErr.BlockingResources) > 0 {
-			color.Red("Cannot delete OU '%s' - %d active device(s) must be removed first:", name, len(apiErr.BlockingResources))
-			for _, device := range apiErr.BlockingResources {
-				fmt.Printf("  • %s\n", device)
-			}
-			return nil
+			header := fmt.Sprintf("Cannot delete OU '%s' - %d active device(s) must be removed first:", name, len(apiErr.BlockingResources))
+			return refusalWithList(err, header, "", apiErr.BlockingResources)
 		}
 		return err
 	}

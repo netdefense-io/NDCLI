@@ -34,7 +34,7 @@ func TestDeviceRemoveWarningLines_StatesTheOnBoxConsequences(t *testing.T) {
 // does — every one of those tests would keep passing if the constant
 // itself drifted.
 func TestDeviceRemoveConsequence_MatchesTheCanonicalSentence(t *testing.T) {
-	const canonical = "Permanently deletes the device. On its next contact the device removes all NetDefense-managed configuration (firewall rules, aliases, VPN, users, external authentication servers, package repositories), uninstalls the NetDefense agent and repository, and cannot be restored. Re-adding it requires a fresh installation."
+	const canonical = "Permanently deletes the device. On its next contact the device removes all NetDefense-managed configuration (firewall rules, aliases, VPN, users, external authentication servers, certificates and CAs, package repositories) except certificates and CAs still in use by a service, uninstalls the NetDefense agent and repository, and cannot be restored. Re-adding it requires a fresh installation."
 	if service.DeviceRemoveConsequence != canonical {
 		t.Errorf("DeviceRemoveConsequence drifted from the canonical sentence:\ngot:  %s\nwant: %s", service.DeviceRemoveConsequence, canonical)
 	}

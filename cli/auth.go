@@ -438,34 +438,26 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !skipConfirm {
-		color.Red("WARNING: This will permanently delete your account!")
-		fmt.Printf("  Email: %s\n", userInfo.Email)
-		fmt.Println()
-		fmt.Print("Type 'DELETE' to confirm: ")
+		color.New(color.FgRed).Fprintln(os.Stderr, "WARNING: This will permanently delete your account!")
+		fmt.Fprintf(os.Stderr, "  Email: %s\n", userInfo.Email)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprint(os.Stderr, "Type 'DELETE' to confirm: ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(response)
 
 		if response != "DELETE" {
-			fmt.Println("Aborted.")
+			fmt.Fprintln(os.Stderr, "Aborted.")
 			return nil
 		}
 	}
 
 	result, err := svc.AuthDelete(context.Background())
 	if err != nil {
-		// Sole-superuser conflict: surface the blocking orgs nicely.
+		// Sole-superuser conflict: list the organizations that block it.
 		if blocking := service.AuthDeleteBlockingOrgs(err); blocking != nil {
-			color.Red("✗ Cannot delete account")
-			fmt.Println()
-			fmt.Println(err.Error())
-			fmt.Println()
-			fmt.Println("Organizations where you are the only superuser:")
-			for _, org := range blocking {
-				fmt.Printf("  • %s\n", org)
-			}
-			return nil
+			return refusalWithList(err, err.Error(), "Organizations where you are the only superuser:", blocking)
 		}
 		return fmt.Errorf("failed to delete account: %w", err)
 	}

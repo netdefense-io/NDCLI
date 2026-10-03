@@ -338,10 +338,14 @@ func (s *Server) handleDeviceApproveAll(ctx context.Context, req *mcp.CallToolRe
 	approvedNames := []string{}
 	for _, r := range results {
 		if r.Err != nil {
-			failed = append(failed, map[string]string{
+			entry := map[string]string{
 				"device": r.Name,
 				"error":  r.Err.Error(),
-			})
+			}
+			if code := api.GetErrorCode(r.Err); code != "" {
+				entry["code"] = code
+			}
+			failed = append(failed, entry)
 			continue
 		}
 		approved++

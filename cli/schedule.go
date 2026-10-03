@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -166,7 +167,7 @@ func runScheduleDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !ok {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 
@@ -279,7 +280,7 @@ func runScheduleTasksRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !ok {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 

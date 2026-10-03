@@ -2,6 +2,7 @@ package output
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -52,21 +53,26 @@ func (t *StyledTable) Append(row []string) {
 
 // Render outputs the styled table to stdout
 func (t *StyledTable) Render() {
-	// Top border: ╭──────┬──────┬──────╮
-	t.renderTop()
-	// Header row with bold text
-	t.renderHeader()
-	// Header separator: ├──────┼──────┼──────┤
-	t.renderSeparator()
-	// Data rows
-	for _, row := range t.rows {
-		t.renderRow(row)
-	}
-	// Bottom border: ╰──────┴──────┴──────╯
-	t.renderBottom()
+	t.RenderTo(os.Stdout)
 }
 
-func (t *StyledTable) renderTop() {
+// RenderTo outputs the styled table to out.
+func (t *StyledTable) RenderTo(out io.Writer) {
+	// Top border: ╭──────┬──────┬──────╮
+	t.renderTop(out)
+	// Header row with bold text
+	t.renderHeader(out)
+	// Header separator: ├──────┼──────┼──────┤
+	t.renderSeparator(out)
+	// Data rows
+	for _, row := range t.rows {
+		t.renderRow(out, row)
+	}
+	// Bottom border: ╰──────┴──────┴──────╯
+	t.renderBottom(out)
+}
+
+func (t *StyledTable) renderTop(out io.Writer) {
 	var sb strings.Builder
 	sb.WriteString(BoxTopLeft)
 	for i, w := range t.widths {
@@ -76,10 +82,10 @@ func (t *StyledTable) renderTop() {
 		}
 	}
 	sb.WriteString(BoxTopRight)
-	fmt.Fprintln(os.Stdout, sb.String())
+	fmt.Fprintln(out, sb.String())
 }
 
-func (t *StyledTable) renderHeader() {
+func (t *StyledTable) renderHeader(out io.Writer) {
 	var sb strings.Builder
 	sb.WriteString(BoxVertical)
 	for i, h := range t.headers {
@@ -91,10 +97,10 @@ func (t *StyledTable) renderHeader() {
 		sb.WriteString(strings.Repeat(" ", padding+1))
 		sb.WriteString(BoxVertical)
 	}
-	fmt.Fprintln(os.Stdout, sb.String())
+	fmt.Fprintln(out, sb.String())
 }
 
-func (t *StyledTable) renderSeparator() {
+func (t *StyledTable) renderSeparator(out io.Writer) {
 	var sb strings.Builder
 	sb.WriteString(BoxTeeLeft)
 	for i, w := range t.widths {
@@ -104,10 +110,10 @@ func (t *StyledTable) renderSeparator() {
 		}
 	}
 	sb.WriteString(BoxTeeRight)
-	fmt.Fprintln(os.Stdout, sb.String())
+	fmt.Fprintln(out, sb.String())
 }
 
-func (t *StyledTable) renderRow(row []string) {
+func (t *StyledTable) renderRow(out io.Writer, row []string) {
 	var sb strings.Builder
 	sb.WriteString(BoxVertical)
 	for i, cell := range row {
@@ -127,10 +133,10 @@ func (t *StyledTable) renderRow(row []string) {
 		sb.WriteString(strings.Repeat(" ", t.widths[i]+1))
 		sb.WriteString(BoxVertical)
 	}
-	fmt.Fprintln(os.Stdout, sb.String())
+	fmt.Fprintln(out, sb.String())
 }
 
-func (t *StyledTable) renderBottom() {
+func (t *StyledTable) renderBottom(out io.Writer) {
 	var sb strings.Builder
 	sb.WriteString(BoxBottomLeft)
 	for i, w := range t.widths {
@@ -140,7 +146,7 @@ func (t *StyledTable) renderBottom() {
 		}
 	}
 	sb.WriteString(BoxBottomRight)
-	fmt.Fprintln(os.Stdout, sb.String())
+	fmt.Fprintln(out, sb.String())
 }
 
 // FormatDevices formats a list of devices as a table
@@ -555,9 +561,13 @@ func (f *TableFormatter) FormatSnippets(snippets []models.Snippet) error {
 	return nil
 }
 
-// FormatSnippet formats a single snippet as a table
+// FormatSnippet formats a single snippet as a table, followed by its content
 func (f *TableFormatter) FormatSnippet(snippet *models.Snippet) error {
-	return f.FormatSnippets([]models.Snippet{*snippet})
+	if err := f.FormatSnippets([]models.Snippet{*snippet}); err != nil {
+		return err
+	}
+	writeContent(f.Writer, snippet.Content)
+	return nil
 }
 
 // FormatSoftwarePolicies formats a list of software policies as a table.
@@ -633,9 +643,14 @@ func templatesCell(names []string) string {
 	return fmt.Sprintf("%s, +%d more", strings.Join(names[:maxInline], ", "), len(names)-maxInline)
 }
 
-// FormatSoftwarePolicy formats a single policy as a table.
+// FormatSoftwarePolicy formats a single policy as a table, followed by its
+// content.
 func (f *TableFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) error {
-	return f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy})
+	if err := f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy}); err != nil {
+		return err
+	}
+	writeContent(f.Writer, policy.Content)
+	return nil
 }
 
 // FormatAccounts formats a list of accounts as a table
@@ -861,7 +876,7 @@ func (f *TableFormatter) FormatSyncApply(result *models.SyncApplyResponse) error
 		fmt.Println()
 		ColorError.Println("Errors:")
 		for _, e := range result.Errors {
-			fmt.Printf("  • %s: %s\n", e.DeviceName, e.Error)
+			fmt.Printf("  • %s: %s\n", e.DeviceName, WithCode(e.Code, e.Error))
 			// Show conflict details
 			for _, c := range e.Conflicts {
 				fmt.Printf("      %s\n", c.Message)
@@ -1425,6 +1440,7 @@ func (f *TableFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) error {
 func (f *TableFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
+		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 
@@ -1452,6 +1468,7 @@ func (f *TableFormatter) FormatVpnConnections(connections []models.EffectiveConn
 	}
 
 	table.Render()
+	writeConnectionsSummary(f.Writer, connections)
 	return nil
 }
 

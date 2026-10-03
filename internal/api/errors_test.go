@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -35,10 +37,10 @@ func mustJSON(t *testing.T, v interface{}) []byte {
 // TestParseError_SanitizesMessage is REVERT-SENSITIVE: it fails against the
 // pre-amendment ParseError, which built APIError.Message straight from the
 // response body's "error" field and returned it unsanitized. APIError.Error()
-// is what Cobra prints to stderr on a failing command (Cobra does not
-// SilenceErrors), so a hostile/misbehaving NDManager returning a 4xx/5xx body
-// with a terminal escape sequence in "error" would have it interpreted by the
-// operator's terminal.
+// is what a failing command prints to stderr (cli.printCommandError), so a
+// hostile/misbehaving NDManager returning a 4xx/5xx body with a terminal
+// escape sequence in "error" would have it interpreted by the operator's
+// terminal.
 func TestParseError_SanitizesMessage(t *testing.T) {
 	body := mustJSON(t, map[string]string{
 		"error": "evil" + testESC + "[2J" + testESC + "[Hmessage",
@@ -148,5 +150,61 @@ func TestParseError_CapsBodySize(t *testing.T) {
 
 	if apiErr.Message != statusMessage(http.StatusInternalServerError) {
 		t.Fatalf("expected fallback status message for a truncated body, got %q", apiErr.Message)
+	}
+}
+
+// TestGetErrorCode_LooksThroughWrapping: the service layer hands every API
+// error back wrapped, so a type assertion on the outer error never found the
+// code NDManager sent.
+func TestGetErrorCode_LooksThroughWrapping(t *testing.T) {
+	apiErr := ParseError(newErrorResponse(http.StatusUnprocessableEntity, mustJSON(t, map[string]string{
+		"error": "'crt' has an RSA key of 1024 bits: use 2048 to 4096 bits",
+		"code":  "TRUST_KEY_WEAK",
+	})))
+
+	for name, err := range map[string]error{
+		"bare":    apiErr,
+		"wrapped": fmt.Errorf("create snippet: %w", apiErr),
+	} {
+		if got := GetErrorCode(err); got != "TRUST_KEY_WEAK" {
+			t.Errorf("%s: GetErrorCode = %q, want TRUST_KEY_WEAK", name, got)
+		}
+	}
+
+	if got := GetErrorCode(errors.New("no API error here")); got != "" {
+		t.Errorf("an error without an API error has no code, got %q", got)
+	}
+	if got := GetErrorCode(nil); got != "" {
+		t.Errorf("GetErrorCode(nil) = %q, want empty", got)
+	}
+}
+
+// TestIsHelpers_LookThroughWrapping: like GetErrorCode, every Is* helper has
+// to find the API error inside the service's wrapping. org create passes the
+// service error straight to IsRegistrationRestrictedError, so its message
+// for a closed registration never showed.
+func TestIsHelpers_LookThroughWrapping(t *testing.T) {
+	wrapped := func(status int, code string) error {
+		return fmt.Errorf("service: %w", &APIError{StatusCode: status, Code: code, Message: "m"})
+	}
+	for _, tc := range []struct {
+		name  string
+		is    func(error) bool
+		match error
+		other error
+	}{
+		{"IsAuthError", IsAuthError, wrapped(http.StatusUnauthorized, "AUTH_INVALID"), wrapped(http.StatusForbidden, "ACCESS_DENIED")},
+		{"IsNotFoundError", IsNotFoundError, wrapped(http.StatusNotFound, "SNIPPET_NOT_FOUND"), wrapped(http.StatusConflict, "ALREADY_EXISTS")},
+		{"IsConflictError", IsConflictError, wrapped(http.StatusConflict, "SNIPPET_UUID_IN_USE"), wrapped(http.StatusNotFound, "SNIPPET_NOT_FOUND")},
+		{"IsPlanLimitError", IsPlanLimitError, wrapped(http.StatusForbidden, "PLAN_LIMIT_EXCEEDED"), wrapped(http.StatusForbidden, "ACCESS_DENIED")},
+		{"IsFeatureNotAvailableError", IsFeatureNotAvailableError, wrapped(http.StatusForbidden, "FEATURE_NOT_AVAILABLE"), wrapped(http.StatusForbidden, "PLAN_LIMIT_EXCEEDED")},
+		{"IsRegistrationRestrictedError", IsRegistrationRestrictedError, wrapped(http.StatusForbidden, "REGISTRATION_RESTRICTED"), wrapped(http.StatusForbidden, "ACCESS_DENIED")},
+	} {
+		if !tc.is(tc.match) {
+			t.Errorf("%s missed a wrapped match", tc.name)
+		}
+		if tc.is(tc.other) || tc.is(errors.New("no API error")) || tc.is(nil) {
+			t.Errorf("%s matched an error it should not", tc.name)
+		}
 	}
 }

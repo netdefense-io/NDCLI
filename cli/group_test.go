@@ -194,12 +194,12 @@ func TestGroupExecution(t *testing.T) {
 	}
 }
 
-// runRootCommand executes rootCmd with args and returns everything it wrote.
-// The repo's custom help function writes straight to os.Stdout, so the real
-// file descriptor has to be swapped, not just cobra's writers.
+// runRootCommand executes rootCmd with args through Execute, which prints a
+// returned error, and returns everything it wrote. The repo's custom help
+// function writes straight to os.Stdout, so the real file descriptor has to be
+// swapped, not just cobra's writers.
 func runRootCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	prepareRootCommand()
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -222,7 +222,7 @@ func runRootCommand(t *testing.T, args ...string) (string, error) {
 	rootCmd.SetErr(&buf)
 	rootCmd.SetArgs(args)
 
-	execErr := rootCmd.Execute()
+	execErr := Execute()
 
 	os.Stdout = origStdout
 	w.Close()

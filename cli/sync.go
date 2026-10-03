@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -75,11 +76,6 @@ func runSyncStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	if len(result.Items) == 0 {
-		fmt.Println("No devices found")
-		return nil
-	}
 	return formatter.FormatSyncStatus(result.Items, result.Total)
 }
 
@@ -102,18 +98,20 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	// The confirm prompt gates both the immediate-apply path and --schedule
 	// registration: planting a persistent recurring spec deserves the same
 	// device-list review as an immediate sync, and --yes still short-circuits
-	// it for automation.
+	// it for automation. The review is part of the prompt, so it goes to
+	// stderr with it, as does a note that nothing matched: nothing was
+	// applied, so there is no result for the formatter.
 	if !skipConfirm {
 		status, err := svc.SyncStatus(ctx, org, filter)
 		if err != nil {
 			return err
 		}
 		if len(status.Items) == 0 {
-			fmt.Println("No devices match the specified filters")
+			fmt.Fprintln(os.Stderr, "No devices match the specified filters")
 			return nil
 		}
 
-		fmt.Printf("Devices to sync (%d):\n", len(status.Items))
+		fmt.Fprintf(os.Stderr, "Devices to sync (%d):\n", len(status.Items))
 		table := output.NewStyledTable([]string{"Device", "OUs", "Last Sync"})
 		for _, item := range status.Items {
 			lastSync := "Never"
@@ -126,15 +124,15 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 				lastSync,
 			})
 		}
-		table.Render()
-		fmt.Println()
+		table.RenderTo(os.Stderr)
+		fmt.Fprintln(os.Stderr)
 
 		prompt := fmt.Sprintf("Trigger sync for %d device(s)?", len(status.Items))
 		if filter.Schedule != "" {
 			prompt = fmt.Sprintf("Register a recurring sync spec on schedule %q for %d device(s)?", filter.Schedule, len(status.Items))
 		}
 		if !helpers.Confirm(prompt) {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}

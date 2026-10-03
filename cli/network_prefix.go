@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
@@ -182,7 +183,7 @@ func runNetworkPrefixRemove(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
 		if !helpers.Confirm(fmt.Sprintf("Remove prefix '%s' from '%s' in VPN '%s'?", variableName, deviceName, vpnName)) {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}

@@ -15,10 +15,10 @@ import (
 // straight into the returned error string. FetchCLIConfig runs
 // unauthenticated on every login (internal/auth/manager.go), before any
 // trust has been established with the server at cfg.Controlplane.Host, and
-// Cobra does not SilenceErrors — so a hostile or misbehaving NDManager
-// returning a >=400 body containing a terminal escape sequence would have
-// it interpreted by the operator's terminal the moment `ndcli auth login`
-// (or any command that triggers an implicit login) fails.
+// a failed command prints its error to stderr — so a hostile or misbehaving
+// NDManager returning a >=400 body containing a terminal escape sequence
+// would have it interpreted by the operator's terminal the moment `ndcli
+// auth login` (or any command that triggers an implicit login) fails.
 func TestFetchCLIConfig_SanitizesErrorBody(t *testing.T) {
 	evilBody := "evil" + testESC + "[2J" + testESC + "[Hmessage"
 

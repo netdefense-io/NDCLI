@@ -305,13 +305,7 @@ func runSoftwareDescribe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := formatter.FormatSoftwarePolicy(sp); err != nil {
-		return err
-	}
-	fmt.Println()
-	color.Cyan("Content:")
-	fmt.Println(internalHelpers.PrettyJSON(sp.Content))
-	return nil
+	return formatter.FormatSoftwarePolicy(sp)
 }
 
 func runSoftwareEdit(cmd *cobra.Command, args []string) error {
@@ -384,7 +378,7 @@ func runSoftwareDelete(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if !internalHelpers.Confirm(fmt.Sprintf("Delete software policy '%s'?", name)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.SoftwarePolicyDelete(context.Background(), org, name); err != nil {

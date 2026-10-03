@@ -532,9 +532,14 @@ func (f *DetailedFormatter) FormatSnippets(snippets []models.Snippet) error {
 	return nil
 }
 
-// FormatSnippet formats a single snippet with full details
+// FormatSnippet formats a single snippet with full details, followed by its
+// content
 func (f *DetailedFormatter) FormatSnippet(snippet *models.Snippet) error {
-	return f.FormatSnippets([]models.Snippet{*snippet})
+	if err := f.FormatSnippets([]models.Snippet{*snippet}); err != nil {
+		return err
+	}
+	writeContent(f.Writer, snippet.Content)
+	return nil
 }
 
 // FormatSoftwarePolicies formats a list of software policies with full details
@@ -572,9 +577,14 @@ func (f *DetailedFormatter) FormatSoftwarePolicies(policies []models.SoftwarePol
 	return nil
 }
 
-// FormatSoftwarePolicy formats a single software policy with full details
+// FormatSoftwarePolicy formats a single software policy with full details,
+// followed by its content
 func (f *DetailedFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) error {
-	return f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy})
+	if err := f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy}); err != nil {
+		return err
+	}
+	writeContent(f.Writer, policy.Content)
+	return nil
 }
 
 // FormatAccounts formats a list of accounts with full details
@@ -851,7 +861,7 @@ func (f *DetailedFormatter) FormatSyncApply(result *models.SyncApplyResponse) er
 		fmt.Fprintln(f.Writer)
 		ColorError.Fprintln(f.Writer, "Errors:")
 		for _, e := range result.Errors {
-			fmt.Fprintf(f.Writer, "  • %s: %s\n", e.DeviceName, e.Error)
+			fmt.Fprintf(f.Writer, "  • %s: %s\n", e.DeviceName, WithCode(e.Code, e.Error))
 			for _, c := range e.Conflicts {
 				fmt.Fprintf(f.Writer, "      %s\n", c.Message)
 			}
@@ -1564,6 +1574,7 @@ func (f *DetailedFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) erro
 func (f *DetailedFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
+		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 
@@ -1588,6 +1599,7 @@ func (f *DetailedFormatter) FormatVpnConnections(connections []models.EffectiveC
 			f.printLabelValue("Notes", note)
 		}
 	}
+	writeConnectionsSummary(f.Writer, connections)
 	return nil
 }
 

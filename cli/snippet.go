@@ -45,6 +45,8 @@ var snippetCreateCmd = &cobra.Command{
 // shared constants rather than literals here.
 const snippetCreateLong = `Create a new snippet.
 
+` + models.SnippetUUIDGuidance + `
+
 AUTH_SERVER and AUTH_ORDER content:
 
 AUTH_SERVER defines one external authentication server (LDAP or Active
@@ -175,6 +177,7 @@ var snippetEditCmd = &cobra.Command{
 var snippetUpdateContentCmd = &cobra.Command{
 	Use:               "update-content [name] [file]",
 	Short:             "Update snippet content from file",
+	Long:              "Replace a snippet's content with the contents of a file.\n\n" + models.SnippetUUIDGuidance,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSnippets,
 	RunE:              runSnippetUpdateContent,
@@ -378,13 +381,7 @@ func runSnippetDescribe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := formatter.FormatSnippet(snippet); err != nil {
-		return err
-	}
-	fmt.Println()
-	color.Cyan("Content:")
-	fmt.Println(internalHelpers.PrettyJSON(snippet.Content))
-	return nil
+	return formatter.FormatSnippet(snippet)
 }
 
 func runSnippetEdit(cmd *cobra.Command, args []string) error {
@@ -474,7 +471,7 @@ func runSnippetDelete(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if !internalHelpers.Confirm(fmt.Sprintf("Delete snippet '%s'?", name)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.SnippetDelete(context.Background(), org, name); err != nil {
@@ -515,14 +512,16 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return namedSnippetNameFlag(err)
 	}
-	color.Green("✓ Pull task created: %s", pull.Task)
+	result := &models.SnippetPull{Task: pull.Task, Status: pull.Status, ConfigType: pull.ConfigType, Snippet: pull.Name}
 
 	if !wait {
-		fmt.Printf("Check task status with: ndcli task describe %s\n", pull.Task)
-		return nil
+		return formatter.FormatSnippetPull(result)
 	}
 
-	fmt.Println("Waiting for task to complete...")
+	// Progress, not the result: it goes to stderr, where it does not land in
+	// a -f json document.
+	output.ColorSuccess.Fprintf(os.Stderr, "✓ Pull task created: %s\n", pull.Task)
+	fmt.Fprintln(os.Stderr, "Waiting for task to complete...")
 	for attempt := 0; attempt < 60; attempt++ {
 		time.Sleep(1 * time.Second)
 		task, err := svc.TaskGet(ctx, pull.Task)
@@ -539,13 +538,10 @@ func runSnippetPull(cmd *cobra.Command, args []string) error {
 			if created == "" {
 				created = matchKey
 			}
-			color.Green("✓ Snippet pulled successfully: %s", created)
-			if task.Message != "" {
-				fmt.Println()
-				color.Cyan("Content:")
-				fmt.Println(internalHelpers.PrettyJSON(task.Message))
-			}
-			return nil
+			result.Status = task.Status
+			result.Snippet = created
+			result.Content = task.Message
+			return formatter.FormatSnippetPull(result)
 		case models.TaskStatusFailed:
 			errMsg := task.Message
 			if errMsg == "" {

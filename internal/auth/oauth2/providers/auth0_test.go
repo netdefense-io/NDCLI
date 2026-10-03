@@ -59,7 +59,7 @@ func TestGetUserInfo_SanitizesResponse(t *testing.T) {
 
 // TestGetUserInfo_ErrorBodyIsSanitized covers the non-200 branch, which
 // embeds the raw response body text in the returned error — also printed
-// on the terminal (Cobra does not SilenceErrors).
+// on the terminal (a failed command prints its error to stderr).
 func TestGetUserInfo_ErrorBodyIsSanitized(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

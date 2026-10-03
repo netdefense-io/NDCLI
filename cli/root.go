@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -35,6 +36,9 @@ var rootCmd = &cobra.Command{
 
 It provides commands for managing devices, organizations, templates, and more.`,
 	SilenceUsage: true,
+	// Execute prints the error through printCommandError, which adds
+	// NDManager's error code and renders JSON under -f json.
+	SilenceErrors: true,
 	// Run is called when no subcommand is provided
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no config exists, auto-trigger setup wizard
@@ -111,7 +115,11 @@ It provides commands for managing devices, organizations, templates, and more.`,
 // Execute runs the root command
 func Execute() error {
 	prepareRootCommand()
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		printCommandError(rootCmd.ErrOrStderr(), err)
+	}
+	return err
 }
 
 // prepareRootCommand performs the last-moment wiring that has to happen after
@@ -224,7 +232,7 @@ func getOrganization() string {
 func requireOrganization() string {
 	org := getOrganization()
 	if org == "" {
-		fmt.Fprintln(os.Stderr, "Error: Organization is required. Use --org flag or set in config.")
+		printCommandError(os.Stderr, errors.New("Organization is required. Use --org flag or set in config."))
 		os.Exit(1)
 	}
 	return org
@@ -249,7 +257,7 @@ func requireAuth() {
 	// Use GetAccessToken() which attempts token refresh if expired
 	_, err := authManager.GetAccessToken()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: Not authenticated. Please run 'ndcli auth login' first.")
+		printCommandError(os.Stderr, errors.New("Not authenticated. Please run 'ndcli auth login' first."))
 		os.Exit(1)
 	}
 }
@@ -265,15 +273,20 @@ func setupOutputAndFormatter(_ *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: Invalid timezone '%s', using system local\n", timezone)
 	}
 
-	format := outputFmt
-	if format == "" {
-		format = config.Get().Output.Format
-	}
-	if format == "" {
-		format = config.DefaultOutputFormat
-	}
-	formatter = output.GetFormatter(format)
+	formatter = output.GetFormatter(outputFormat())
 	return nil
+}
+
+// outputFormat is the format a command runs with: -f, else the configured
+// default, else the built-in one.
+func outputFormat() string {
+	if outputFmt != "" {
+		return outputFmt
+	}
+	if format := config.Get().Output.Format; format != "" {
+		return format
+	}
+	return config.DefaultOutputFormat
 }
 
 // isCompletionCommand reports whether cmd is part of the shell-completion

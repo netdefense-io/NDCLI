@@ -112,12 +112,12 @@ func runAuthTokenRevoke(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 	if !skipConfirm {
-		fmt.Printf("Revoke token %q? This cannot be undone. [y/N]: ", name)
+		fmt.Fprintf(os.Stderr, "Revoke token %q? This cannot be undone. [y/N]: ", name)
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Aborted.")
+			fmt.Fprintln(os.Stderr, "Aborted.")
 			return nil
 		}
 	}

@@ -262,7 +262,10 @@ func (s *Server) successResultWithPagination(data interface{}, page, perPage, to
 
 // errorResult creates an error tool result. Recognises both the legacy
 // *ToolError (from pre-service handlers) and the unified *service.Error so
-// the wire-level error code stays stable across the migration.
+// the wire-level error code stays stable across the migration. When the error
+// carries the code NDManager answered with, that code is error.code instead:
+// it is the one the CLI shows, and API_ERROR on its own says only that the
+// request failed.
 func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 	response := ToolResponse{
 		Success: false,
@@ -276,6 +279,9 @@ func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 		response.Error.Code = e.Code
 	case *service.Error:
 		response.Error.Code = e.Code
+	}
+	if code := api.GetErrorCode(err); code != "" {
+		response.Error.Code = code
 	}
 
 	return s.jsonResult(response, true)

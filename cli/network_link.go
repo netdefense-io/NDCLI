@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
@@ -113,46 +114,7 @@ func runNetworkLinkList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := formatter.FormatVpnConnections(connections, len(connections)); err != nil {
-		return err
-	}
-
-	// Print summary
-	automatic, manualLinks, overrides := 0, 0, 0
-	for _, c := range connections {
-		if c.Source == "implicit" {
-			automatic++
-			if c.HasOverride {
-				overrides++
-			}
-		} else {
-			manualLinks++
-		}
-	}
-	connWord := "connections"
-	if len(connections) == 1 {
-		connWord = "connection"
-	}
-	var parts []string
-	if automatic > 0 {
-		parts = append(parts, fmt.Sprintf("%d automatic", automatic))
-	}
-	if manualLinks > 0 {
-		word := "manual links"
-		if manualLinks == 1 {
-			word = "manual link"
-		}
-		parts = append(parts, fmt.Sprintf("%d %s", manualLinks, word))
-	}
-	if overrides > 0 {
-		word := "overrides"
-		if overrides == 1 {
-			word = "override"
-		}
-		parts = append(parts, fmt.Sprintf("%d %s", overrides, word))
-	}
-	output.ColorDim.Printf("\n%d %s (%s)\n", len(connections), connWord, strings.Join(parts, ", "))
-	return nil
+	return formatter.FormatVpnConnections(connections, len(connections))
 }
 
 func runNetworkLinkCreate(cmd *cobra.Command, args []string) error {
@@ -383,7 +345,7 @@ func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
 				deviceA, deviceB, vpnName)
 		}
 		if !helpers.Confirm(prompt) {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}

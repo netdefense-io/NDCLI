@@ -264,11 +264,12 @@ func (f *SimpleFormatter) FormatSnippets(snippets []models.Snippet) error {
 	return nil
 }
 
-// FormatSnippet formats a single snippet
+// FormatSnippet formats a single snippet, followed by its content
 func (f *SimpleFormatter) FormatSnippet(snippet *models.Snippet) error {
 	fmt.Fprintf(f.Writer, "Snippet: %s\n", snippet.Name)
 	fmt.Fprintf(f.Writer, "  Type: %s\n", snippet.Type)
 	fmt.Fprintf(f.Writer, "  Priority: %d\n", snippet.Priority)
+	writeContent(f.Writer, snippet.Content)
 	return nil
 }
 
@@ -290,7 +291,8 @@ func (f *SimpleFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolic
 	return nil
 }
 
-// FormatSoftwarePolicy formats a single software policy.
+// FormatSoftwarePolicy formats a single software policy, followed by its
+// content.
 func (f *SimpleFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
 	c := softwarePolicyCounts(p.Content)
 	fmt.Fprintf(f.Writer, "Software policy: %s\n", p.Name)
@@ -307,6 +309,7 @@ func (f *SimpleFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
 			fmt.Fprintf(f.Writer, "  Templates: %s\n", strings.Join(p.TemplateNames, ", "))
 		}
 	}
+	writeContent(f.Writer, p.Content)
 	return nil
 }
 
@@ -433,7 +436,7 @@ func (f *SimpleFormatter) FormatSyncApply(result *models.SyncApplyResponse) erro
 	if len(result.Errors) > 0 {
 		fmt.Fprintf(f.Writer, "\nErrors:\n")
 		for _, e := range result.Errors {
-			fmt.Fprintf(f.Writer, "• %s: %s\n", e.DeviceName, e.Error)
+			fmt.Fprintf(f.Writer, "• %s: %s\n", e.DeviceName, WithCode(e.Code, e.Error))
 			for _, c := range e.Conflicts {
 				fmt.Fprintf(f.Writer, "  %s\n", c.Message)
 			}
@@ -842,6 +845,7 @@ func (f *SimpleFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) error 
 func (f *SimpleFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
+		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 
@@ -859,6 +863,7 @@ func (f *SimpleFormatter) FormatVpnConnections(connections []models.EffectiveCon
 		}
 		fmt.Fprintf(f.Writer, "• %s ↔ %s  (%s)%s\n", c.DeviceA, c.DeviceB, VpnPairTypeDisplay(c.PairType), tags)
 	}
+	writeConnectionsSummary(f.Writer, connections)
 	return nil
 }
 

@@ -118,7 +118,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.create",
-		Description: "Create a new snippet. Content must be supplied inline." + suOnlyTypesNote,
+		Description: "Create a new snippet. Content must be supplied inline. " + models.SnippetUUIDGuidance + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -134,7 +134,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.update_content",
-		Description: "Replace a snippet's content. Requires confirm=true." + suOnlyTypesNote,
+		Description: "Replace a snippet's content. Requires confirm=true. " + models.SnippetUUIDGuidance + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

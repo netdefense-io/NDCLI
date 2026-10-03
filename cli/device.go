@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/fatih/color"
@@ -256,7 +257,7 @@ func runDeviceRemove(cmd *cobra.Command, args []string) error {
 		color.New(color.FgRed).Println(line)
 	}
 	if !helpers.Confirm(fmt.Sprintf("Remove device '%s'?", deviceName)) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.DeviceRemove(context.Background(), org, deviceName); err != nil {
@@ -307,14 +308,14 @@ func runDeviceApproveAll(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	if !helpers.Confirm(fmt.Sprintf("Approve all %d pending devices?", len(listing.Devices))) {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 
 	approved, failed := 0, 0
 	for _, d := range listing.Devices {
 		if err := svc.DeviceApprove(ctx, org, d.Name); err != nil {
-			color.Red("✗ Failed to approve %s: %s", d.Name, err)
+			color.Red("✗ Failed to approve %s: %s", d.Name, errorText(err))
 			failed++
 			continue
 		}

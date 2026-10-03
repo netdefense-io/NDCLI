@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/fatih/color"
@@ -249,7 +250,7 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 						prompt = "Disable auto-connect-hubs? Hub-to-hub connections without manual links will be lost."
 					}
 					if !helpers.Confirm(prompt) {
-						fmt.Println("Cancelled")
+						fmt.Fprintln(os.Stderr, "Cancelled")
 						return nil
 					}
 				}
@@ -273,7 +274,7 @@ func runNetworkDelete(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
 		if !helpers.Confirm(fmt.Sprintf("Delete VPN network '%s'?", vpnName)) {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}

@@ -264,7 +264,7 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 		color.Yellow("⚠  Detaching the schedule stops scheduled backups.")
 		color.Yellow("   The backup config stays configured but won't run until re-attached.")
 		if !helpers.Confirm("Detach backup from its schedule?") {
-			fmt.Println("Cancelled")
+			fmt.Fprintln(os.Stderr, "Cancelled")
 			return nil
 		}
 	}
@@ -287,7 +287,7 @@ func runBackupConfigDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	if !helpers.Confirm("Delete backup configuration? This will also disable backup for all devices.") {
-		fmt.Println("Cancelled")
+		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
 	if err := svc.BackupConfigDelete(context.Background(), org); err != nil {

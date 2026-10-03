@@ -53,8 +53,8 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 	if resp.StatusCode != http.StatusOK {
 		// This call runs unauthenticated, before login, so a hostile or
 		// misbehaving NDManager can respond with an arbitrary body here.
-		// Cobra doesn't SilenceErrors, so this string reaches the
-		// operator's terminal verbatim — scrub terminal control bytes
+		// A failed command prints this string to the operator's
+		// terminal verbatim — scrub terminal control bytes
 		// before splicing the body into the error message, matching
 		// ParseError's handling of APIError fields.
 		body, _ := ReadBody(resp.Body)

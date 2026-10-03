@@ -27,11 +27,12 @@ func ConfirmOrForce(message string, force bool) (bool, error) {
 	return Confirm(message), nil
 }
 
-// Confirm prompts the user for a yes/no confirmation
+// Confirm prompts the user for a yes/no confirmation. The prompt goes to
+// stderr, so stdout carries only the command's output.
 func Confirm(message string) bool {
 	reader := bufio.NewReader(os.Stdin)
 
-	color.New(color.FgYellow).Printf("%s [y/N]: ", message)
+	color.New(color.FgYellow).Fprintf(os.Stderr, "%s [y/N]: ", message)
 
 	response, err := reader.ReadString('\n')
 	if err != nil {

@@ -77,6 +77,13 @@ func SnippetTypesHelp(types []string) string {
 // exactly rather than paraphrase, so it never drifts from this constant.
 const AuthOrderConsistencyRule = `every name must be an auth server delivered to the same device by any of its templates, or already configured on the device; names match exactly (case-sensitive); 'Local Database' is always valid`
 
+// SnippetUUIDGuidance is the sentence every snippet-writing surface states
+// about the managed uuid of the types whose device object is owned by it:
+// the help of snippet create and update-content, and the ndcli.snippet.create
+// and update_content tool descriptions.
+const SnippetUUIDGuidance = "ALIAS, RULE and UNBOUND_* content: leave uuid out and NetDefense supplies it. " +
+	"When copying another snippet's content, drop its uuid: a uuid that another snippet already holds is refused with SNIPPET_UUID_IN_USE."
+
 // AuthPrerequisites is the exact minimum-version/consent line every
 // AUTH_SERVER/AUTH_ORDER-facing surface states.
 const AuthPrerequisites = "ndagent 1.19.2 or later, OPNsense 26.1.6 or later, reject_dangerous_snippets off"
@@ -94,4 +101,17 @@ type SnippetListResponse struct {
 	Page       int       `json:"page"`
 	PerPage    int       `json:"per_page"`
 	TotalPages int       `json:"total_pages"`
+}
+
+// SnippetPull is what `snippet pull` reports: the PULL task it created and,
+// once that task has completed (--wait), the snippet it wrote.
+type SnippetPull struct {
+	Task       string `json:"task"`
+	Status     string `json:"status"`
+	ConfigType string `json:"config_type,omitempty"`
+	// Snippet names the snippet the server creates or updates: the --name
+	// given, or the name it derives from the match key.
+	Snippet string `json:"snippet,omitempty"`
+	// Content is the pulled content as the completed task reported it.
+	Content string `json:"content,omitempty"`
 }

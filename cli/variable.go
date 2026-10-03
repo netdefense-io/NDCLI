@@ -479,7 +479,7 @@ func makeVarDeleteHandler(meta variableScopeMeta) func(*cobra.Command, []string)
 			}
 			msg += "?"
 			if !helpers.Confirm(msg) {
-				fmt.Println("Cancelled")
+				fmt.Fprintln(os.Stderr, "Cancelled")
 				return nil
 			}
 		}
