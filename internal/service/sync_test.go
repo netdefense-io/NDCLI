@@ -101,3 +101,42 @@ func TestSyncRegisterSpec_SanitizesResponse(t *testing.T) {
 		t.Errorf("ScheduleName still contains a control byte: %q", spec.ScheduleName)
 	}
 }
+
+// TestSyncFilters_SendOrgAndOUAsBareNames: NDManager compares organization and
+// ou to names with equality, so they go out exactly as given. An anchored or
+// escaped form (^acme$) would match nothing.
+func TestSyncFilters_SendOrgAndOUAsBareNames(t *testing.T) {
+	var queries []map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"items": []interface{}{}, "total": 0, "tasks": []interface{}{}})
+	}))
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	filter := SyncFilter{Organization: "acme.corp", OU: "branch (east)", Device: "^fw-0[12]$"}
+	if _, err := svc.SyncStatus(context.Background(), "default-org", filter); err != nil {
+		t.Fatalf("SyncStatus: %v", err)
+	}
+	if _, err := svc.SyncApply(context.Background(), "default-org", filter, false); err != nil {
+		t.Fatalf("SyncApply: %v", err)
+	}
+	if _, err := svc.SyncStatus(context.Background(), "default-org", SyncFilter{}); err != nil {
+		t.Fatalf("SyncStatus: %v", err)
+	}
+
+	if len(queries) != 3 {
+		t.Fatalf("expected 3 requests, got %d", len(queries))
+	}
+	for i, q := range queries[:2] {
+		for key, want := range map[string]string{"organization": "acme.corp", "ou": "branch (east)", "device": "^fw-0[12]$"} {
+			if got := q[key]; len(got) != 1 || got[0] != want {
+				t.Errorf("request %d sent %s=%v, want %q", i, key, got, want)
+			}
+		}
+	}
+	if got := queries[2]["organization"]; len(got) != 1 || got[0] != "default-org" {
+		t.Errorf("an empty organization must fall back to the default org as given, got %v", got)
+	}
+}

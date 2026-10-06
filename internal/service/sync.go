@@ -8,15 +8,15 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
-// SyncFilter selects the devices a sync operation applies to. All fields are
-// regex patterns interpreted by NDManager. Empty fields are omitted.
+// SyncFilter selects the devices a sync operation applies to. NDManager
+// matches Organization and OU as exact names, and Device and Template as
+// regex patterns. Empty fields are omitted.
 //
 // Organization defaults to the caller's current org when empty; the caller
 // supplies that fallback explicitly via SyncStatus / SyncApply.
 //
 // Schedule, when set, registers a recurring ScheduledTask spec instead of
-// triggering an immediate sync. The org filter must be an exact name (not a
-// regex) when scheduling, per the API contract.
+// triggering an immediate sync.
 type SyncFilter struct {
 	Organization string
 	Device       string

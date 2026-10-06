@@ -6,10 +6,11 @@ import (
 )
 
 // TestSymbolForResult_TrustItems guards the TRUST_CA/TRUST_CERT result
-// items, using the action/status/code strings NDAgent emits: a "warning"
-// on any trust_* type is informational (⚠, never ✗), a successful
-// trust_reload reads as a reload whatever its action verb, and every
-// "blocked" or "error" item still reads as a failure.
+// items, using the action/status/code strings NDAgent emits: a trust
+// warning is informational like a "warning" in any family (⚠, never ✗; see
+// TestSymbolForResult_WarningIsNeverAFailure), a successful trust_reload
+// reads as a reload whatever its action verb, and every "blocked" or "error"
+// item still reads as a failure.
 func TestSymbolForResult_TrustItems(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -32,8 +33,6 @@ func TestSymbolForResult_TrustItems(t *testing.T) {
 		{"reload scheduled", syncResultEntry{Type: "trust_reload", Action: "scheduled", Status: "success", Code: "TRUST_RELOAD_SCHEDULED"}, "↻"},
 		{"reload failed", syncResultEntry{Type: "trust_reload", Action: "ipsec reload", Status: "warning", Code: "TRUST_RELOAD_FAILED"}, "⚠"},
 		{"unknown consumer", syncResultEntry{Type: "trust_reload", Action: "none", Status: "warning", Code: "TRUST_CONSUMER_UNKNOWN"}, "⚠"},
-		// The informational-warning rule stays scoped to the two families.
-		{"other family warning", syncResultEntry{Type: "alias", Action: "created", Status: "warning"}, "✗"},
 	}
 	for _, tc := range cases {
 		if got := symbolForResult(tc.entry); got != tc.want {

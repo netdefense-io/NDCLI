@@ -31,13 +31,13 @@ func (s *Server) registerSyncTools() {
 	// ndcli.sync.status
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.sync.status",
-		Description: "Show synchronization status for devices matching the filter. All filters are regex patterns. Organization defaults to the configured org.",
+		Description: "Show synchronization status for devices matching the filter. device and template are regex patterns; organization and ou are exact names. Organization defaults to the configured org.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization": stringProperty("Organization name regex (defaults to configured org)"),
+				"organization": stringProperty("Exact organization name (defaults to configured org)"),
 				"device":       stringProperty("Device name regex"),
-				"ou":           stringProperty("OU name regex"),
+				"ou":           stringProperty("Exact OU name"),
 				"drift_status": stringEnumProperty("Filter by drift status", []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
 				"template":     stringProperty("Template name regex — restricts to devices whose effective OU→Template chain matches"),
 			},
@@ -47,13 +47,13 @@ func (s *Server) registerSyncTools() {
 	// ndcli.sync.apply
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.sync.apply",
-		Description: "Trigger configuration sync for every device matching the filter. Filters are regex patterns; org defaults to the configured org. Requires confirm=true for immediate apply. Pass schedule to register a recurring sync spec instead.",
+		Description: "Trigger configuration sync for every device matching the filter. device and template are regex patterns; organization and ou are exact names, and organization defaults to the configured org. Requires confirm=true for immediate apply. Pass schedule to register a recurring sync spec instead.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"organization": stringProperty("Organization name regex (defaults to configured org; must be exact name when schedule is provided)"),
+				"organization": stringProperty("Exact organization name (defaults to configured org)"),
 				"device":       stringProperty("Device name regex"),
-				"ou":           stringProperty("OU name regex"),
+				"ou":           stringProperty("Exact OU name"),
 				"drift_status": stringEnumProperty("Only sync devices with this drift status", []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
 				"template":     stringProperty("Template name regex — restricts to devices whose effective OU→Template chain matches"),
 				"force":        boolProperty("Force sync even if already in sync"),

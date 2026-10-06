@@ -40,6 +40,15 @@ func TestSyncApplyFormatters_ShowTheDeviceErrorCode(t *testing.T) {
 				"Keep one snippet per uuid: delete the others and create them again without a uuid",
 			Code: "SNIPPET_UUID_CONFLICT",
 		},
+		{
+			// NDManager's refusal to build a sync for an agent that would
+			// apply a RULE, ALIAS or UNBOUND_HOST_OVERRIDE snippet only in
+			// part: the snippets and their keys are all in the message.
+			DeviceName: "e2e-a",
+			Error: "This device's NDAgent (1.22.1) applies these snippets only in part; upgrade it to 1.23.0 " +
+				"or later, or edit what is listed: allow-https (RULE: fields it ignores: log)",
+			Code: "SNIPPET_AGENT_TOO_OLD",
+		},
 	} {
 		t.Run(devErr.Code, func(t *testing.T) {
 			resp := makeSyncResponse(devErr)

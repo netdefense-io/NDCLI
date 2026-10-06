@@ -80,6 +80,32 @@ func TestTrustPrerequisites_MatchesTheIntendedWording(t *testing.T) {
 	}
 }
 
+// TestSnippetFieldContract_MatchesTheIntendedWording pins the contract and
+// its agent version against literal copies, for the same reason as
+// TestAuthOrderConsistencyRule_MatchesTheIntendedWording. The version is
+// NDManager's FULL_FIELD_MIN_AGENT_VERSION, below which it refuses the build
+// with SNIPPET_AGENT_TOO_OLD.
+func TestSnippetFieldContract_MatchesTheIntendedWording(t *testing.T) {
+	if SnippetFieldMinAgentVersion != "1.23.0" {
+		t.Errorf("SnippetFieldMinAgentVersion = %q, want 1.23.0", SnippetFieldMinAgentVersion)
+	}
+	const want = `ALIAS, RULE and UNBOUND_* values are JSON strings in OPNsense's own form ("443", "1", "lan,wan"), as snippet pull returns them; ` +
+		`enabled may also be true or false (so may UNBOUND_DOMAIN_FORWARD's forward_tcp_upstream and forward_first), ` +
+		`and ALIAS content and UNBOUND_ACL networks may be lists of strings. ` +
+		`Any other kind is refused when the snippet is saved, except for keys a pull copies but no device applies (%action, alias_meta_*, sort_order, ...), which are ignored. ` +
+		`RULE and ALIAS take any field OPNsense's API defines for the object, and a field left out gets OPNsense's default; ` +
+		`a key the device's OPNsense does not define refuses that rule or alias at sync, which the device keeps as it was (RULE_FIELD_UNKNOWN, ALIAS_FIELD_UNKNOWN), ` +
+		`and the rest of the sync still applies. ` +
+		`A RULE needs a non-empty action, since OPNsense's default (pass) would loosen policy by omission: it is refused when the snippet is saved, and by the agent from 1.23.0 at sync. ` +
+		`A list value of only blanks or commas holds no option key: the sync refuses it (RULE_VALUE_INVALID, or ALIAS_VALUE_INVALID for an alias). ` +
+		`A rule's sequence, like the uuid, is managed by NetDefense: one in content is ignored, and the template's position (PREPEND/APPEND) places the rule. ` +
+		`Full field support needs ndagent 1.23.0 or later: NetDefense refuses to sync a device whose older agent ` +
+		`would apply one of these snippets only in part (SNIPPET_AGENT_TOO_OLD).`
+	if SnippetFieldContract != want {
+		t.Errorf("SnippetFieldContract drifted:\ngot:  %s\nwant: %s", SnippetFieldContract, want)
+	}
+}
+
 // TestSnippetTypeListsHaveNoDuplicates catches a copy-paste slip in either
 // list — a duplicate entry would make a stringEnumProperty/Options list
 // advertise the same value twice.

@@ -39,13 +39,16 @@ var snippetCreateCmd = &cobra.Command{
 
 // snippetCreateLong documents AUTH_SERVER, AUTH_ORDER, TRUST_CA and
 // TRUST_CERT inline, since their content is free-form JSON with no
-// dedicated flags of its own. models.AuthOrderConsistencyRule,
+// dedicated flags of its own. models.SnippetUUIDGuidance,
+// models.SnippetFieldContract, models.AuthOrderConsistencyRule,
 // models.AuthPrerequisites and models.TrustPrerequisites are the sentences
 // other surfaces (MCP tools, docs) must state identically, so they are
 // shared constants rather than literals here.
 const snippetCreateLong = `Create a new snippet.
 
 ` + models.SnippetUUIDGuidance + `
+
+` + models.SnippetFieldContract + `
 
 AUTH_SERVER and AUTH_ORDER content:
 
@@ -177,7 +180,7 @@ var snippetEditCmd = &cobra.Command{
 var snippetUpdateContentCmd = &cobra.Command{
 	Use:               "update-content [name] [file]",
 	Short:             "Update snippet content from file",
-	Long:              "Replace a snippet's content with the contents of a file.\n\n" + models.SnippetUUIDGuidance,
+	Long:              "Replace a snippet's content with the contents of a file.\n\n" + models.SnippetUUIDGuidance + "\n\n" + models.SnippetFieldContract,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSnippets,
 	RunE:              runSnippetUpdateContent,

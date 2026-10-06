@@ -222,3 +222,55 @@ func TestSyncApply_RendersTrustIssuesAlongsideAuthIssues(t *testing.T) {
 		t.Errorf("trust_issues[0].snippet = %v, want [fw-wildcard]", issue["snippet"])
 	}
 }
+
+// TestSyncApply_CarriesTheOlderAgentRefusal: NDManager refuses to build a sync
+// for an agent that would apply a RULE, ALIAS or UNBOUND_HOST_OVERRIDE snippet
+// only in part. The device, the message naming each snippet and its keys, and
+// the code all reach the tool result as fields.
+func TestSyncApply_CarriesTheOlderAgentRefusal(t *testing.T) {
+	const refusal = "This device's NDAgent (1.22.1) applies these snippets only in part; upgrade it to 1.23.0 " +
+		"or later, or edit what is listed: allow-https (RULE: fields it ignores: log)"
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/sync":
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message":          "Sync triggered for 0 device(s); 1 error(s)",
+				"devices_affected": 0,
+				"skipped":          0,
+				"tasks":            []interface{}{},
+				"errors": []map[string]interface{}{
+					{"device_name": "e2e-b", "error": refusal, "code": "SNIPPET_AGENT_TOO_OLD"},
+				},
+			})
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	s := newTestServer(t, srv, "acme")
+	result, err := s.syncApply(context.Background(), &syncApplyInput{Confirm: true})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map data, got %T", resp.Data)
+	}
+	errs, ok := data["errors"].([]interface{})
+	if !ok || len(errs) != 1 {
+		t.Fatalf("expected exactly one error, got %v", data["errors"])
+	}
+	errEntry, _ := errs[0].(map[string]interface{})
+	if errEntry["device"] != "e2e-b" || errEntry["code"] != "SNIPPET_AGENT_TOO_OLD" || errEntry["error"] != refusal {
+		t.Errorf("errors[0] = %v, want device e2e-b, code SNIPPET_AGENT_TOO_OLD and the refusal verbatim", errEntry)
+	}
+	if data["status_code"] != float64(http.StatusBadRequest) {
+		t.Errorf("status_code = %v, want 400", data["status_code"])
+	}
+}

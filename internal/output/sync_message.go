@@ -28,15 +28,14 @@ type syncResultEntry struct {
 	Action string `json:"action"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
-	// Code, Before, After, Available and Risks are additive fields NDAgent
-	// reports only for the AUTH_SERVER/AUTH_ORDER family (SyncAPIItemResult),
-	// plus Code alone for the TRUST_CA/TRUST_CERT family — every other
-	// family's results carry none of them.
-	// Code is the structured outcome code a consumer keys on instead of
-	// parsing Error. Before/After are an auth_facility item's kept/written
-	// order (names only). Available is the resolution set an unresolved
-	// order entry was checked against, reported only on a refusal. Risks is
-	// the auth_local_server warning's structured risk list.
+	// Code, Before, After, Available and Risks are additive fields of
+	// NDAgent's SyncAPIItemResult. Code is the structured outcome code a
+	// consumer keys on instead of parsing Error (AUTH, TRUST, RULE and ALIAS
+	// items). Before/After are an auth_facility item's kept/written order
+	// (names only) or a renumbered local rule's old/new sequence. Available
+	// is the resolution set an unresolved order entry was checked against,
+	// reported only on a refusal. Risks is the auth_local_server warning's
+	// structured risk list.
 	Code      string   `json:"code,omitempty"`
 	Before    []string `json:"before,omitempty"`
 	After     []string `json:"after,omitempty"`
@@ -166,29 +165,29 @@ func writeResultLines(b *strings.Builder, results []syncResultEntry) {
 		} else {
 			fmt.Fprintf(b, "  %s %s%s  %s\n", r.Symbol, r.Type, pad, name)
 		}
-		for _, extra := range authResultDetailLines(r.Action, r.Code, r.Before, r.After, r.Available, r.Risks) {
+		for _, extra := range resultDetailLines(r.Action, r.Code, r.Before, r.After, r.Available, r.Risks) {
 			fmt.Fprintf(b, "      %s\n", extra)
 		}
 	}
 }
 
-// authResultDetailLines renders the additive AUTH_SERVER/AUTH_ORDER result
-// fields a plain Type/Action/Status/Error line doesn't otherwise show:
-// Before/After (an auth_facility item's kept/written order), Available
-// (the resolution set an unresolved order entry was checked against, on a
-// refusal only), Risks (an auth_local_server warning's structured risk
-// list) and Code (the structured outcome code). Names only, never values.
-// TRUST_CA/TRUST_CERT items carry only Code, so for them this is the
-// "code: TRUST_..." line alone.
+// resultDetailLines renders the additive result fields a plain
+// Type/Action/Status/Error line doesn't otherwise show: Before/After (an
+// auth_facility item's kept/written order, or a renumbered local rule's
+// old/new sequence), Available (the resolution set an unresolved order
+// entry was checked against, on a refusal only), Risks (an
+// auth_local_server warning's structured risk list) and Code (the
+// structured outcome code). Names and sequence numbers only, never values.
+// TRUST, ALIAS and most RULE items carry at most Code, so for them this is
+// at most the "code: ..." line.
 //
-// Two things are suppressed as noise rather than detail: the helper
-// reports code "OK" on every successful write/unchanged/delete (not only
-// AUTH_SERVER's own success — see symbolForResult's non-AUTH callers),
-// so printing it would put a redundant "code: OK" under nearly every
-// AUTH_SERVER/AUTH_ORDER row; and an "unchanged" facility's before/after
-// are always identical by definition, so showing both says nothing the
-// "=" symbol on the row above doesn't already say.
-func authResultDetailLines(action, code string, before, after, available, risks []string) []string {
+// Two things are suppressed as noise rather than detail: the AUTH helper
+// reports code "OK" on every successful write/unchanged/delete, so
+// printing it would put a redundant "code: OK" under nearly every
+// AUTH_SERVER/AUTH_ORDER row; and an "unchanged" item's before/after are
+// always identical by definition, so showing both says nothing the "="
+// symbol on the row above doesn't already say.
+func resultDetailLines(action, code string, before, after, available, risks []string) []string {
 	var lines []string
 	if (len(before) > 0 || len(after) > 0) && action != "unchanged" {
 		lines = append(lines, fmt.Sprintf("before: [%s]  after: [%s]", strings.Join(before, ", "), strings.Join(after, ", ")))
@@ -216,25 +215,15 @@ func authResultDetailLines(action, code string, before, after, available, risks 
 // rather than "this build does not know that word" — and it is why an
 // installed package was invisible in `task describe` for a while.
 func symbolForResult(r syncResultEntry) string {
-	// AUTH_SERVER/AUTH_ORDER warnings (ORDER_NAMES_LOCAL_SERVER,
-	// PRIVILEGED_LOCAL_USERS_SHADOWABLE, ...) are never failures —
-	// NetDefense makes no guardrail claim about a server or user
-	// it did not create. Neither are TRUST_CA/TRUST_CERT warnings
-	// (TRUST_RELOAD_FAILED, TRUST_CONSUMER_UNKNOWN): the certificate was
-	// written, and the warning names a service still to restart. This has
-	// to be checked before the generic "any non-success/ok status is a
-	// failure" rule below, or a warning would render as ✗ and read as
-	// broken.
-	//
-	// Scoped to the auth_* and trust_* type families on purpose — every
-	// AUTH result Type carries that prefix (auth_server, auth_facility,
-	// auth_local_server, auth_warning, ...; see
-	// TestSymbolForResult_AuthActionsAndWarningStatus), as does every
-	// TRUST one (trust_ca, trust_cert, trust_reload). Reading Status
-	// alone would let any future or untested family that ever reports
-	// "warning" fall through to the same ⚠, silently overriding this
-	// function's own fail-loud default for an unrecognised status.
-	if r.Status == "warning" && (strings.HasPrefix(r.Type, "auth_") || strings.HasPrefix(r.Type, "trust_")) {
+	// A "warning" item is never a failure, in any family: NDAgent uses the
+	// status for something the sync did not break but someone should know
+	// (a hand-made server named in an AUTH order, a TRUST reload that
+	// failed, a RULE placement OPNsense's sections overrule, a failed pkg
+	// catalog refresh), and the task still completes. It has to be checked
+	// before the generic "any non-success/ok status is a failure" rule
+	// below, or a warning would render as ✗ and read as broken. Any other
+	// status this build does not know still falls through to ✗.
+	if r.Status == "warning" {
 		return "⚠"
 	}
 	if r.Status != "" && r.Status != "success" && r.Status != "ok" {
@@ -254,10 +243,17 @@ func symbolForResult(r syncResultEntry) string {
 		return "~"
 	case "delete", "deleted":
 		return "-"
-	// AUTH_SERVER/AUTH_ORDER (only reached with status success/ok/"")
+	// unchanged: the device already held the object as desired (AUTH,
+	// TRUST, RULE, ALIAS); written: an AUTH_ORDER facility was rewritten.
+	// Only reached with status success/ok/"".
 	case "unchanged":
 		return "="
 	case "written":
+		return "~"
+	// A local rule whose sequence RULE placement raised so the PREPEND
+	// rules of its section come first: a change to the device, counted as
+	// one in the summary line; before/after carry both sequences.
+	case "renumbered":
 		return "~"
 
 	// Package reconcile

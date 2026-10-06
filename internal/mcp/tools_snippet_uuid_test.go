@@ -18,3 +18,14 @@ func TestSnippetWriteToolsStateUUIDGuidance(t *testing.T) {
 		}
 	}
 }
+
+// TestSnippetWriteToolsStateTheFieldContract: the write tools state the same
+// ALIAS, RULE and UNBOUND_* field contract as the CLI help, so a model writes
+// string values and OPNsense's field names.
+func TestSnippetWriteToolsStateTheFieldContract(t *testing.T) {
+	for _, tool := range []string{"ndcli.snippet.create", "ndcli.snippet.update_content"} {
+		if description := registeredToolDescription(t, tool); !strings.Contains(description, models.SnippetFieldContract) {
+			t.Errorf("%s description does not carry the field contract:\n%s", tool, description)
+		}
+	}
+}

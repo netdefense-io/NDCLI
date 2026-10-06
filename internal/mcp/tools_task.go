@@ -29,6 +29,14 @@ type taskIDInput struct {
 	Confirm bool   `json:"confirm,omitempty"`
 }
 
+// syncResultGuide tells a caller how to read the result items the CLI renders
+// with symbols: what a warning and a renumbered local rule mean is otherwise
+// left to the caller to guess from the raw message.
+const syncResultGuide = "A SYNC task's message is a JSON envelope: message (the summary line), " +
+	"results[] (type, name, action, status, code, error) and validation_errors[]. " +
+	"A result with status warning is informational; error and blocked results are failures. " +
+	"A local rule that rule placement moved has action renumbered, with its old and new sequence in before/after."
+
 // registerTaskTools registers task management tools.
 func (s *Server) registerTaskTools() {
 	// ndcli.task.list
@@ -55,7 +63,7 @@ func (s *Server) registerTaskTools() {
 	// ndcli.task.describe
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.task.describe",
-		Description: "Get full details for a single task by its task code.",
+		Description: "Get full details for a single task by its task code. " + syncResultGuide,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
