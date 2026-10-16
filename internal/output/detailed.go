@@ -162,6 +162,9 @@ func (f *DetailedFormatter) FormatTasks(tasks []models.Task, total int) error {
 		if !t.CompletedAt.IsZero() {
 			f.printLabelValue("Completed", FormatTimestamp(t.CompletedAt.Time))
 		}
+		if result := firmwareTrackResultSummary(&tasks[i]); result != "" {
+			f.printLabelValue("Result", result)
+		}
 		if t.ErrorMessage != "" {
 			ColorError.Fprintf(f.Writer, "  Error: %s\n", t.ErrorMessage)
 		}
@@ -212,8 +215,9 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Completed", FormatTimestamp(task.CompletedAt.Time))
 	}
 
-	// Message — FIRMWARE_UPGRADE tasks store a structured JSON data block
-	// rendered via parseFirmwareUpgradeData. SYNC tasks store a different
+	// Message — FIRMWARE_TRACK tasks store a structured JSON result rendered
+	// via ParseFirmwareTrackResult and FIRMWARE_UPGRADE tasks a JSON data
+	// block rendered via parseFirmwareUpgradeData. SYNC tasks store a different
 	// JSON envelope handled by FormatTaskMessage. Non-structured messages
 	// pass through unchanged. wrapMessageLines preserves internal padding
 	// (so columns in the change list line up) and uses a hanging indent
@@ -221,7 +225,15 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 	if task.Message != "" {
 		fmt.Fprintln(f.Writer)
 		sectionBox := NewSharpBox(width)
-		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+		if fr := firmwareTrackResultFor(task); fr != nil {
+			fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Firmware Track Result"))
+			for _, line := range firmwareTrackResultLines(fr) {
+				for _, wrapped := range wrapMessageLines(line, width-5) {
+					fmt.Fprintln(f.Writer, sectionBox.ContentLine(wrapped))
+				}
+			}
+			fmt.Fprintln(f.Writer, sectionBox.BottomLine())
+		} else if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
 			fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle("Firmware Upgrade Result"))
 			for _, line := range formatFirmwareDataLines(fw) {
 				fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
@@ -1259,6 +1271,7 @@ func (f *DetailedFormatter) FormatOrgQuota(quota *models.OrgQuota) error {
 	fmt.Fprintf(f.Writer, "  Features:\n")
 	f.printLabelValue("  Backup", EnabledDisabledWithIcon(quota.BackupEnabled))
 	f.printLabelValue("  Remote Admin", EnabledDisabledWithIcon(quota.RemoteAdminEnabled))
+	f.printLabelValue("  Firmware Tracks", EnabledDisabledWithIcon(quota.FirmwareTracksEnabled))
 	return nil
 }
 

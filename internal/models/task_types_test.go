@@ -15,7 +15,7 @@ import (
 var (
 	nddataModelsTaskTypes = []string{
 		"PING", "SHUTDOWN", "REBOOT", "RESTART", "PULL", "SYNC", "BACKUP", "CONNECT",
-		"PLUGIN_INSTALL", "FIRMWARE_UPGRADE",
+		"PLUGIN_INSTALL", "FIRMWARE_UPGRADE", "FIRMWARE_TRACK",
 	}
 	nddataModelsTaskStatuses = []string{
 		"PENDING", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "EXPIRED", "FAILED", "CANCELED",

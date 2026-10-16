@@ -8,7 +8,7 @@
 
 ## Give an AI agent your firewall fleet
 
-The second binary in this repo, `netdefense-mcp`, exposes **159 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
+The second binary in this repo, `netdefense-mcp`, exposes **177 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, firmware tracks, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
 
 **Start with the sharp edge, because it's the one that matters.** `ndcli.device.console_exec` runs arbitrary shell commands on a device, with administrative privilege, and takes no confirmation flag. It is gated on the caller's role — a read-only token is refused before a stream ever opens — but an agent holding a write-scoped token has a shell. Scope the token you hand an agent accordingly, and if you want a hard limit that no token can cross, set the device-side remote-access policy on the firewall itself (Services → NetDefense → Settings), which caps what any session may be regardless of who asks.
 
@@ -81,11 +81,11 @@ Every command supports `-f table|simple|detailed|json`. Run `ndcli --help` for t
 
 ## Security model
 
-NDAgent — the daemon that runs on the firewall — understands exactly **ten named operations**: ping, config sync, config pull, restart, reboot, shutdown, backup, remote session, plugin install, firmware upgrade. It rejects anything else.
+NDAgent — the daemon that runs on the firewall — understands exactly **eleven named operations**: ping, config sync, config pull, restart, reboot, shutdown, backup, remote session, plugin install, firmware upgrade, firmware track step. It rejects anything else.
 
 Every command dispatched to a device is **Ed25519-signed**, covering the operation, the target device, an expiry, and a strictly-increasing per-device sequence number — so a command can't be replayed, reordered, or forged by a compromised relay in the middle. The agent **opens no listening ports**; it only dials out over TLS, so there's nothing on the device for an attacker to scan or connect to.
 
-**What that does and doesn't buy you.** All of the above is integrity on the *command channel*: it stops tampering, replay, misdelivery, and a compromised relay minting instructions. It is not containment. One of those ten operations is a remote session, and a session reaches a shell — so a compromised control plane, or a stolen credential with write access, is not stopped by any of it. The honest claim is cryptographic integrity on the channel, not "an attacker with your credentials can't do anything".
+**What that does and doesn't buy you.** All of the above is integrity on the *command channel*: it stops tampering, replay, misdelivery, and a compromised relay minting instructions. It is not containment. One of those eleven operations is a remote session, and a session reaches a shell — so a compromised control plane, or a stolen credential with write access, is not stopped by any of it. The honest claim is cryptographic integrity on the channel, not "an attacker with your credentials can't do anything".
 
 The limit that *is* enforced against a caller who already holds write access is set on the device, not here: NDAgent's remote-access policy caps every session at `full`, `readonly` (web UI only — no shell, no SSH, no exec stream) or `disabled`, and the control plane cannot raise it.
 

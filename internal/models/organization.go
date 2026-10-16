@@ -51,6 +51,10 @@ type OrgQuota struct {
 	Snippets           Quota    `json:"snippets"`
 	BackupEnabled      bool     `json:"backup_enabled"`
 	RemoteAdminEnabled bool     `json:"remoteadmin_enabled"`
+	// FirmwareTracksEnabled is whether the plan includes firmware tracks. A
+	// server that predates the flag does not send it, which reads as not
+	// included: the commands are there either way.
+	FirmwareTracksEnabled bool `json:"firmware_tracks_enabled"`
 }
 
 // GetRole returns the role from either field (list uses 'role', describe uses 'user_role')

@@ -248,20 +248,36 @@ func (f *TableFormatter) FormatTasks(tasks []models.Task, total int) error {
 		return nil
 	}
 
-	table := NewStyledTable([]string{"ID", "Type", "Status", "Device", "Created"})
+	// A page that holds firmware track results gets a column for them; a page
+	// without any keeps the columns every other task list has.
+	withResult := anyFirmwareTrackResult(tasks)
+	headers := []string{"ID", "Type", "Status", "Device", "Created"}
+	if withResult {
+		headers = append(headers, "Result")
+	}
+	table := NewStyledTable(headers)
 
-	for _, t := range tasks {
+	for i := range tasks {
+		t := &tasks[i]
 		id := t.ID
 		if len(id) > 8 {
 			id = id[:8]
 		}
-		table.Append([]string{
+		row := []string{
 			id,
 			t.Type,
 			StatusWithIcon(t.Status),
 			t.DeviceName,
 			FormatTimestampShort(t.CreatedAt.Time),
-		})
+		}
+		if withResult {
+			result := firmwareTrackResultSummary(t)
+			if result == "" {
+				result = "-"
+			}
+			row = append(row, result)
+		}
+		table.Append(row)
 	}
 
 	table.Render()
@@ -289,11 +305,16 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 		fmt.Printf("Completed:    %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		// FIRMWARE_UPGRADE tasks store a structured JSON data block;
-		// parseFirmwareUpgradeData unpacks it. SYNC tasks store a different
-		// JSON envelope handled by FormatTaskMessage. Plain messages pass
-		// through unchanged.
-		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+		// FIRMWARE_TRACK and FIRMWARE_UPGRADE tasks store a structured JSON
+		// data block; ParseFirmwareTrackResult and parseFirmwareUpgradeData
+		// unpack them. SYNC tasks store a different JSON envelope handled by
+		// FormatTaskMessage. Plain messages pass through unchanged.
+		if fr := firmwareTrackResultFor(task); fr != nil {
+			fmt.Printf("\nFirmware track result:\n")
+			for _, line := range firmwareTrackResultLines(fr) {
+				fmt.Printf("  %s\n", line)
+			}
+		} else if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
 			fmt.Printf("\nFirmware upgrade result:\n")
 			for _, line := range formatFirmwareDataLines(fw) {
 				fmt.Printf("  %s\n", line)
@@ -1191,8 +1212,9 @@ func (f *TableFormatter) FormatOrgQuota(quota *models.OrgQuota) error {
 
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintf(os.Stdout, "Features:\n")
-	fmt.Fprintf(os.Stdout, "  Backup:       %s\n", EnabledDisabledWithIcon(quota.BackupEnabled))
-	fmt.Fprintf(os.Stdout, "  Remote Admin: %s\n", EnabledDisabledWithIcon(quota.RemoteAdminEnabled))
+	fmt.Fprintf(os.Stdout, "  Backup:          %s\n", EnabledDisabledWithIcon(quota.BackupEnabled))
+	fmt.Fprintf(os.Stdout, "  Remote Admin:    %s\n", EnabledDisabledWithIcon(quota.RemoteAdminEnabled))
+	fmt.Fprintf(os.Stdout, "  Firmware Tracks: %s\n", EnabledDisabledWithIcon(quota.FirmwareTracksEnabled))
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
@@ -24,6 +25,7 @@ func (ScheduledTaskResource) Columns() []registry.Column {
 	return []registry.Column{
 		{Title: "CODE", Width: 12},
 		{Title: "KIND", Width: 8},
+		{Title: "TRACK", Width: 8},
 		{Title: "ENABLED", Width: 8},
 		{Title: "LAST FIRED", Width: 0},
 		{Title: "CREATED BY", Width: 0},
@@ -37,20 +39,37 @@ func (r ScheduledTaskResource) Fetch(ctx context.Context, svc *service.Service, 
 	}
 	rows := make([]registry.Row, 0, len(tasks))
 	for _, t := range tasks {
-		rows = append(rows, registry.Row{
-			ID: t.Code,
-			Cells: []string{
-				t.Code,
-				t.Kind,
-				yesNo(t.Enabled),
-				agoPtr(t.LastFiredAt),
-				uihelp.Default(t.CreatedBy, "—"),
-			},
-		})
+		rows = append(rows, scheduledTaskRow(t))
 	}
 	// ScheduleTaskList is unpaginated — it returns every task spec for the
 	// schedule in one call — so len(tasks) is the true total.
 	return rows, len(tasks), nil
+}
+
+// scheduledTaskRow is one list row, its cells aligned with Columns. The TRACK
+// cell is the firmware track a FIRMWARE spec is the window of, and a dash for
+// every other kind.
+func scheduledTaskRow(t models.ScheduledTask) registry.Row {
+	return registry.Row{
+		ID: t.Code,
+		Cells: []string{
+			t.Code,
+			t.Kind,
+			uihelp.Default(t.Track(), "—"),
+			yesNo(t.Enabled),
+			agoPtr(t.LastFiredAt),
+			uihelp.Default(t.CreatedBy, "—"),
+		},
+	}
+}
+
+// scheduledTaskKindLabel is the kind of a spec for a detail field: a FIRMWARE
+// spec says which track's window it is.
+func scheduledTaskKindLabel(t models.ScheduledTask) string {
+	if track := t.Track(); track != "" {
+		return fmt.Sprintf("%s (%s track)", t.Kind, track)
+	}
+	return t.Kind
 }
 
 func (ScheduledTaskResource) Actions() []registry.Action {

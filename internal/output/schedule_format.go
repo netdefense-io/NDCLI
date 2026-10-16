@@ -41,6 +41,24 @@ func scheduleLastFired(sch *models.Schedule) string {
 	return fmt.Sprintf("%s (%s)", FormatTimestamp(sch.LastFiredAt.Time), RelativeTime(sch.LastFiredAt.Time))
 }
 
+// scheduledTaskSummary is the one-line summary of a spec. A FIRMWARE spec has
+// no request of its own (the body is empty: the spec belongs to a firmware
+// track and is bound to it by NDManager), so it is named for what it is, the
+// window of its track ("fast track window", beside the FIRMWARE kind), instead
+// of being shown as "{}". track is the track the control plane named on the
+// descriptor; one that does not send it leaves a plain "firmware track window".
+// The phrase stays short on purpose: the detailed schedule view draws its specs
+// in a box 60 columns wide that does not wrap.
+func scheduledTaskSummary(kind, track string, raw json.RawMessage) string {
+	if kind == models.ScheduledTaskKindFirmware {
+		if track != "" {
+			return track + " track window"
+		}
+		return "firmware track window"
+	}
+	return scheduledTaskRequestSummary(raw)
+}
+
 // scheduledTaskRequestSummary returns a one-line summary of the raw request
 // JSON stored in a ScheduledTask. It extracts the most useful fields without
 // requiring a full parse of every possible shape.
@@ -155,7 +173,7 @@ func (f *TableFormatter) FormatSchedule(sch *models.Schedule) error {
 		fmt.Fprintf(f.Writer, "Registered specs (%d):\n", len(sch.ScheduledTasks))
 		for _, st := range sch.ScheduledTasks {
 			status := scheduleEnabledLabel(st.Enabled)
-			summary := scheduledTaskRequestSummary(st.Request)
+			summary := scheduledTaskSummary(st.Kind, st.Track(), st.Request)
 			fmt.Fprintf(f.Writer, "  %s  [%s] %s  %s\n", st.Code, st.Kind, status, summary)
 		}
 	}
@@ -176,7 +194,7 @@ func (f *TableFormatter) FormatScheduledTasks(tasks []models.ScheduledTask, tota
 			t.ScheduleName,
 			t.Kind,
 			StatusWithIcon(scheduleEnabledStatus(t.Enabled)),
-			scheduledTaskRequestSummary(t.Request),
+			scheduledTaskSummary(t.Kind, t.Track(), t.Request),
 		})
 	}
 	table.Render()
@@ -189,7 +207,7 @@ func (f *TableFormatter) FormatScheduledTaskRegisterResult(result *models.Schedu
 	fmt.Fprintf(f.Writer, "Code:     %s\n", result.Code)
 	fmt.Fprintf(f.Writer, "Kind:     %s\n", result.Kind)
 	fmt.Fprintf(f.Writer, "Schedule: %s\n", result.ScheduleName)
-	summary := scheduledTaskRequestSummary(result.Request)
+	summary := scheduledTaskSummary(result.Kind, "", result.Request)
 	if summary != "" {
 		fmt.Fprintf(f.Writer, "Request:  %s\n", summary)
 	}
@@ -231,7 +249,7 @@ func (f *SimpleFormatter) FormatSchedule(sch *models.Schedule) error {
 		for _, st := range sch.ScheduledTasks {
 			fmt.Fprintf(f.Writer, "    • %s [%s] %s  %s\n",
 				st.Code, st.Kind, scheduleEnabledLabel(st.Enabled),
-				scheduledTaskRequestSummary(st.Request))
+				scheduledTaskSummary(st.Kind, st.Track(), st.Request))
 		}
 	}
 	return nil
@@ -247,7 +265,7 @@ func (f *SimpleFormatter) FormatScheduledTasks(tasks []models.ScheduledTask, tot
 		fmt.Fprintf(f.Writer, "• %s [%s/%s] %s  %s\n",
 			t.Code, t.ScheduleName, t.Kind,
 			scheduleEnabledLabel(t.Enabled),
-			scheduledTaskRequestSummary(t.Request))
+			scheduledTaskSummary(t.Kind, t.Track(), t.Request))
 	}
 	return nil
 }
@@ -332,7 +350,7 @@ func (f *DetailedFormatter) formatScheduleRich(sch *models.Schedule) {
 		fmt.Fprintln(f.Writer, sectionBox.TopLineWithTitle(fmt.Sprintf("Registered Specs (%d)", len(sch.ScheduledTasks))))
 		for _, st := range sch.ScheduledTasks {
 			status := scheduleEnabledLabel(st.Enabled)
-			line := fmt.Sprintf("%s  [%s]  %s  %s", st.Code, st.Kind, status, scheduledTaskRequestSummary(st.Request))
+			line := fmt.Sprintf("%s  [%s]  %s  %s", st.Code, st.Kind, status, scheduledTaskSummary(st.Kind, st.Track(), st.Request))
 			fmt.Fprintln(f.Writer, sectionBox.ContentLine(line))
 		}
 		fmt.Fprintln(f.Writer, sectionBox.BottomLine())
@@ -354,7 +372,7 @@ func (f *DetailedFormatter) FormatScheduledTasks(tasks []models.ScheduledTask, t
 		f.printLabelValue("Kind", t.Kind)
 		f.printLabel("Status")
 		fmt.Fprintln(f.Writer, scheduleEnabledLabel(t.Enabled))
-		summary := scheduledTaskRequestSummary(t.Request)
+		summary := scheduledTaskSummary(t.Kind, t.Track(), t.Request)
 		if summary != "" {
 			f.printLabelValue("Request", summary)
 		}
@@ -390,7 +408,7 @@ func (f *DetailedFormatter) FormatScheduledTaskRegisterResult(result *models.Sch
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Schedule", result.ScheduleName)
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Created By", result.CreatedBy)
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Created", FormatTimestamp(result.CreatedAt.Time))
-	summary := scheduledTaskRequestSummary(result.Request)
+	summary := scheduledTaskSummary(result.Kind, "", result.Request)
 	if summary != "" {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Request", summary)
 	}

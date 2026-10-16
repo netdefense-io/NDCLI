@@ -37,12 +37,26 @@ const syncResultGuide = "A SYNC task's message is a JSON envelope: message (the 
 	"A result with status warning is informational; error and blocked results are failures. " +
 	"A local rule that rule placement moved has action renumbered, with its old and new sequence in before/after."
 
+// firmwareTrackResultGuide tells a caller how to read the result of a
+// FIRMWARE_TRACK task, which the control plane stores as JSON in the message:
+// the parsed block is returned beside it as firmware_track_result.
+var firmwareTrackResultGuide = "A FIRMWARE_TRACK task is a step of a firmware track (enroll, advance or unenroll) " +
+	"created by the control plane, never by a client. Once it completes, firmware_track_result holds the parsed result: " +
+	"action, track, outcome (success, noop, held, released), reason (a closed code; ndcli.firmware.status lists them), " +
+	"drift (the pin had been changed outside NetDefense), reinstall_entries, and from_version, to_version, " +
+	"target_version and pinned_version when the device reported them. An advance that carried a major upgrade " +
+	"(the move to the next OPNsense series) also has kind \"major\" on every answer from the moment the agent decided " +
+	"to run it, a hold included, with target_version the series, and notes, what the agent found on the way, each one of: " +
+	firmwareNoteGuide + ". " +
+	"A task that is still pending or that failed carries a plain-text message instead."
+
 // registerTaskTools registers task management tools.
 func (s *Server) registerTaskTools() {
 	// ndcli.task.list
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.task.list",
-		Description: "List tasks (sync, ping, reboot, plugin-install, ...) across an organization with optional filters.",
+		Name: "ndcli.task.list",
+		Description: "List tasks (sync, ping, reboot, plugin-install, ...) across an organization with optional filters. " +
+			"A FIRMWARE_TRACK task carries its parsed result as firmware_track_result once it has completed.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -63,7 +77,7 @@ func (s *Server) registerTaskTools() {
 	// ndcli.task.describe
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.task.describe",
-		Description: "Get full details for a single task by its task code. " + syncResultGuide,
+		Description: "Get full details for a single task by its task code. " + syncResultGuide + " " + firmwareTrackResultGuide,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -183,7 +197,7 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *mcp.CallToolRequest)
 }
 
 func taskSummary(t *models.Task) map[string]interface{} {
-	return map[string]interface{}{
+	summary := map[string]interface{}{
 		"task":        t.ID,
 		"type":        t.Type,
 		"status":      t.Status,
@@ -192,10 +206,25 @@ func taskSummary(t *models.Task) map[string]interface{} {
 		"created_at":  t.CreatedAt,
 		"expires_at":  t.ExpiresAt,
 	}
+	addFirmwareTrackResult(summary, t)
+	return summary
+}
+
+// addFirmwareTrackResult joins the parsed result of a completed FIRMWARE_TRACK
+// task to the task's data, so a caller reads outcome and reason as fields
+// instead of decoding JSON held in a string. Any other task, and a message
+// that is not a result, adds nothing: the key is absent, never null.
+func addFirmwareTrackResult(data map[string]interface{}, t *models.Task) {
+	if t.Type != models.TaskTypeFirmwareTrack {
+		return
+	}
+	if result := models.ParseFirmwareTrackResult(t.Message); result != nil {
+		data["firmware_track_result"] = result
+	}
 }
 
 func taskFull(t *models.Task) map[string]interface{} {
-	return map[string]interface{}{
+	full := map[string]interface{}{
 		"task":          t.ID,
 		"type":          t.Type,
 		"status":        t.Status,
@@ -212,4 +241,6 @@ func taskFull(t *models.Task) map[string]interface{} {
 		"started_at":    t.StartedAt,
 		"completed_at":  t.CompletedAt,
 	}
+	addFirmwareTrackResult(full, t)
+	return full
 }

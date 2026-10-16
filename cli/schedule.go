@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
@@ -19,7 +20,8 @@ var scheduleCmd = &cobra.Command{
 
 A schedule is a pure cadence (cron expression + timezone). The "what to run"
 is registered separately: use --schedule <name> on ndcli run or ndcli sync
-apply to attach a task spec to this schedule.
+apply to attach a task spec to this schedule. A firmware track's update window
+is a spec too, attached with 'ndcli firmware track schedule'.
 
 Each schedule is identified by its name (unique per organization). Registered
 task specs are addressed by their server-generated code (8-char base62).`,
@@ -47,8 +49,12 @@ func runScheduleList(cmd *cobra.Command, args []string) error {
 // ── describe ─────────────────────────────────────────────────────────────────
 
 var scheduleDescribeCmd = &cobra.Command{
-	Use:               "describe <name>",
-	Short:             "Show schedule details including registered specs",
+	Use:   "describe <name>",
+	Short: "Show schedule details including registered specs",
+	Long: `Show a schedule and the task specs registered on it. A spec of kind FIRMWARE is
+the update window of a firmware track and is listed with the track's name (for
+example "fast track window"); -f json carries it as firmware_track, null for
+every other kind.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeScheduleNames,
 	RunE:              runScheduleDescribe,
@@ -146,8 +152,13 @@ func runScheduleDisable(cmd *cobra.Command, args []string) error {
 // ── delete ───────────────────────────────────────────────────────────────────
 
 var scheduleDeleteCmd = &cobra.Command{
-	Use:               "delete <name>",
-	Short:             "Delete a schedule and all its registered specs",
+	Use:   "delete <name>",
+	Short: "Delete a schedule and all its registered specs",
+	Long: `Delete a schedule and every task spec registered on it.
+
+A schedule that a firmware track's update windows run on is refused, and the
+refusal names those tracks: detach each first with
+'ndcli firmware track schedule <track> --no-schedule', then delete.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeScheduleNames,
 	RunE:              runScheduleDelete,
@@ -172,7 +183,7 @@ func runScheduleDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := svc.ScheduleDelete(context.Background(), org, name); err != nil {
-		return err
+		return firmwareAdvice(err)
 	}
 	color.Green("Schedule %q deleted", name)
 	return nil
@@ -194,7 +205,11 @@ Without --schedule, every spec in the org is shown; each row includes its
 schedule_name column so the list is self-describing.
 
 With --schedule <name>, only specs belonging to that schedule are returned
-(server-side filtering; unknown schedule name returns an empty list).`,
+(server-side filtering; unknown schedule name returns an empty list).
+
+A spec of kind FIRMWARE is the update window of a firmware track and is listed
+with the track's name (for example "fast track window"); -f json carries it as
+firmware_track, null for every other kind.`,
 	Args: cobra.NoArgs,
 	RunE: runScheduleTasksList,
 }
@@ -223,7 +238,7 @@ func runScheduleTasksEnable(cmd *cobra.Command, args []string) error {
 	code := args[0]
 	spec, err := svc.ScheduledTaskSetEnabledByCode(context.Background(), org, code, true)
 	if err != nil {
-		return err
+		return firmwareAdvice(err)
 	}
 	color.Green("Spec %s (schedule %q) enabled", code, spec.ScheduleName)
 	return nil
@@ -242,7 +257,7 @@ func runScheduleTasksDisable(cmd *cobra.Command, args []string) error {
 	code := args[0]
 	spec, err := svc.ScheduledTaskSetEnabledByCode(context.Background(), org, code, false)
 	if err != nil {
-		return err
+		return firmwareAdvice(err)
 	}
 	color.Green("Spec %s (schedule %q) disabled", code, spec.ScheduleName)
 	return nil
@@ -268,7 +283,16 @@ func runScheduleTasksRemove(cmd *cobra.Command, args []string) error {
 	spec, _ := svc.ScheduledTaskGet(ctx, org, code)
 
 	prompt := fmt.Sprintf("Remove spec %s? This cannot be undone.", code)
-	if spec != nil && spec.Kind == "BACKUP" {
+	// The descriptor names its track, so the commands do too.
+	if spec != nil && spec.Kind == models.ScheduledTaskKindFirmware {
+		return &service.Error{
+			Code: service.CodeInvalidInput,
+			Message: fmt.Sprintf("Spec %s is a firmware track's update window and belongs to the track: detach the track from "+
+				"its schedule with %s, or move it to another schedule with %s",
+				code, firmwareCLIVocabulary.DetachCommand(spec.Track()), firmwareCLIVocabulary.ScheduleCommand(spec.Track())),
+		}
+	}
+	if spec != nil && spec.Kind == models.ScheduledTaskKindBackup {
 		color.Yellow("⚠  This is the org's BACKUP spec — removing it stops scheduled backups.")
 		color.Yellow("   The backup config stays configured but won't run until re-attached to a schedule.")
 		prompt = fmt.Sprintf("Remove BACKUP spec %s?", code)
@@ -285,7 +309,7 @@ func runScheduleTasksRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := svc.ScheduledTaskRemoveByCode(ctx, org, code); err != nil {
-		return err
+		return firmwareAdvice(err)
 	}
 	color.Green("Spec %s removed", code)
 	return nil

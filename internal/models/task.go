@@ -46,6 +46,7 @@ const (
 const (
 	TaskTypeBackup          = "BACKUP"
 	TaskTypeConnect         = "CONNECT"
+	TaskTypeFirmwareTrack   = "FIRMWARE_TRACK"
 	TaskTypeFirmwareUpgrade = "FIRMWARE_UPGRADE"
 	TaskTypePing            = "PING"
 	TaskTypePull            = "PULL"
@@ -60,10 +61,12 @@ const (
 // filter (NDDataModels' TaskType enum). It is the single source for `task list
 // --type` help, completion and validation and for the ndcli.task.list enum.
 // Treat it as read-only: it is shared by reference with all of them. It is the
-// listable set, not the creatable one (see service.validRunTypes).
+// listable set, not the creatable one (see service.validRunTypes):
+// FIRMWARE_TRACK is listed because the firmware tracks create those tasks, and
+// no client can.
 var TaskTypes = []string{
-	TaskTypeBackup, TaskTypeConnect, TaskTypeFirmwareUpgrade, TaskTypePing, TaskTypePluginInstall,
-	TaskTypePull, TaskTypeReboot, TaskTypeRestart, TaskTypeShutdown, TaskTypeSync,
+	TaskTypeBackup, TaskTypeConnect, TaskTypeFirmwareTrack, TaskTypeFirmwareUpgrade, TaskTypePing,
+	TaskTypePluginInstall, TaskTypePull, TaskTypeReboot, TaskTypeRestart, TaskTypeShutdown, TaskTypeSync,
 }
 
 // TaskStatuses is NDDataModels' TaskStatus enum in lifecycle order, the single

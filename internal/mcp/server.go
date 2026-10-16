@@ -125,6 +125,7 @@ func (s *Server) registerAll() {
 	s.registerNetworkTools()
 	s.registerVariableTools()
 	s.registerBackupTools()
+	s.registerFirmwareTools()
 	s.registerDeviceHealthTool()
 	s.registerScheduleTools()
 	s.registerConsoleTools()
@@ -263,9 +264,9 @@ func (s *Server) successResultWithPagination(data interface{}, page, perPage, to
 // errorResult creates an error tool result. Recognises both the legacy
 // *ToolError (from pre-service handlers) and the unified *service.Error so
 // the wire-level error code stays stable across the migration. When the error
-// carries the code NDManager answered with, that code is error.code instead:
-// it is the one the CLI shows, and API_ERROR on its own says only that the
-// request failed.
+// carries the code NDManager answered with, that code is error.code instead
+// (service.ErrorCode): it is the one the CLI shows, and API_ERROR on its own
+// says only that the request failed.
 func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 	response := ToolResponse{
 		Success: false,
@@ -280,7 +281,7 @@ func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 	case *service.Error:
 		response.Error.Code = e.Code
 	}
-	if code := api.GetErrorCode(err); code != "" {
+	if code := service.ErrorCode(err); code != "" {
 		response.Error.Code = code
 	}
 
@@ -297,6 +298,16 @@ func (s *Server) previewResult(action, target string) (*mcp.CallToolResult, erro
 // has to carry the facts it should restate — a scheduled run's resolved
 // instant, for one — as data rather than prose.
 func (s *Server) previewResultWithData(action, target string, extra map[string]interface{}) (*mcp.CallToolResult, error) {
+	response := ToolResponse{
+		Success: true,
+		Data:    previewPayload(action, target, extra),
+		Message: fmt.Sprintf("Preview: Would %s '%s'. Set confirm=true to execute.", action, target),
+	}
+	return s.jsonResult(response, false)
+}
+
+// previewPayload is the data of a preview: what it is, plus the extra named fields.
+func previewPayload(action, target string, extra map[string]interface{}) map[string]interface{} {
 	data := map[string]interface{}{
 		"preview": true,
 		"action":  action,
@@ -305,10 +316,20 @@ func (s *Server) previewResultWithData(action, target string, extra map[string]i
 	for k, v := range extra {
 		data[k] = v
 	}
+	return data
+}
+
+// previewResultWithNote is previewResultWithData with a sentence the model has
+// to see before it asks for confirm=true, in the message as well as in the data
+// (note): the consequence of an action that cannot be undone, or that starts
+// something the user did not see.
+func (s *Server) previewResultWithNote(action, target, note string, extra map[string]interface{}) (*mcp.CallToolResult, error) {
+	data := previewPayload(action, target, extra)
+	data["note"] = note
 	response := ToolResponse{
 		Success: true,
 		Data:    data,
-		Message: fmt.Sprintf("Preview: Would %s '%s'. Set confirm=true to execute.", action, target),
+		Message: fmt.Sprintf("Preview: Would %s '%s'. %s Set confirm=true to execute.", action, target, note),
 	}
 	return s.jsonResult(response, false)
 }

@@ -23,24 +23,52 @@ type Schedule struct {
 	ScheduledTasks   []ScheduledTask `json:"scheduled_tasks,omitempty"` // populated only on GET-one
 }
 
+// The kinds of work a ScheduledTask spec describes (NDDataModels'
+// ScheduledTaskKind).
+const (
+	ScheduledTaskKindRun      = "RUN"
+	ScheduledTaskKindSync     = "SYNC"
+	ScheduledTaskKindBackup   = "BACKUP"
+	ScheduledTaskKindFirmware = "FIRMWARE"
+)
+
 // ScheduledTask is a registered task spec associated with a schedule. Addressed
-// by Code (server-generated 8-char base62); Kind is "RUN" or "SYNC".
+// by Code (server-generated 8-char base62); Kind is RUN, SYNC, BACKUP or
+// FIRMWARE. A FIRMWARE spec is a firmware track's update window: it belongs to
+// the track, which attaches and detaches it ('ndcli firmware track schedule');
+// NDManager refuses to enable, disable or remove it here.
 // Request is the verbatim request body stored by NDManager (device names,
 // OUs, task type, payload, sync filters, …) — kept as raw JSON because the
 // shape varies by Kind and the CLI only needs to display it, not parse it.
 //
 // ScheduleName is present in org-wide list responses
 // (GET /organizations/{org}/scheduled-tasks) so each row is self-describing.
+//
+// FirmwareTrack names the track a FIRMWARE spec is the window of (fast,
+// regular or stable) and is null for every other kind. NDManager sends the key
+// on every descriptor (the org-wide list, the read by code, the per-schedule
+// list and the specs nested in a schedule), so it is a pointer: a descriptor
+// decoded and printed again keeps the null instead of an empty string.
 type ScheduledTask struct {
-	Code         string          `json:"code"`
-	ScheduleName string          `json:"schedule_name"` // set on org-wide list items
-	Kind         string          `json:"kind"`          // RUN | SYNC
-	Request      json.RawMessage `json:"request"`
-	Enabled      bool            `json:"enabled"`
-	CreatedBy    string          `json:"created_by"`
-	LastFiredAt  *FlexibleTime   `json:"last_fired_at"`
-	CreatedAt    FlexibleTime    `json:"created_at"`
-	UpdatedAt    FlexibleTime    `json:"updated_at"`
+	Code          string          `json:"code"`
+	ScheduleName  string          `json:"schedule_name"`  // set on org-wide list items
+	Kind          string          `json:"kind"`           // RUN | SYNC | BACKUP | FIRMWARE
+	FirmwareTrack *string         `json:"firmware_track"` // fast | regular | stable for FIRMWARE, else null
+	Request       json.RawMessage `json:"request"`
+	Enabled       bool            `json:"enabled"`
+	CreatedBy     string          `json:"created_by"`
+	LastFiredAt   *FlexibleTime   `json:"last_fired_at"`
+	CreatedAt     FlexibleTime    `json:"created_at"`
+	UpdatedAt     FlexibleTime    `json:"updated_at"`
+}
+
+// Track returns the firmware track the spec is the window of, or "" when it is
+// not a firmware window (or the control plane predates the field).
+func (t ScheduledTask) Track() string {
+	if t.FirmwareTrack == nil {
+		return ""
+	}
+	return *t.FirmwareTrack
 }
 
 // ScheduleListResponse is the envelope returned by

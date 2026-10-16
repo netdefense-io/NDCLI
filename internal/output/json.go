@@ -59,15 +59,23 @@ func (f *JSONFormatter) FormatDevice(device *models.Device) error {
 
 // FormatTasks formats tasks as JSON
 func (f *JSONFormatter) FormatTasks(tasks []models.Task, total int) error {
+	// A nil list stays null and an empty one stays [], as they always printed.
+	var rows []jsonTask
+	if tasks != nil {
+		rows = make([]jsonTask, len(tasks))
+		for i := range tasks {
+			rows[i] = newJSONTask(&tasks[i])
+		}
+	}
 	return f.output(map[string]interface{}{
-		"tasks": tasks,
+		"tasks": rows,
 		"total": total,
 	})
 }
 
 // FormatTask formats a single task as JSON
 func (f *JSONFormatter) FormatTask(task *models.Task) error {
-	return f.output(task)
+	return f.output(newJSONTask(task))
 }
 
 // FormatRunResult formats a multi-device run result as JSON

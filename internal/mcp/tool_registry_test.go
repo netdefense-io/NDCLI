@@ -58,8 +58,8 @@ func TestToolRegistry_SupportAndResponderNames(t *testing.T) {
 		}
 	}
 
-	if got := len(names); got != 159 {
-		t.Errorf("the server registers %d tools, want 159 — update this count deliberately, with the README and CLAUDE.md", got)
+	if got := len(names); got != 177 {
+		t.Errorf("the server registers %d tools, want 177 — update this count deliberately, with the README and CLAUDE.md", got)
 	}
 }
 

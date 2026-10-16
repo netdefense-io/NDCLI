@@ -228,6 +228,20 @@ type Formatter interface {
 	// VPN prefix provisioning (network prefix add --value)
 	FormatVpnPrefixProvisioned(p VpnPrefixProvision) error
 
+	// Firmware tracks (staged OPNsense updates)
+	FormatFirmwareConfig(config *models.FirmwareConfig) error
+	FormatFirmwareConfigDeleted(result *models.FirmwareConfigDeleted) error
+	FormatFirmwareTracks(tracks []models.FirmwareTrack) error
+	FormatFirmwareTrack(track *models.FirmwareTrack) error
+	FormatFirmwareAssignment(result *models.FirmwareAssignment) error
+	FormatFirmwareDevices(list *models.FirmwareDeviceList) error
+	FormatFirmwareHistory(history *models.FirmwareHistory) error
+	FormatFirmwareRollout(rollout *models.FirmwareRollout) error
+	FormatFirmwareHalts(list *models.FirmwareHaltList) error
+	FormatFirmwareHalt(result *models.FirmwareHaltResult) error
+	FormatFirmwarePromotion(result *models.FirmwarePromotion) error
+	FormatFirmwareFailuresCleared(result *models.FirmwareFailuresCleared) error
+
 	// Messages
 	Success(message string)
 	Error(message string)

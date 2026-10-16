@@ -133,8 +133,12 @@ func (s *Server) registerOrgTools() {
 	}, s.handleOrgDelete)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.org.quota",
-		Description: "Show the plan limits and current usage for an organization.",
+		Name: "ndcli.org.quota",
+		Description: "Show the plan limits and current usage for an organization, and which plan features it has: " +
+			"backup_enabled, remoteadmin_enabled and firmware_tracks_enabled. Check firmware_tracks_enabled before using the " +
+			"ndcli.firmware.* tools: on a plan without it they answer FEATURE_NOT_AVAILABLE, reads included, unless the " +
+			"organization already has a firmware configuration, whose reads keep answering and which can still be wound " +
+			"down (see ndcli.firmware.config_show).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

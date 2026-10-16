@@ -53,6 +53,11 @@ type scheduleTaskRemoveInput struct {
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
+// scheduleSpecTrackGuide says what a spec's kind and firmware_track mean, in the
+// descriptions of the tools that return specs.
+const scheduleSpecTrackGuide = "A spec of kind FIRMWARE is the update window of a firmware track, and its firmware_track " +
+	"says which one (fast, regular or stable); firmware_track is null for every other kind."
+
 // ── registration ──────────────────────────────────────────────────────────────
 
 // registerScheduleTools registers all ndcli.schedule.* MCP tools.
@@ -72,7 +77,7 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.describe
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.describe",
-		Description: "Get full details for a named schedule, including its registered task specs.",
+		Description: "Get full details for a named schedule, including its registered task specs. " + scheduleSpecTrackGuide,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -130,8 +135,10 @@ func (s *Server) registerScheduleTools() {
 
 	// ndcli.schedule.delete
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.schedule.delete",
-		Description: "Delete a cadence schedule and all its registered specs. Requires confirm=true.",
+		Name: "ndcli.schedule.delete",
+		Description: "Delete a cadence schedule and all its registered specs. A schedule a firmware track's update windows run on " +
+			"is refused with FIRMWARE_SPEC_MANAGED, and the error names those tracks: detach each first with " +
+			"ndcli.firmware.track_schedule (track=<track>, no_schedule=true), then delete. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -146,7 +153,7 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.tasks.list
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.tasks.list",
-		Description: "List registered task specs org-wide. Omit schedule for all specs; provide schedule to filter to one cadence.",
+		Description: "List registered task specs org-wide. Omit schedule for all specs; provide schedule to filter to one cadence. " + scheduleSpecTrackGuide,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -159,7 +166,7 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.tasks.enable
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.tasks.enable",
-		Description: "Enable a registered task spec by its code (org-wide, no schedule name needed).",
+		Description: "Enable a registered task spec by its code (org-wide, no schedule name needed). A spec of kind FIRMWARE is a firmware track's update window and belongs to the track: refused with FIRMWARE_SPEC_MANAGED; use ndcli.firmware.track_schedule instead.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -173,7 +180,7 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.tasks.disable
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.tasks.disable",
-		Description: "Disable a registered task spec by its code (org-wide, no schedule name needed).",
+		Description: "Disable a registered task spec by its code (org-wide, no schedule name needed). A spec of kind FIRMWARE is a firmware track's update window and belongs to the track: refused with FIRMWARE_SPEC_MANAGED; use ndcli.firmware.track_schedule instead.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -187,7 +194,7 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.tasks.remove
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.tasks.remove",
-		Description: "Remove a task spec by its code (org-wide, no schedule name needed). Requires confirm=true.",
+		Description: "Remove a task spec by its code (org-wide, no schedule name needed). A spec of kind FIRMWARE is a firmware track's update window and belongs to the track: refused with FIRMWARE_SPEC_MANAGED; use ndcli.firmware.track_schedule instead. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -360,7 +367,7 @@ func (s *Server) handleScheduleDelete(ctx context.Context, req *mcp.CallToolRequ
 	defer cancel()
 
 	if err := s.svc.ScheduleDelete(apiCtx, org, input.Name); err != nil {
-		return s.errorResult(err)
+		return s.firmwareError(err)
 	}
 	return s.successResult(map[string]interface{}{
 		"deleted": true,
@@ -416,7 +423,7 @@ func (s *Server) handleScheduleTasksEnable(ctx context.Context, req *mcp.CallToo
 
 	spec, err := s.svc.ScheduledTaskSetEnabledByCode(apiCtx, org, input.Code, true)
 	if err != nil {
-		return s.errorResult(err)
+		return s.firmwareError(err)
 	}
 	return s.successResult(spec, "Spec enabled")
 }
@@ -440,7 +447,7 @@ func (s *Server) handleScheduleTasksDisable(ctx context.Context, req *mcp.CallTo
 
 	spec, err := s.svc.ScheduledTaskSetEnabledByCode(apiCtx, org, input.Code, false)
 	if err != nil {
-		return s.errorResult(err)
+		return s.firmwareError(err)
 	}
 	return s.successResult(spec, "Spec disabled")
 }
@@ -466,7 +473,7 @@ func (s *Server) handleScheduleTasksRemove(ctx context.Context, req *mcp.CallToo
 	defer cancel()
 
 	if err := s.svc.ScheduledTaskRemoveByCode(apiCtx, org, input.Code); err != nil {
-		return s.errorResult(err)
+		return s.firmwareError(err)
 	}
 	return s.successResult(map[string]interface{}{
 		"removed": true,

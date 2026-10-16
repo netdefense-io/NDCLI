@@ -143,6 +143,10 @@ func init() {
 	)
 	firmwareUpgradeCmd.Long = `Upgrade OPNsense firmware on the targeted device(s).
 
+A device in a firmware track is refused: its track moves it between releases.
+Move it back to unmanaged first ('ndcli firmware device set'), or leave the
+updates to its track ('ndcli firmware').
+
 --mode minor applies the pending point release and reboots the device. With
 --no-reboot it applies the package updates only and does not reboot: base and
 kernel updates stay deferred, and the device runs the new packages on the old
@@ -224,17 +228,22 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 			// When --schedule is set, register a recurring spec instead of
 			// creating tasks immediately. The server enforces mutual exclusion
 			// with scheduled_at (422); we also guard client-side.
+			//
+			// A device in a firmware track is refused a firmware upgrade
+			// (FIRMWARE_DEVICE_MANAGED) on both paths; the refusal is
+			// explained by the server, and firmwareAdvice adds the command
+			// that takes the device out of its track.
 			if scheduleName != "" {
 				spec, err := svc.RunRegisterSpec(context.Background(), org, opts)
 				if err != nil {
-					return err
+					return firmwareAdvice(err)
 				}
 				return formatter.FormatScheduledTaskRegisterResult(spec)
 			}
 
 			result, err := svc.Run(context.Background(), org, opts)
 			if err != nil {
-				return err
+				return firmwareAdvice(err)
 			}
 			return formatter.FormatRunResult(result)
 		},

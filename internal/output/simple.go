@@ -74,9 +74,14 @@ func (f *SimpleFormatter) FormatTasks(tasks []models.Task, total int) error {
 		return nil
 	}
 
-	for _, t := range tasks {
+	for i := range tasks {
+		t := &tasks[i]
 		status := ColoredStatus(t.Status)
-		fmt.Fprintf(f.Writer, "• %s - %s [%s]\n", t.ID[:8], t.Type, status)
+		fmt.Fprintf(f.Writer, "• %s - %s [%s]", t.ID[:8], t.Type, status)
+		if result := firmwareTrackResultSummary(t); result != "" {
+			fmt.Fprintf(f.Writer, " %s", result)
+		}
+		fmt.Fprintln(f.Writer)
 	}
 	return nil
 }
@@ -102,7 +107,12 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 		fmt.Fprintf(f.Writer, "  Completed: %s\n", FormatTimestamp(task.CompletedAt.Time))
 	}
 	if task.Message != "" {
-		if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
+		if fr := firmwareTrackResultFor(task); fr != nil {
+			fmt.Fprintf(f.Writer, "  Firmware track result:\n")
+			for _, line := range firmwareTrackResultLines(fr) {
+				fmt.Fprintf(f.Writer, "    %s\n", line)
+			}
+		} else if fw := parseFirmwareUpgradeData(task.Message); fw != nil {
 			fmt.Fprintf(f.Writer, "  Firmware upgrade result:\n")
 			for _, line := range formatFirmwareDataLines(fw) {
 				fmt.Fprintf(f.Writer, "    %s\n", line)
@@ -667,6 +677,7 @@ func (f *SimpleFormatter) FormatOrgQuota(quota *models.OrgQuota) error {
 	fmt.Fprintf(f.Writer, "• Snippets: %s\n", simpleQuotaLine(quota.Snippets))
 	fmt.Fprintf(f.Writer, "+ Backup: %s\n", enabledDisabledText(quota.BackupEnabled))
 	fmt.Fprintf(f.Writer, "+ Remote Admin: %s\n", enabledDisabledText(quota.RemoteAdminEnabled))
+	fmt.Fprintf(f.Writer, "+ Firmware Tracks: %s\n", enabledDisabledText(quota.FirmwareTracksEnabled))
 	return nil
 }
 

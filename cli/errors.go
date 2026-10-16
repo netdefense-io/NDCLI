@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -31,7 +30,7 @@ func printCommandError(w io.Writer, err error) {
 		return
 	}
 	var doc commandErrorJSON
-	doc.Error.Code = api.GetErrorCode(err)
+	doc.Error.Code = service.ErrorCode(err)
 	doc.Error.Message = err.Error()
 	// A struct of two strings always marshals.
 	out, _ := json.MarshalIndent(doc, "", "  ")
@@ -55,10 +54,10 @@ func refusalWithList(err error, header, listTitle string, items []string) error 
 	return &service.Error{Code: service.CodeAPIError, Message: b.String(), Err: err}
 }
 
-// errorText is err's message with NDManager's error code in front, when the
-// error carries one.
+// errorText is err's message with the error's code in front, when it carries
+// one: NDManager's, or the service's own for a version skew (service.ErrorCode).
 func errorText(err error) string {
-	return output.WithCode(api.GetErrorCode(err), err.Error())
+	return output.WithCode(service.ErrorCode(err), err.Error())
 }
 
 // jsonErrors reports whether errors are printed as JSON: the command's

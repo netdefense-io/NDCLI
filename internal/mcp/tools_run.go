@@ -316,6 +316,8 @@ func (s *Server) registerRunTools() {
 			"mode=minor applies a point release; mode=major upgrades the full series. " +
 			"DESTRUCTIVE: triggers an upgrade and (by default) reboots the firewall. " +
 			"major+reboot=false is rejected by the server (422). " +
+			"A device in a firmware track is refused with FIRMWARE_DEVICE_MANAGED: its track moves it between " +
+			"releases; take it out of the track first (ndcli.firmware.device_set with track=unmanaged). " +
 			"Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type":       "object",
@@ -413,14 +415,14 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 	if input.Schedule != "" {
 		spec, err := s.svc.RunRegisterSpec(apiCtx, org, opts)
 		if err != nil {
-			return s.errorResult(err)
+			return s.firmwareError(err)
 		}
 		return s.successResult(spec, fmt.Sprintf("Registered %s spec %s on schedule %q", models.TaskTypeFirmwareUpgrade, spec.Code, spec.ScheduleName))
 	}
 
 	result, err := s.svc.Run(apiCtx, org, opts)
 	if err != nil {
-		return s.errorResult(err)
+		return s.firmwareError(err)
 	}
 
 	data, summary := runResultResponse(result, resolved, models.TaskTypeFirmwareUpgrade)

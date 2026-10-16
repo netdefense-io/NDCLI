@@ -2,7 +2,7 @@
 #
 # Render the final mcpb/manifest.json by filling in the "tools" array from a
 # live introspection of the netdefense-mcp binary, rather than hand-maintaining
-# ~130 tool entries that would rot the moment a tool is added/renamed/removed.
+# 177 tool entries that would rot the moment a tool is added/renamed/removed.
 #
 # Tool registration in internal/mcp/server.go (NewServer) is unconditional --
 # every registerXTools() call runs before any auth check -- so `tools/list`

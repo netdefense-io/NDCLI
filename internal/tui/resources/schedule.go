@@ -133,7 +133,7 @@ func (scheduleResource) Describe(ctx context.Context, svc *service.Service, org,
 		for _, t := range sch.ScheduledTasks {
 			taskFields = append(taskFields, registry.Field{
 				Label: t.Code,
-				Value: fmt.Sprintf("%s · %s", t.Kind, enabledLabel(t.Enabled)),
+				Value: fmt.Sprintf("%s · %s", scheduledTaskKindLabel(t), enabledLabel(t.Enabled)),
 			})
 		}
 		sections = append(sections, registry.Section{Title: "Registered tasks", Fields: taskFields})

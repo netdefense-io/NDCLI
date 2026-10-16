@@ -203,6 +203,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(backupCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(deviceCmd)
+	rootCmd.AddCommand(firmwareCmd)
 	rootCmd.AddCommand(networkCmd)
 	rootCmd.AddCommand(orgCmd)
 	rootCmd.AddCommand(ouCmd)
