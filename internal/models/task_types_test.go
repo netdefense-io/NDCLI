@@ -59,6 +59,16 @@ func TestTaskStatusAliasesResolveToCanonicalStatuses(t *testing.T) {
 	}
 }
 
+// nddataModelsTaskOrigins is a copy of NDDataModels' TASK_ORIGINS (DB.py,
+// v1.43), in its order: the values of the task list's origin filter.
+var nddataModelsTaskOrigins = []string{"MANUAL", "SCHEDULE", "FIRMWARE"}
+
+func TestTaskOriginsMatchNDDataModels(t *testing.T) {
+	if !reflect.DeepEqual(TaskOrigins, nddataModelsTaskOrigins) {
+		t.Errorf("TaskOrigins = %v, want NDDataModels' TASK_ORIGINS %v", TaskOrigins, nddataModelsTaskOrigins)
+	}
+}
+
 func TestTaskFilterListsHaveNoDuplicates(t *testing.T) {
 	for name, list := range map[string][]string{"TaskTypes": TaskTypes, "TaskStatuses": TaskStatuses} {
 		seen := make(map[string]bool, len(list))

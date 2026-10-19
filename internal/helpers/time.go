@@ -129,11 +129,61 @@ func ParseFutureTimeZoned(input string, loc *time.Location) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("could not parse %q (accepts relative like 30m/2h/1d/1w, or 2026-05-12, 2026-05-12 03:00, 2026-05-12T03:00:00Z)", input)
 }
 
-// ParseTimeFilter parses a time filter string which can be either:
-// - Relative: 30m, 2h, 7d, 2w (minutes, hours, days, weeks ago)
-// - ISO 8601: 2025-12-05, 2025-12-05T14:30:00, 2025-12-05T14:30:00Z
-// Returns the time in ISO 8601 format suitable for API calls.
+// relativeFilterPattern is a list filter's relative bound: 45s, 30m, 2h, 7d,
+// 2w back from now, the same with a leading -, or with a leading + that far
+// ahead.
+var relativeFilterPattern = regexp.MustCompile(`^([+-]?)(\d+)([smhdw])$`)
+
+// maxFilterOffset bounds a relative bound well inside time.Duration's range.
+const maxFilterOffset = 100 * 365 * 24 * time.Hour
+
+// ResolveTimeFilter turns a list filter's time bound into an instant:
+//
+//   - 45s, 30m, 2h, 7d, 2w: that long before now (-2h says the same);
+//   - +30m, +2h, +7d: that long after now;
+//   - an RFC 3339 time with Z or an offset: that instant;
+//   - a bare 2026-10-18, 2026-10-18 03:00 or 2026-10-18T03:00:00: that time in
+//     UTC, the way NDManager reads a bound without an offset.
+//
+// The instant is returned in UTC.
+func ResolveTimeFilter(input string, now time.Time) (time.Time, error) {
+	input = strings.TrimSpace(input)
+	if m := relativeFilterPattern.FindStringSubmatch(strings.ToLower(input)); m != nil {
+		n, err := strconv.Atoi(m[2])
+		unit := map[string]time.Duration{
+			"s": time.Second, "m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour,
+		}[m[3]]
+		if err != nil || time.Duration(n) > maxFilterOffset/unit {
+			return time.Time{}, fmt.Errorf("%q is too far from now", input)
+		}
+		offset := time.Duration(n) * unit
+		if m[1] != "+" {
+			offset = -offset
+		}
+		return now.Add(offset).UTC(), nil
+	}
+	// Only the absolute forms reach this parser, which does not refuse a past instant.
+	if at, err := ParseFutureTimeZoned(input, time.UTC); err == nil {
+		return at.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("could not parse %q (accepts 30m, 2h, 7d or 2w ago, +30m or +2h from now, "+
+		"2026-10-18, 2026-10-18 03:00 (UTC) or 2026-10-18T03:00:00-03:00)", input)
+}
+
+// ParseTimeFilter parses a list filter's time bound (created_after and the
+// like):
+//
+//   - Relative: 30m, 2h, 7d, 2w, that long ago. Sent as a UTC instant with Z:
+//     NDManager reads a time without an offset as UTC, so the host's own wall
+//     clock would move the bound by the host's UTC offset.
+//   - Anything else, such as 2025-12-05, 2025-12-05T14:30:00 or
+//     2025-12-05T14:30:00Z, is sent as typed, for NDManager to parse and
+//     validate.
 func ParseTimeFilter(input string) (string, error) {
+	return parseTimeFilterAt(input, time.Now())
+}
+
+func parseTimeFilterAt(input string, now time.Time) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", nil
@@ -159,11 +209,8 @@ func ParseTimeFilter(input string) (string, error) {
 			return "", fmt.Errorf("unknown time unit: %s", unit)
 		}
 
-		result := time.Now().Add(-duration)
-		return result.Format("2006-01-02T15:04:05"), nil
+		return now.Add(-duration).UTC().Format(time.RFC3339), nil
 	}
 
-	// If not relative, assume it's already ISO 8601 format - pass through
-	// The API will validate the format
 	return input, nil
 }

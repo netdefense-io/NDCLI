@@ -106,17 +106,3 @@ func anyFirmwareTrackResult(tasks []models.Task) bool {
 	}
 	return false
 }
-
-// jsonTask is a task as `-f json` prints it: the task exactly as the control
-// plane sent it, and for a completed FIRMWARE_TRACK step its parsed result
-// beside the raw message, the way the MCP task tools return it, so a script
-// reads the outcome without decoding JSON held in a string. A task with no
-// result has no such key: the output is the same as it always was.
-type jsonTask struct {
-	models.Task
-	FirmwareTrackResult *models.FirmwareTrackResult `json:"firmware_track_result,omitempty"`
-}
-
-func newJSONTask(task *models.Task) jsonTask {
-	return jsonTask{Task: *task, FirmwareTrackResult: firmwareTrackResultFor(task)}
-}

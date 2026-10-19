@@ -42,7 +42,7 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", fmt.Sprintf("NDCLI-Go/%s", config.Version))
+	req.Header.Set("User-Agent", CLIUserAgent())
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

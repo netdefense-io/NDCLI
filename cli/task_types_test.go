@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/models"
@@ -44,19 +45,24 @@ func TestTaskListFilterFlagsUseCanonicalLists(t *testing.T) {
 	}
 }
 
-// resetTaskListFilterFlags puts --type and --status back to unset. A
-// StringSlice replaces its default on the first Set and appends after that, so
-// a value left by one test would leak into the next.
+// resetTaskListFilterFlags puts every task list flag back to its default. A
+// StringSlice replaces its default on the first Set and appends after that,
+// and any flag left set by one test would filter the next one's list.
 func resetTaskListFilterFlags(t *testing.T) {
 	t.Helper()
 	reset := func() {
-		for _, name := range []string{"type", "status"} {
-			f := taskListCmd.Flags().Lookup(name)
-			if err := f.Value.(interface{ Replace([]string) error }).Replace(nil); err != nil {
-				t.Fatalf("reset --%s: %v", name, err)
+		taskListCmd.Flags().VisitAll(func(f *pflag.Flag) {
+			var err error
+			if slice, ok := f.Value.(interface{ Replace([]string) error }); ok {
+				err = slice.Replace(nil)
+			} else {
+				err = f.Value.Set(f.DefValue)
+			}
+			if err != nil {
+				t.Fatalf("reset --%s: %v", f.Name, err)
 			}
 			f.Changed = false
-		}
+		})
 	}
 	reset()
 	t.Cleanup(reset)

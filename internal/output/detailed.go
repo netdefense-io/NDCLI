@@ -145,24 +145,25 @@ func (f *DetailedFormatter) FormatTasks(tasks []models.Task, total int) error {
 		return nil
 	}
 
-	for i, t := range tasks {
+	for i := range tasks {
+		t := &tasks[i]
 		if i > 0 {
 			fmt.Fprintln(f.Writer)
 		}
-		ColorHeader.Fprintf(f.Writer, "─── Task %s ───\n", t.ID[:8])
+		ColorHeader.Fprintf(f.Writer, "─── Task %s ───\n", shortTaskID(t.ID))
 		f.printLabelValue("ID", t.ID)
 		f.printLabelValue("Type", t.Type)
 		f.printLabel("Status")
 		fmt.Fprintln(f.Writer, ColoredStatus(t.Status))
-		f.printLabelValue("Device", t.DeviceName)
+		f.printLabelValue("Device", taskDeviceLine(t))
+		for _, field := range taskProvenanceFields(t) {
+			f.printLabelValue(field.label, field.value)
+		}
 		f.printLabelValue("Created", FormatTimestamp(t.CreatedAt.Time))
-		if !t.StartedAt.IsZero() {
-			f.printLabelValue("Started", FormatTimestamp(t.StartedAt.Time))
+		for _, field := range taskRunFields(t) {
+			f.printLabelValue(field.label, field.value)
 		}
-		if !t.CompletedAt.IsZero() {
-			f.printLabelValue("Completed", FormatTimestamp(t.CompletedAt.Time))
-		}
-		if result := firmwareTrackResultSummary(&tasks[i]); result != "" {
+		if result := firmwareTrackResultSummary(t); result != "" {
 			f.printLabelValue("Result", result)
 		}
 		if t.ErrorMessage != "" {
@@ -196,8 +197,11 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 
 	// Status row
 	fmt.Fprintf(f.Writer, "  %-12s %s %s\n", "Status", StatusIndicator(task.Status), ColoredStatus(task.Status))
-	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Device", task.DeviceName)
+	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Device", taskDeviceLine(task))
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Organization", task.Organization)
+	for _, field := range taskProvenanceFields(task) {
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", field.label, field.value)
+	}
 	fmt.Fprintln(f.Writer)
 
 	// Timestamps
@@ -208,11 +212,8 @@ func (f *DetailedFormatter) FormatTask(task *models.Task) error {
 	if !task.ExpiresAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Expires", FormatTimestamp(task.ExpiresAt.Time))
 	}
-	if !task.StartedAt.IsZero() {
-		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Started", FormatTimestamp(task.StartedAt.Time))
-	}
-	if !task.CompletedAt.IsZero() {
-		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Completed", FormatTimestamp(task.CompletedAt.Time))
+	for _, field := range taskRunFields(task) {
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", field.label, field.value)
 	}
 
 	// Message — FIRMWARE_TRACK tasks store a structured JSON result rendered

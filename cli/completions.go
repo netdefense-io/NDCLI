@@ -720,6 +720,10 @@ func completeTaskStatuses(_ *cobra.Command, _ []string, toComplete string) ([]st
 	return completeValueList(models.TaskStatuses, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
+func completeTaskOrigins(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeValueList(models.TaskOrigins, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
 // completeTasks completes a task code as the first (and only) arg.
 func completeTasks(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {

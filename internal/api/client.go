@@ -65,6 +65,19 @@ func ReadBody(r io.Reader) ([]byte, error) {
 	return io.ReadAll(capBody(r))
 }
 
+// userAgentProduct opens the User-Agent of every NDCLI binary. NDManager
+// records how a login's request reached it from this header: a User-Agent that
+// starts with NDCLI-Go/ is the CLI, or the MCP server when its comment holds
+// the item mcp. A task carries that as its client, which is informational:
+// nothing authorizes on it.
+const userAgentProduct = "NDCLI-Go/"
+
+// CLIUserAgent is the User-Agent of ndcli and the TUI: NDCLI-Go/<version>.
+func CLIUserAgent() string { return userAgentProduct + config.Version }
+
+// MCPUserAgent is the User-Agent of netdefense-mcp: NDCLI-Go/<version> (mcp).
+func MCPUserAgent() string { return CLIUserAgent() + " (mcp)" }
+
 // Client is the API client for NDManager
 type Client struct {
 	baseURL    string
@@ -97,8 +110,14 @@ func NewClient(baseURL string, sslVerify bool, authMgr AuthProvider) *Client {
 			Transport: transport,
 		},
 		authMgr:   authMgr,
-		userAgent: fmt.Sprintf("NDCLI-Go/%s", config.Version),
+		userAgent: CLIUserAgent(),
 	}
+}
+
+// SetUserAgent replaces the User-Agent of every request the client sends, JSON
+// and raw transfers alike.
+func (c *Client) SetUserAgent(userAgent string) {
+	c.userAgent = userAgent
 }
 
 // NewClientFromConfig creates a new API client from the current configuration

@@ -1,34 +1,130 @@
 package models
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
-// Task represents a device task
+// Task represents a device task.
+//
+// NDManager 1.99 added where a task came from and how its device stands
+// (device_deleted through last_response_at), and 1.100 who asked for it, from
+// which client, in which run, and when it was sent and finished (requested_by
+// through completed_at). An older control plane omits them and they read as
+// unset. The nullable ones are pointers without omitempty, so -f json and a
+// re-encode keep the server's null. Every time a current NDManager sends is UTC
+// with its Z; the newer ones are time.Time, the older ones keep FlexibleTime.
 type Task struct {
-	ID           string       `json:"task"`
-	Type         string       `json:"type"`
-	Status       string       `json:"status"`
-	DeviceUUID   string       `json:"device_uuid"`
-	DeviceName   string       `json:"device_name,omitempty"`
-	Organization string       `json:"organization"`
-	Payload      string       `json:"payload,omitempty"`
-	Message      string       `json:"message,omitempty"`
-	ErrorMessage string       `json:"error_message,omitempty"`
-	CreatedAt    FlexibleTime `json:"created_at"`
-	UpdatedAt    FlexibleTime `json:"updated_at,omitempty"`
-	ExpiresAt    FlexibleTime `json:"expires_at,omitempty"`
-	ScheduledAt  FlexibleTime `json:"scheduled_at,omitempty"`
-	StartedAt    FlexibleTime `json:"started_at,omitempty"`
-	CompletedAt  FlexibleTime `json:"completed_at,omitempty"`
+	ID         string `json:"task"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	DeviceUUID string `json:"device_uuid"`
+	// DeviceName is a removed device's name as it was given, with
+	// DeviceDeleted set.
+	DeviceName    string       `json:"device_name,omitempty"`
+	DeviceDeleted bool         `json:"device_deleted"`
+	Organization  string       `json:"organization"`
+	Payload       string       `json:"payload,omitempty"`
+	Message       string       `json:"message,omitempty"`
+	ErrorMessage  string       `json:"error_message,omitempty"`
+	CreatedAt     FlexibleTime `json:"created_at"`
+	UpdatedAt     FlexibleTime `json:"updated_at,omitempty"`
+	ExpiresAt     FlexibleTime `json:"expires_at,omitempty"`
+	ScheduledAt   FlexibleTime `json:"scheduled_at,omitempty"`
+	// Origin is one of TaskOrigins.
+	Origin string `json:"origin,omitempty"`
+	// Schedule is the schedule spec that created the task, or nil.
+	Schedule *TaskSchedule `json:"schedule"`
+	// DeviceOnline and DeviceLastSeenAt are set on a PENDING or SCHEDULED task
+	// only: whether its device is connected now (nil also when that cannot be
+	// told) and its last heartbeat, which lags the device by about two minutes.
+	DeviceOnline     *bool      `json:"device_online"`
+	DeviceLastSeenAt *time.Time `json:"device_last_seen_at"`
+	// LastResponseAt is when the device's signed answer was recorded.
+	LastResponseAt *time.Time `json:"last_response_at"`
+	// RequestedBy is the account that asked for a MANUAL task. nil for a
+	// schedule's or a firmware track's task, and for a task recorded before
+	// NDManager kept it.
+	RequestedBy *TaskRequester `json:"requested_by"`
+	// Client is how the request reached NetDefense: WEB, CLI, MCP or API (a
+	// personal access token). MANUAL tasks only.
+	Client *string `json:"client"`
+	// RunID is shared by the tasks of one create request or one fire of a
+	// schedule spec.
+	RunID *string `json:"run_id"`
+	// DispatchedAt is when the task was sent to the device, and CompletedAt
+	// when it reached COMPLETED, FAILED, EXPIRED or CANCELED.
+	DispatchedAt *time.Time `json:"dispatched_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
 }
 
-// TaskListResponse represents a paginated list of tasks
-type TaskListResponse struct {
-	Items      []Task `json:"items"`
-	Total      int    `json:"total"`
-	Page       int    `json:"page"`
-	PerPage    int    `json:"per_page"`
-	TotalPages int    `json:"pages"`
+// TaskSchedule is the schedule spec that created a task.
+type TaskSchedule struct {
+	Name     string  `json:"name"`
+	SpecCode *string `json:"spec_code"`
+	// Kind is the spec's kind: RUN, SYNC, BACKUP or FIRMWARE.
+	Kind string `json:"kind"`
+	// NextRunAt is null while the schedule or the spec is disabled.
+	NextRunAt *time.Time `json:"next_run_at"`
+	// FirmwareTrack names the track whose window created the task (fast,
+	// regular or stable), and is null for every other kind.
+	FirmwareTrack *string `json:"firmware_track"`
 }
+
+// TaskRequester is the account that asked for a task, read when the task is.
+// Both fields are null when the account no longer exists.
+type TaskRequester struct {
+	Email *string `json:"email"`
+	Name  *string `json:"name"`
+}
+
+// Duration is how long the task took, from its dispatch to its completion. ok
+// is false unless both are known and in that order.
+func (t *Task) Duration() (d time.Duration, ok bool) {
+	if t.DispatchedAt == nil || t.CompletedAt == nil {
+		return 0, false
+	}
+	d = t.CompletedAt.Sub(*t.DispatchedAt)
+	if d < 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+// DurationSeconds is Duration in whole seconds, as -f json and the MCP task
+// tools give it, or nil when it is not known.
+func (t *Task) DurationSeconds() *int64 {
+	d, ok := t.Duration()
+	if !ok {
+		return nil
+	}
+	s := int64(d.Round(time.Second) / time.Second)
+	return &s
+}
+
+// TaskListResponse represents a paginated list of tasks. Filters echoes the
+// filters the server applied; a filter it does not know is ignored and has no
+// key there.
+type TaskListResponse struct {
+	Items      []Task         `json:"items"`
+	Total      int            `json:"total"`
+	Page       int            `json:"page"`
+	PerPage    int            `json:"per_page"`
+	TotalPages int            `json:"pages"`
+	Filters    map[string]any `json:"filters,omitempty"`
+}
+
+// Where a task came from (NDDataModels' TASK_ORIGIN_*): a person's request, a
+// schedule spec's fire, or a firmware track's step.
+const (
+	TaskOriginManual   = "MANUAL"
+	TaskOriginSchedule = "SCHEDULE"
+	TaskOriginFirmware = "FIRMWARE"
+)
+
+// TaskOrigins is NDDataModels' TASK_ORIGINS in its order, the values of the
+// task list's origin filter. Read-only.
+var TaskOrigins = []string{TaskOriginManual, TaskOriginSchedule, TaskOriginFirmware}
 
 // TaskStatus constants. NDManager writes CANCELED (one L); CANCELLED is only
 // accepted as an input filter.

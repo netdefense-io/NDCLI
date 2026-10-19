@@ -77,7 +77,13 @@ func (f *SimpleFormatter) FormatTasks(tasks []models.Task, total int) error {
 	for i := range tasks {
 		t := &tasks[i]
 		status := ColoredStatus(t.Status)
-		fmt.Fprintf(f.Writer, "• %s - %s [%s]", t.ID[:8], t.Type, status)
+		fmt.Fprintf(f.Writer, "• %s - %s [%s]", shortTaskID(t.ID), t.Type, status)
+		if source := taskSourceCell(t); source != "" {
+			fmt.Fprintf(f.Writer, " · %s", source)
+		}
+		if took := taskDurationText(t); took != "" {
+			fmt.Fprintf(f.Writer, " · took %s", took)
+		}
 		if result := firmwareTrackResultSummary(t); result != "" {
 			fmt.Fprintf(f.Writer, " %s", result)
 		}
@@ -91,8 +97,11 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 	fmt.Fprintf(f.Writer, "Task: %s\n", task.ID)
 	fmt.Fprintf(f.Writer, "  Type: %s\n", task.Type)
 	fmt.Fprintf(f.Writer, "  Status: %s\n", ColoredStatus(task.Status))
-	fmt.Fprintf(f.Writer, "  Device: %s\n", task.DeviceName)
+	fmt.Fprintf(f.Writer, "  Device: %s\n", taskDeviceLine(task))
 	fmt.Fprintf(f.Writer, "  Organization: %s\n", task.Organization)
+	for _, field := range taskProvenanceFields(task) {
+		fmt.Fprintf(f.Writer, "  %s: %s\n", field.label, field.value)
+	}
 	fmt.Fprintf(f.Writer, "  Created: %s\n", FormatTimestamp(task.CreatedAt.Time))
 	if !task.ScheduledAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  Scheduled: %s\n", FormatTimestamp(task.ScheduledAt.Time))
@@ -100,11 +109,8 @@ func (f *SimpleFormatter) FormatTask(task *models.Task) error {
 	if !task.ExpiresAt.IsZero() {
 		fmt.Fprintf(f.Writer, "  Expires: %s\n", FormatTimestamp(task.ExpiresAt.Time))
 	}
-	if !task.StartedAt.IsZero() {
-		fmt.Fprintf(f.Writer, "  Started: %s\n", FormatTimestamp(task.StartedAt.Time))
-	}
-	if !task.CompletedAt.IsZero() {
-		fmt.Fprintf(f.Writer, "  Completed: %s\n", FormatTimestamp(task.CompletedAt.Time))
+	for _, field := range taskRunFields(task) {
+		fmt.Fprintf(f.Writer, "  %s: %s\n", field.label, field.value)
 	}
 	if task.Message != "" {
 		if fr := firmwareTrackResultFor(task); fr != nil {

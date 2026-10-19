@@ -248,10 +248,21 @@ func (f *TableFormatter) FormatTasks(tasks []models.Task, total int) error {
 		return nil
 	}
 
-	// A page that holds firmware track results gets a column for them; a page
-	// without any keeps the columns every other task list has.
+	// A column a page has nothing for is left out: Source when the control
+	// plane does not say where tasks came from, Duration when no task on the
+	// page has both its dispatch and its completion, Result without a firmware
+	// track result.
+	withSource := anyTaskSource(tasks)
+	withDuration := anyTaskDuration(tasks)
 	withResult := anyFirmwareTrackResult(tasks)
-	headers := []string{"ID", "Type", "Status", "Device", "Created"}
+	headers := []string{"ID", "Type", "Status", "Device"}
+	if withSource {
+		headers = append(headers, "Source")
+	}
+	headers = append(headers, "Created")
+	if withDuration {
+		headers = append(headers, "Duration")
+	}
 	if withResult {
 		headers = append(headers, "Result")
 	}
@@ -259,16 +270,18 @@ func (f *TableFormatter) FormatTasks(tasks []models.Task, total int) error {
 
 	for i := range tasks {
 		t := &tasks[i]
-		id := t.ID
-		if len(id) > 8 {
-			id = id[:8]
-		}
 		row := []string{
-			id,
+			shortTaskID(t.ID),
 			t.Type,
 			StatusWithIcon(t.Status),
-			t.DeviceName,
-			FormatTimestampShort(t.CreatedAt.Time),
+			taskDeviceCell(t),
+		}
+		if withSource {
+			row = append(row, dashIfEmpty(taskSourceCell(t)))
+		}
+		row = append(row, FormatTimestampShort(t.CreatedAt.Time))
+		if withDuration {
+			row = append(row, dashIfEmpty(taskDurationText(t)))
 		}
 		if withResult {
 			result := firmwareTrackResultSummary(t)
@@ -286,23 +299,24 @@ func (f *TableFormatter) FormatTasks(tasks []models.Task, total int) error {
 
 // FormatTask formats a single task with full details
 func (f *TableFormatter) FormatTask(task *models.Task) error {
-	fmt.Printf("Task ID:      %s\n", task.ID)
-	fmt.Printf("Type:         %s\n", task.Type)
-	fmt.Printf("Status:       %s\n", ColoredStatus(task.Status))
-	fmt.Printf("Device:       %s\n", task.DeviceName)
-	fmt.Printf("Organization: %s\n", task.Organization)
-	fmt.Printf("Created:      %s\n", FormatTimestamp(task.CreatedAt.Time))
+	field := func(label, value string) { fmt.Printf("%-14s%s\n", label+":", value) }
+	field("Task ID", task.ID)
+	field("Type", task.Type)
+	field("Status", ColoredStatus(task.Status))
+	field("Device", taskDeviceLine(task))
+	field("Organization", task.Organization)
+	for _, line := range taskProvenanceFields(task) {
+		field(line.label, line.value)
+	}
+	field("Created", FormatTimestamp(task.CreatedAt.Time))
 	if !task.ScheduledAt.IsZero() {
-		fmt.Printf("Scheduled:    %s\n", FormatTimestamp(task.ScheduledAt.Time))
+		field("Scheduled", FormatTimestamp(task.ScheduledAt.Time))
 	}
 	if !task.ExpiresAt.IsZero() {
-		fmt.Printf("Expires:      %s\n", FormatTimestamp(task.ExpiresAt.Time))
+		field("Expires", FormatTimestamp(task.ExpiresAt.Time))
 	}
-	if !task.StartedAt.IsZero() {
-		fmt.Printf("Started:      %s\n", FormatTimestamp(task.StartedAt.Time))
-	}
-	if !task.CompletedAt.IsZero() {
-		fmt.Printf("Completed:    %s\n", FormatTimestamp(task.CompletedAt.Time))
+	for _, line := range taskRunFields(task) {
+		field(line.label, line.value)
 	}
 	if task.Message != "" {
 		// FIRMWARE_TRACK and FIRMWARE_UPGRADE tasks store a structured JSON

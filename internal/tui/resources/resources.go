@@ -59,6 +59,14 @@ func fullTime(t models.FlexibleTime) string {
 	return t.Time.Format("2006-01-02 15:04:05")
 }
 
+// fullTimePtr is fullTime for a nilable time.Time.
+func fullTimePtr(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return "—"
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
 // ago renders a past timestamp as "12s ago", or a bare "—" when the time is
 // zero/unset or in the future (so labels never read "— ago").
 func ago(t models.FlexibleTime) string {

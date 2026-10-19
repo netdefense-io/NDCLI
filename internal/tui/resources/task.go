@@ -81,8 +81,8 @@ func (taskResource) Describe(ctx context.Context, svc *service.Service, org, id 
 		{Label: "Device", Value: uihelp.Default(t.DeviceName, "—")},
 		{Label: "Organization", Value: t.Organization},
 		{Label: "Created", Value: fullTime(t.CreatedAt)},
-		{Label: "Started", Value: fullTime(t.StartedAt)},
-		{Label: "Completed", Value: fullTime(t.CompletedAt)},
+		{Label: "Dispatched", Value: fullTimePtr(t.DispatchedAt)},
+		{Label: "Completed", Value: fullTimePtr(t.CompletedAt)},
 		{Label: "Expires", Value: fullTime(t.ExpiresAt)},
 	}
 	sections := []registry.Section{{Title: "Task", Fields: fields}}

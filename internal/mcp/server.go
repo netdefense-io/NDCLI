@@ -73,11 +73,11 @@ func NewServer() (*Server, error) {
 		// directly to the provider so RequireAuth() (used by every tool
 		// handler) still works correctly instead of always reporting
 		// "not authenticated".
-		apiClient = api.NewClientFromConfig(staticProvider)
+		apiClient = newAPIClient(staticProvider)
 		svc = service.NewFromProvider(apiClient, staticProvider, cfg)
 	} else {
 		authMgr = auth.GetManager()
-		apiClient = api.NewClientFromConfig(authMgr)
+		apiClient = newAPIClient(authMgr)
 		svc = service.New(apiClient, authMgr, cfg)
 	}
 
@@ -103,6 +103,15 @@ func NewServer() (*Server, error) {
 	s.registerAll()
 
 	return s, nil
+}
+
+// newAPIClient builds the server's NDManager client from the configuration,
+// sending the MCP server's own User-Agent so NDManager records the tasks a tool
+// creates as asked for over MCP, not from the CLI.
+func newAPIClient(provider api.AuthProvider) *api.Client {
+	client := api.NewClientFromConfig(provider)
+	client.SetUserAgent(api.MCPUserAgent())
+	return client
 }
 
 // registerAll installs every tool and resource on the server. It is split out

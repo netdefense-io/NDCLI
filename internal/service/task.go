@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,20 +19,48 @@ import (
 // accepts. Empty fields are omitted; ExpiredSet must be true for Expired to
 // be sent (so callers can distinguish "no filter" from "explicitly false").
 //
-// Statuses and Types take the caller's raw input: TaskList validates and
-// normalizes them (see normalizeTaskFilter), so a front-end does no parsing of
-// its own. A task matches when it has any listed status and any listed type.
+// Every field takes the caller's raw input: TaskList validates and normalizes
+// it (see normalizeTaskFilter), so a front-end does no parsing of its own. A
+// task matches when it has any listed status, any listed type and any listed
+// origin, none of the excluded types, and every other filter given.
+//
+// The fields from ExcludeTypes on need NDManager 1.99 (RunID and RequestedBy
+// 1.100). An older one ignores them, which TaskList detects from the filters
+// echo and refuses with CodeServerTooOld rather than return a list they did not
+// filter.
 type TaskListOpts struct {
-	Statuses      []string
-	Types         []string
+	Statuses []string
+	Types    []string
+	// Device is a device-name pattern (RE2), sent as device_name.
 	Device        string
 	Expired       bool
 	ExpiredSet    bool
 	CreatedAfter  string
 	CreatedBefore string
-	SortBy        string
-	Page          int
-	PerPage       int
+	// ExcludeTypes leaves these task types out.
+	ExcludeTypes []string
+	// Origins keeps the tasks from these sources: MANUAL, SCHEDULE, FIRMWARE.
+	Origins []string
+	// Schedule is the exact name of the schedule whose specs created the tasks.
+	Schedule string
+	// Devices are exact device names.
+	Devices []string
+	// Search is plain text found in the task code or the device's name.
+	Search string
+	// ScheduledAfter and ScheduledBefore bound scheduled_at, in the forms
+	// helpers.ResolveTimeFilter reads.
+	ScheduledAfter  string
+	ScheduledBefore string
+	// IncludeActive also lists every PENDING, SCHEDULED and IN_PROGRESS task
+	// whatever CreatedAfter and CreatedBefore say.
+	IncludeActive bool
+	// RunID is the run of one create request or one fire of a schedule spec.
+	RunID string
+	// RequestedBy is the email of the account that asked for the tasks.
+	RequestedBy string
+	SortBy      string
+	Page        int
+	PerPage     int
 }
 
 // TaskListResult mirrors the paginated task list response with resolved
@@ -41,6 +70,45 @@ type TaskListResult struct {
 	Total   int
 	Page    int
 	PerPage int
+}
+
+// runIDPattern is NDDataModels' TASK_RUN_ID_PATTERN.
+var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{8}$`)
+
+// taskFilterFields names a filter by the field a caller sets it with, where
+// that differs from the key NDManager echoes it under.
+var taskFilterFields = map[string]string{"q": "search", "device": "device_exact"}
+
+// ignoredTaskFilters lists the filters a request carried (by their echo keys)
+// that the answer's echo lacks. NDManager echoes every filter it applies, and
+// one that predates a filter ignores it without a word, so a missing key is a
+// filter that was not applied.
+func ignoredTaskFilters(sent []string, echo map[string]any) []string {
+	var ignored []string
+	for _, key := range sent {
+		if _, ok := echo[key]; ok {
+			continue
+		}
+		if field, ok := taskFilterFields[key]; ok {
+			key = field
+		}
+		ignored = append(ignored, key)
+	}
+	return ignored
+}
+
+// splitValues splits each element on commas, trims it and drops empty and
+// repeated values, keeping the first occurrence's order.
+func splitValues(raw []string) []string {
+	var out []string
+	for _, item := range raw {
+		for _, v := range strings.Split(item, ",") {
+			if v = strings.TrimSpace(v); v != "" && !slices.Contains(out, v) {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 // normalizeTaskFilter turns raw type/status filter input into the values to
@@ -105,7 +173,26 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 	if err != nil {
 		return nil, err
 	}
+	for _, v := range splitValues(opts.ExcludeTypes) {
+		if strings.EqualFold(v, "all") {
+			return nil, &Error{Code: CodeInvalidInput, Message: "exclude_type takes task types: excluding all of them would list nothing"}
+		}
+	}
+	excluded, err := normalizeTaskFilter("type", opts.ExcludeTypes, models.TaskTypes, nil)
+	if err != nil {
+		return nil, err
+	}
+	origins, err := normalizeTaskFilter("origin", opts.Origins, models.TaskOrigins, nil)
+	if err != nil {
+		return nil, err
+	}
+	runID := strings.TrimSpace(opts.RunID)
+	if runID != "" && !runIDPattern.MatchString(runID) {
+		return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("invalid run_id %q: a run id is 8 letters or digits", runID)}
+	}
 
+	// The keys of the filters NDManager echoes only once it applies them.
+	var echoed []string
 	query := url.Values{}
 	if org != "" {
 		query.Set("organization", org)
@@ -146,6 +233,45 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 		query.Set(f[1], parsed)
 	}
 
+	add := func(key string, values ...string) {
+		if len(values) == 0 {
+			return
+		}
+		for _, v := range values {
+			query.Add(key, v)
+		}
+		echoed = append(echoed, key)
+	}
+	add("exclude_type", excluded...)
+	add("origin", origins...)
+	add("device", splitValues(opts.Devices)...)
+	for _, f := range [][2]string{
+		{"schedule", strings.TrimSpace(opts.Schedule)},
+		{"q", strings.TrimSpace(opts.Search)},
+		{"run_id", runID},
+		{"requested_by", strings.TrimSpace(opts.RequestedBy)},
+	} {
+		if f[1] != "" {
+			add(f[0], f[1])
+		}
+	}
+	for _, f := range [][2]string{
+		{opts.ScheduledAfter, "scheduled_after"},
+		{opts.ScheduledBefore, "scheduled_before"},
+	} {
+		if strings.TrimSpace(f[0]) == "" {
+			continue
+		}
+		at, err := helpers.ResolveTimeFilter(f[0], time.Now())
+		if err != nil {
+			return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("invalid %s value: %v", f[1], err), Err: err}
+		}
+		add(f[1], at.Format(time.RFC3339))
+	}
+	if opts.IncludeActive {
+		add("include_active", "true")
+	}
+
 	resp, err := s.api.GetValues(ctx, "/api/v1/tasks", query)
 	if err != nil {
 		return nil, wrapAPI("%v", err)
@@ -153,6 +279,16 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 	var result models.TaskListResponse
 	if err := api.ParseResponse(resp, &result); err != nil {
 		return nil, wrapAPI("%v", err)
+	}
+	if ignored := ignoredTaskFilters(echoed, result.Filters); len(ignored) > 0 {
+		noun, pronoun := "filter", "it"
+		if len(ignored) > 1 {
+			noun, pronoun = "filters", "them"
+		}
+		slices.Sort(ignored)
+		return nil, &Error{Code: CodeServerTooOld, Message: fmt.Sprintf(
+			"this NDManager predates the task list %s %s: it did not apply %s, so no list is shown",
+			noun, strings.Join(ignored, ", "), pronoun)}
 	}
 	return &TaskListResult{
 		Tasks:   result.Items,
