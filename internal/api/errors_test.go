@@ -208,3 +208,83 @@ func TestIsHelpers_LookThroughWrapping(t *testing.T) {
 		}
 	}
 }
+
+// TestParseError_CapturesSkippedDevices: a BACKUP_NO_ELIGIBLE_DEVICES refusal
+// says, device by device, why nothing was backed up. The list reaches the
+// message (so every front-end shows it) and the typed field (so MCP can return
+// it as data).
+func TestParseError_CapturesSkippedDevices(t *testing.T) {
+	body := mustJSON(t, map[string]interface{}{
+		"error": "No backup was started: none of the targeted devices can be backed up right now",
+		"code":  "BACKUP_NO_ELIGIBLE_DEVICES",
+		"skipped": []map[string]string{
+			{"device_uuid": "7c0e2f4a-9b1d-4f6e-8a3b-5d2c1e0f9a8b", "device_name": "fw-branch-02", "code": "BACKUP_NOT_ENABLED", "reason": "Backup is not enabled for this device"},
+			{"device_uuid": "550e8400-e29b-41d4-a716-446655440000", "device_name": "fw-branch-01", "code": "BACKUP_IN_FLIGHT", "reason": "A backup of this device is already waiting to be sent or running"},
+		},
+	})
+
+	apiErr := ParseError(newErrorResponse(http.StatusConflict, body))
+
+	if apiErr.Code != "BACKUP_NO_ELIGIBLE_DEVICES" {
+		t.Fatalf("code = %q", apiErr.Code)
+	}
+	if len(apiErr.Skipped) != 2 {
+		t.Fatalf("skipped = %+v, want 2 entries", apiErr.Skipped)
+	}
+	if got := apiErr.Skipped[0]; got.DeviceName != "fw-branch-02" || got.Code != "BACKUP_NOT_ENABLED" ||
+		got.Reason != "Backup is not enabled for this device" || got.DeviceUUID != "7c0e2f4a-9b1d-4f6e-8a3b-5d2c1e0f9a8b" {
+		t.Errorf("first entry = %+v", got)
+	}
+	want := "No backup was started: none of the targeted devices can be backed up right now\n" +
+		"  • fw-branch-02: Backup is not enabled for this device\n" +
+		"  • fw-branch-01: A backup of this device is already waiting to be sent or running"
+	if got := apiErr.Error(); got != want {
+		t.Errorf("Error() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestParseError_EmptySkippedLeavesTheMessageAlone: no device in the
+// organization has backup enabled, so the list is empty and the server's own
+// sentence stands.
+func TestParseError_EmptySkippedLeavesTheMessageAlone(t *testing.T) {
+	body := mustJSON(t, map[string]interface{}{
+		"error":   "No device in this organization has backup enabled",
+		"code":    "BACKUP_NO_ELIGIBLE_DEVICES",
+		"skipped": []interface{}{},
+	})
+
+	apiErr := ParseError(newErrorResponse(http.StatusConflict, body))
+
+	if len(apiErr.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want none", apiErr.Skipped)
+	}
+	if got := apiErr.Error(); got != "No device in this organization has backup enabled" {
+		t.Errorf("Error() = %q", got)
+	}
+}
+
+// TestParseError_SanitizesSkippedDevices: the reasons are printed to the
+// operator's terminal as sent, so they get the same scrub as every other field.
+func TestParseError_SanitizesSkippedDevices(t *testing.T) {
+	body := mustJSON(t, map[string]interface{}{
+		"error": "No backup was started",
+		"code":  "BACKUP_NO_ELIGIBLE_DEVICES",
+		"skipped": []map[string]string{{
+			"device_uuid": "u1",
+			"device_name": "fw" + testESC + "[2J-a",
+			"code":        "BACKUP_NOT_ENABLED" + testBEL,
+			"reason":      "off" + testESC + "[31m",
+		}},
+	})
+
+	apiErr := ParseError(newErrorResponse(http.StatusConflict, body))
+
+	if strings.ContainsAny(apiErr.Error(), testESC+testBEL) {
+		t.Fatalf("Error() still contains a control byte: %q", apiErr.Error())
+	}
+	for _, d := range apiErr.Skipped {
+		if strings.ContainsAny(d.DeviceName+d.Code+d.Reason, testESC+testBEL) {
+			t.Fatalf("skipped entry still contains a control byte: %+v", d)
+		}
+	}
+}

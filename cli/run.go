@@ -30,7 +30,7 @@ var runCmd = &cobra.Command{
 	Long: `Issue a pre-defined command to one or more devices.
 
 Use ` + "`ndcli run <command> --help`" + ` to see per-command flags. Every
-sub-command accepts the same target and scheduling flags:
+sub-command except backup accepts the same target and scheduling flags:
 
   Target (at least one required, repeatable):
     --device <name>   Target a specific device. May be repeated.
@@ -47,7 +47,10 @@ sub-command accepts the same target and scheduling flags:
                                            2026-05-12T03:00:00-03:00
 
 Targets are the UNION of all --device + --ou + --org. Duplicates are deduped
-server-side. An unresolved name rejects the whole batch.`,
+server-side. An unresolved name rejects the whole batch.
+
+` + "`run backup`" + ` takes the target flags only: it backs up the devices that have
+backup enabled, starts now, and cannot be deferred or scheduled.`,
 }
 
 func init() {

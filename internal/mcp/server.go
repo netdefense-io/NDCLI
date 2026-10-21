@@ -277,8 +277,16 @@ func (s *Server) successResultWithPagination(data interface{}, page, perPage, to
 // (service.ErrorCode): it is the one the CLI shows, and API_ERROR on its own
 // says only that the request failed.
 func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
+	return s.errorResultWithData(err, nil)
+}
+
+// errorResultWithData is errorResult plus named fields describing the refusal,
+// for a failure whose detail is data the caller should read without parsing the
+// message: the per-device reasons of a backup that started nothing, for one.
+func (s *Server) errorResultWithData(err error, data interface{}) (*mcp.CallToolResult, error) {
 	response := ToolResponse{
 		Success: false,
+		Data:    data,
 		Error: &ErrorInfo{
 			Message: err.Error(),
 		},

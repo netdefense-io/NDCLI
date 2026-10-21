@@ -325,6 +325,8 @@ func (s *Server) registerRunTools() {
 			"required":   []string{"mode"},
 		},
 	}, s.handleFirmwareUpgrade)
+
+	s.registerRunBackupTool()
 }
 
 // handleFirmwareUpgrade is the MCP handler for ndcli.run.firmware_upgrade.

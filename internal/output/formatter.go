@@ -201,6 +201,7 @@ type Formatter interface {
 	FormatBackupConfigTest(result *models.BackupConfigTestResponse) error
 	FormatDeviceBackupStatuses(statuses []models.DeviceBackupStatus, total int, enabledCount int) error
 	FormatDeviceBackupStatus(status *models.DeviceBackupStatus) error
+	FormatBackupRunResult(result *models.BackupRunResult) error
 
 	// Schedules
 	FormatSchedules(schedules []models.Schedule, total int) error

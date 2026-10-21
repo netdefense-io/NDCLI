@@ -18,6 +18,35 @@ type VariableConflict struct {
 	Message  string `json:"message"`
 }
 
+// SkippedDevice is one entry of the `skipped` list a refusal can carry: a
+// device the request left out, with the control plane's code and its sentence
+// (BACKUP_NO_ELIGIBLE_DEVICES lists why each targeted device was not backed up).
+type SkippedDevice struct {
+	DeviceUUID string
+	DeviceName string
+	Code       string
+	Reason     string
+}
+
+// line is the entry as one line of an error message.
+func (d SkippedDevice) line() string {
+	name := d.DeviceName
+	if name == "" {
+		name = d.DeviceUUID
+	}
+	reason := d.Reason
+	if reason == "" {
+		reason = d.Code
+	}
+	switch {
+	case name == "":
+		return reason
+	case reason == "":
+		return name
+	}
+	return name + ": " + reason
+}
+
 // APIError represents an error response from the API
 type APIError struct {
 	StatusCode         int
@@ -28,6 +57,7 @@ type APIError struct {
 	BlockingCount      int                // For 409 conflicts - count of blocking resources
 	Conflicts          []VariableConflict // For VARIABLE_CONFLICT errors
 	UndefinedVariables []string           // For UNDEFINED_VARIABLES errors
+	Skipped            []SkippedDevice    // For BACKUP_NO_ELIGIBLE_DEVICES: why each targeted device was left out
 }
 
 func (e *APIError) Error() string {
@@ -51,6 +81,16 @@ func (e *APIError) Error() string {
 		lines = append(lines, e.Message)
 		for _, v := range e.UndefinedVariables {
 			lines = append(lines, fmt.Sprintf("  • ${%s}", v))
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	// Handle refusals that say, device by device, what was left out
+	if len(e.Skipped) > 0 {
+		var lines []string
+		lines = append(lines, e.Message)
+		for _, d := range e.Skipped {
+			lines = append(lines, fmt.Sprintf("  • %s", d.line()))
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -163,6 +203,24 @@ func ParseError(resp *http.Response) *APIError {
 		}
 	}
 
+	// Capture the per-device reasons of a refusal such as BACKUP_NO_ELIGIBLE_DEVICES
+	if skipped, ok := rawResp["skipped"].([]interface{}); ok {
+		for _, item := range skipped {
+			entry, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			d := SkippedDevice{}
+			d.DeviceUUID, _ = entry["device_uuid"].(string)
+			d.DeviceName, _ = entry["device_name"].(string)
+			d.Code, _ = entry["code"].(string)
+			d.Reason, _ = entry["reason"].(string)
+			if d != (SkippedDevice{}) {
+				apiErr.Skipped = append(apiErr.Skipped, d)
+			}
+		}
+	}
+
 	// If no message from JSON, use status-based message
 	if apiErr.Message == "" {
 		apiErr.Message = statusMessage(resp.StatusCode)
@@ -170,7 +228,7 @@ func ParseError(resp *http.Response) *APIError {
 
 	// Every field populated above (Message, Detail, Code,
 	// BlockingResources, Conflicts[].Variable/Message,
-	// UndefinedVariables) came straight from the response body and is
+	// UndefinedVariables, Skipped) came straight from the response body and is
 	// printed verbatim by Error(), which a failed command prints to stderr, so
 	// this reaches the operator's terminal on every non-2xx request. Scrub
 	// terminal control bytes the same way the 2xx decode path does before
