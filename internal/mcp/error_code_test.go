@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -207,5 +209,39 @@ func TestErrorResult_ServerCodeWinsOverAnyServiceCode(t *testing.T) {
 		if resp.Error.Code != "SNIPPET_UUID_IN_USE" {
 			t.Errorf("service code %s: error.code = %q, want SNIPPET_UUID_IN_USE", serviceCode, resp.Error.Code)
 		}
+	}
+}
+
+// TestErrorResult_CodeSurvivesWrapping: a handler that wraps an error to say
+// which step failed keeps its code. errorResult used to read the code with a
+// type switch, which sees only the outermost type, so every such error went
+// out uncoded.
+func TestErrorResult_CodeSurvivesWrapping(t *testing.T) {
+	mismatch := &service.Error{Code: service.CodeVariableValueMismatch, Message: "the value differs"}
+	for _, tc := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"service error wrapped with %w", fmt.Errorf("step 2: %w", &service.Error{Code: service.CodeInvalidInput, Message: "bad"}), service.CodeInvalidInput},
+		{"tool error wrapped with %w", fmt.Errorf("step 2: %w", &ToolError{Code: "CONFIRM_REQUIRED", Message: "confirm"}), "CONFIRM_REQUIRED"},
+		{"service error in a wrapper type", &service.NetworkPrefixProvisionError{Step: "creating the org variable", Err: mismatch}, service.CodeVariableValueMismatch},
+		{"server code under two wrappers", fmt.Errorf("step 2: %w", &service.Error{Code: service.CodeAPIError, Err: &api.APIError{StatusCode: http.StatusConflict, Code: "SNIPPET_UUID_IN_USE", Message: uuidInUseMessage}}), "SNIPPET_UUID_IN_USE"},
+		{"nothing coded", errors.New("plain"), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := (&Server{}).errorResult(tc.err)
+			if err != nil {
+				t.Fatalf("unexpected transport error: %v", err)
+			}
+			var resp ToolResponse
+			decodeToolResult(t, result, &resp)
+			if resp.Error.Code != tc.code {
+				t.Errorf("error.code = %q, want %q", resp.Error.Code, tc.code)
+			}
+			if resp.Error.Message != tc.err.Error() {
+				t.Errorf("error.message = %q, want the wrapped message %q", resp.Error.Message, tc.err.Error())
+			}
+		})
 	}
 }

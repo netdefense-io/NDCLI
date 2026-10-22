@@ -161,7 +161,7 @@ func TestFirmwareUpgradeRebootPayload(t *testing.T) {
 		},
 		{
 			name:        "--no-reboot on the whole org",
-			args:        []string{"--org", "--mode", "minor", "--no-reboot"},
+			args:        []string{"--all", "--mode", "minor", "--no-reboot"},
 			wantPayload: map[string]any{"mode": "minor", "reboot": false, "check_first": true, "dry_run": false},
 			wantWarning: noRebootWarning,
 			check: func(t *testing.T, body map[string]any) {

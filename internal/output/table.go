@@ -356,28 +356,30 @@ func (f *TableFormatter) FormatTask(task *models.Task) error {
 // stay on screen.
 func (f *TableFormatter) FormatRunResult(result *models.RunResult) error {
 	f.Success(runResultHeader(result))
-	if len(result.Tasks) == 0 {
-		return nil
-	}
-	scheduled := parseRunTime(result.ScheduledAt)
-	headers := []string{"Device", "Task", "Expires"}
-	if !scheduled.IsZero() {
-		headers = []string{"Device", "Task", "Fires at", "Expires"}
-	}
-	table := NewStyledTable(headers)
-	firesAt := FormatTimestamp(scheduled)
-	for _, t := range result.Tasks {
-		row := []string{
-			t.DeviceName,
-			t.Task,
-		}
+	if len(result.Tasks) > 0 {
+		scheduled := parseRunTime(result.ScheduledAt)
+		headers := []string{"Device", "Task", "Expires"}
 		if !scheduled.IsZero() {
-			row = append(row, firesAt)
+			headers = []string{"Device", "Task", "Fires at", "Expires"}
 		}
-		row = append(row, FormatTimestamp(parseRunTime(t.ExpiresAt)))
-		table.Append(row)
+		table := NewStyledTable(headers)
+		firesAt := FormatTimestamp(scheduled)
+		for _, t := range result.Tasks {
+			row := []string{
+				t.DeviceName,
+				t.Task,
+			}
+			if !scheduled.IsZero() {
+				row = append(row, firesAt)
+			}
+			row = append(row, FormatTimestamp(parseRunTime(t.ExpiresAt)))
+			table.Append(row)
+		}
+		table.Render()
 	}
-	table.Render()
+	if followUp := runResultFollowUp(result); followUp != "" {
+		fmt.Fprintln(f.Writer, followUp)
+	}
 	return nil
 }
 
@@ -889,7 +891,11 @@ func (f *TableFormatter) FormatSyncStatus(items []models.SyncStatusItem, total i
 
 // FormatSyncApply formats sync apply result
 func (f *TableFormatter) FormatSyncApply(result *models.SyncApplyResponse) error {
-	ColorSuccess.Printf("✓ %s\n", result.Message)
+	if result.AllRefused() {
+		ColorError.Printf("✗ %s\n", result.Message)
+	} else {
+		ColorSuccess.Printf("✓ %s\n", result.Message)
+	}
 	fmt.Printf("  Devices affected: %d\n", result.DevicesAffected)
 	fmt.Printf("  Skipped (already synced): %d\n", result.Skipped)
 

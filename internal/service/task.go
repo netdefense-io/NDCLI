@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -71,9 +70,6 @@ type TaskListResult struct {
 	Page    int
 	PerPage int
 }
-
-// runIDPattern is NDDataModels' TASK_RUN_ID_PATTERN.
-var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{8}$`)
 
 // taskFilterFields names a filter by the field a caller sets it with, where
 // that differs from the key NDManager echoes it under.
@@ -187,7 +183,7 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 		return nil, err
 	}
 	runID := strings.TrimSpace(opts.RunID)
-	if runID != "" && !runIDPattern.MatchString(runID) {
+	if runID != "" && !models.RunIDPattern.MatchString(runID) {
 		return nil, &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("invalid run_id %q: a run id is 8 letters or digits", runID)}
 	}
 
@@ -471,10 +467,10 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 		}
 	}
 	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
-		return nil, &Error{Code: CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "name at least one device or OU, or target every enabled device in the organization"}
 	}
 	if opts.AllDevices && (len(opts.Devices) > 0 || len(opts.OUs) > 0) {
-		return nil, &Error{Code: CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "targeting every enabled device cannot be combined with named devices or OUs"}
 	}
 	if opts.Schedule != "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "a one-shot run cannot carry a schedule name — use RunRegisterSpec to register a recurring spec"}
@@ -538,10 +534,10 @@ func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts)
 		}
 	}
 	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
-		return nil, &Error{Code: CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "name at least one device or OU, or target every enabled device in the organization"}
 	}
 	if opts.AllDevices && (len(opts.Devices) > 0 || len(opts.OUs) > 0) {
-		return nil, &Error{Code: CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "targeting every enabled device cannot be combined with named devices or OUs"}
 	}
 
 	body := map[string]interface{}{

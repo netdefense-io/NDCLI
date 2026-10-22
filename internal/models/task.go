@@ -1,9 +1,13 @@
 package models
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
+
+// RunIDPattern is NDDataModels' TASK_RUN_ID_PATTERN, the shape of a run's code.
+var RunIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{8}$`)
 
 // Task represents a device task.
 //
@@ -222,11 +226,14 @@ type FirmwareUpgradeData struct {
 // RunResult is the response from POST /organizations/{org}/tasks — the
 // `ndcli run` server-side fan-out endpoint. One row per resolved device.
 type RunResult struct {
-	Type         string        `json:"type"`
-	Organization string        `json:"organization"`
-	ScheduledAt  string        `json:"scheduled_at,omitempty"`
-	Total        int           `json:"total"`
-	Tasks        []RunTaskItem `json:"tasks"`
+	Type         string `json:"type"`
+	Organization string `json:"organization"`
+	ScheduledAt  string `json:"scheduled_at,omitempty"`
+	// RunID is the code of the run this call created, the run_id of each of
+	// its tasks. A control plane that predates it does not send it.
+	RunID string        `json:"run_id,omitempty"`
+	Total int           `json:"total"`
+	Tasks []RunTaskItem `json:"tasks"`
 }
 
 // RunTaskItem is a single device's task row inside a RunResult.

@@ -151,6 +151,9 @@ func (f *SimpleFormatter) FormatRunResult(result *models.RunResult) error {
 				t.DeviceName, t.Task, expires)
 		}
 	}
+	if followUp := runResultFollowUp(result); followUp != "" {
+		fmt.Fprintln(f.Writer, followUp)
+	}
 	return nil
 }
 

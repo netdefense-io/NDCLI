@@ -35,19 +35,26 @@ sub-command except backup accepts the same target and scheduling flags:
   Target (at least one required, repeatable):
     --device <name>   Target a specific device. May be repeated.
     --ou <name>       Target every enabled device in the OU. May be repeated.
-    --org             Target every enabled device in the current org.
+    --all             Target every enabled device in the org.
+
+  Organization:
+    -o <name>         The organization to run in, as on other commands.
+                      Defaults to the configured one.
 
   Scheduling:
     --at <when>       Defer execution. Omit to run immediately. Accepts:
                         Relative offset:   30m, 2h, 3d, 1w
-                        Local time:        2026-05-12 03:00          (uses your
+                        Local time:        2030-05-12 03:00          (uses your
                                                                       configured
                                                                       timezone)
-                        Explicit timezone: 2026-05-12T03:00:00Z
-                                           2026-05-12T03:00:00-03:00
+                        Explicit timezone: 2030-05-12T03:00:00Z
+                                           2030-05-12T03:00:00-03:00
 
-Targets are the UNION of all --device + --ou + --org. Duplicates are deduped
+Targets are the UNION of all --device + --ou + --all. Duplicates are deduped
 server-side. An unresolved name rejects the whole batch.
+
+--org (no value) is the deprecated spelling of --all. In the next major
+version, --org <name> selects the organization, as on other commands.
 
 ` + "`run backup`" + ` takes the target flags only: it backs up the devices that have
 backup enabled, starts now, and cannot be deferred or scheduled.`,
@@ -191,14 +198,14 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 
 			devices, _ := cmd.Flags().GetStringSlice("device")
 			ous, _ := cmd.Flags().GetStringSlice("ou")
-			all, _ := cmd.Flags().GetBool("org")
+			all := allDevicesFlag(cmd)
 			at, _ := cmd.Flags().GetString("at")
 
 			if !all && len(devices) == 0 && len(ous) == 0 {
-				return &service.Error{Code: service.CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+				return &service.Error{Code: service.CodeInvalidInput, Message: "at least one of --device, --ou, or --all is required"}
 			}
 			if all && (len(devices) > 0 || len(ous) > 0) {
-				return &service.Error{Code: service.CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
+				return &service.Error{Code: service.CodeInvalidInput, Message: "--all cannot be combined with --device or --ou"}
 			}
 
 			// Parsing, the past-time check and the UTC normalization all live
@@ -254,12 +261,10 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 
 	cmd.Flags().StringSlice("device", nil, "Target device name (repeatable)")
 	cmd.Flags().StringSlice("ou", nil, "Target OU name (repeatable; expands to enabled members)")
-	cmd.Flags().Bool("org", false, "Target every enabled device in the current org")
-	cmd.Flags().String("at", "", "Schedule execution. Accepts:  relative (30m, 2h, 3d, 1w);  date+time in your configured timezone (2026-05-12 03:00);  RFC3339 with tz (2026-05-12T03:00:00Z, 2026-05-12T03:00:00-03:00).")
+	addAllDevicesFlags(cmd, "Target every enabled device in the org")
+	cmd.Flags().String("at", "", "Schedule execution. Accepts:  relative (30m, 2h, 3d, 1w);  date+time in your configured timezone (2030-05-12 03:00);  RFC3339 with tz (2030-05-12T03:00:00Z, 2030-05-12T03:00:00-03:00).")
 	cmd.Flags().String("schedule", "", "Register as a recurring spec on this named schedule (mutually exclusive with --at).")
 
-	cmd.MarkFlagsMutuallyExclusive("org", "device")
-	cmd.MarkFlagsMutuallyExclusive("org", "ou")
 	cmd.MarkFlagsMutuallyExclusive("at", "schedule")
 
 	_ = cmd.RegisterFlagCompletionFunc("device", completeDevices)
@@ -267,4 +272,30 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 	_ = cmd.RegisterFlagCompletionFunc("schedule", completeScheduleNames)
 
 	return cmd
+}
+
+// orgFlagDeprecation is what cobra prints, on stderr, when a run command is
+// given the boolean --org.
+const orgFlagDeprecation = "use --all; in the next major version --org <name> selects the organization, as on other commands"
+
+// addAllDevicesFlags gives a run command --all, the boolean --org it replaces
+// (deprecated, hidden from help) and -o. A local flag named org hides the
+// root's --org/-o on the command, so -o is declared again here, as
+// --organization, bound to the same organization setting.
+//
+// --all with --device or --ou is refused by the command itself, in the words
+// the MCP tools use, not by a cobra flag group: cobra would refuse first, with
+// its own generic message.
+func addAllDevicesFlags(cmd *cobra.Command, usage string) {
+	cmd.Flags().Bool("all", false, usage)
+	cmd.Flags().Bool("org", false, usage)
+	_ = cmd.Flags().MarkDeprecated("org", orgFlagDeprecation)
+	cmd.Flags().StringVarP(&orgName, "organization", "o", "", "organization name (overrides config)")
+}
+
+// allDevicesFlag reports --all, or the deprecated boolean --org.
+func allDevicesFlag(cmd *cobra.Command) bool {
+	all, _ := cmd.Flags().GetBool("all")
+	org, _ := cmd.Flags().GetBool("org")
+	return all || org
 }

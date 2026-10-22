@@ -1,5 +1,13 @@
 package models
 
+import "regexp"
+
+// OrganizationNamePattern is NDManager's rule for an organization name
+// (OrganizationCreateRequest.validate_name in src/schemas/requests.py). Python's
+// $ there also lets a trailing newline through; Go's ends the text, the
+// stricter of the two for a name the CLI puts into a command line.
+var OrganizationNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
 // Organization represents a NetDefense organization
 type Organization struct {
 	ID          FlexibleID   `json:"id"`

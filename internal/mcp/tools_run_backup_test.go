@@ -115,8 +115,9 @@ func TestRunBackup_ConfirmedWire(t *testing.T) {
 		{`{"devices":["fw-branch-01","fw-branch-02"],"confirm":true}`, `{"targets":{"devices":["fw-branch-01","fw-branch-02"]}}`},
 		{`{"ous":["edge"],"confirm":true}`, `{"targets":{"ous":["edge"]}}`},
 		{`{"devices":["fw-a"],"ous":["edge"],"confirm":true}`, `{"targets":{"devices":["fw-a"],"ous":["edge"]}}`},
+		{`{"all":true,"confirm":true}`, `{"targets":{"all":true}}`},
+		{`{"organization":"other-org","all":true,"confirm":true}`, `{"targets":{"all":true}}`},
 		{`{"org":true,"confirm":true}`, `{"targets":{"all":true}}`},
-		{`{"organization":"other-org","org":true,"confirm":true}`, `{"targets":{"all":true}}`},
 	} {
 		t.Run(tc.args, func(t *testing.T) {
 			call := callRunBackup(t, http.StatusCreated, mcpBackupFixture, tc.args)
@@ -411,7 +412,7 @@ func TestRunBackup_Schema(t *testing.T) {
 	schema := registeredToolSchema(t, "ndcli.run.backup")
 	props, _ := schema["properties"].(map[string]any)
 
-	for _, want := range []string{"organization", "devices", "ous", "org", "confirm"} {
+	for _, want := range []string{"organization", "devices", "ous", "all", "org", "confirm"} {
 		if _, ok := props[want]; !ok {
 			t.Errorf("schema lacks %q", want)
 		}
@@ -421,8 +422,8 @@ func TestRunBackup_Schema(t *testing.T) {
 			t.Errorf("schema exposes %q", banned)
 		}
 	}
-	if len(props) != 5 {
-		t.Errorf("schema has %d properties, want 5", len(props))
+	if len(props) != 6 {
+		t.Errorf("schema has %d properties, want 6", len(props))
 	}
 	if required, _ := schema["required"].([]any); len(required) != 0 {
 		t.Errorf("required = %v", required)

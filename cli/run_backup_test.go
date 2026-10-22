@@ -100,7 +100,7 @@ func TestRunBackupWire(t *testing.T) {
 		{"comma-separated devices", []string{"--device", "fw-a,fw-b"}, `{"targets":{"devices":["fw-a","fw-b"]}}`},
 		{"an OU", []string{"--ou", "edge"}, `{"targets":{"ous":["edge"]}}`},
 		{"devices and OUs", []string{"--device", "fw-a", "--ou", "edge"}, `{"targets":{"devices":["fw-a"],"ous":["edge"]}}`},
-		{"every device that has backup enabled", []string{"--org"}, `{"targets":{"all":true}}`},
+		{"every device that has backup enabled", []string{"--all"}, `{"targets":{"all":true}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := runBackup(t, "table", http.StatusCreated, runBackupFixture, tc.args...)
@@ -139,7 +139,7 @@ func TestRunBackupTableOutput(t *testing.T) {
 }
 
 func TestRunBackupJSONOutput(t *testing.T) {
-	got := runBackup(t, "json", http.StatusCreated, runBackupFixture, "--org")
+	got := runBackup(t, "json", http.StatusCreated, runBackupFixture, "--all")
 
 	if got.err != nil {
 		t.Fatal(got.err)
@@ -158,10 +158,10 @@ func TestRunBackupRefusesDeferral(t *testing.T) {
 	for _, args := range [][]string{
 		{"--device", "fw-a", "--at", "2h"},
 		{"--device", "fw-a", "--at", ""},
-		{"--org", "--at", "2026-12-01T03:00:00Z"},
+		{"--all", "--at", "2026-12-01T03:00:00Z"},
 		{"--device", "fw-a", "--schedule", "nightly"},
 		{"--device", "fw-a", "--schedule", ""},
-		{"--org", "--at", "2h", "--schedule", "nightly"},
+		{"--all", "--at", "2h", "--schedule", "nightly"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			got := runBackup(t, "table", http.StatusCreated, runBackupFixture, args...)
@@ -188,9 +188,10 @@ func TestRunBackupNeedsATarget(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"none", nil, "at least one of --device, --ou, or --org is required"},
-		{"--org with a device", []string{"--org", "--device", "fw-a"}, "--org cannot be combined with --device or --ou"},
-		{"--org with an OU", []string{"--org", "--ou", "edge"}, "--org cannot be combined with --device or --ou"},
+		{"none", nil, "at least one of --device, --ou, or --all is required"},
+		{"--all with a device", []string{"--all", "--device", "fw-a"}, "--all cannot be combined with --device or --ou"},
+		{"--all with an OU", []string{"--all", "--ou", "edge"}, "--all cannot be combined with --device or --ou"},
+		{"deprecated --org with a device", []string{"--org", "--device", "fw-a"}, "--all cannot be combined with --device or --ou"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := runBackup(t, "table", http.StatusCreated, runBackupFixture, tc.args...)
@@ -240,7 +241,7 @@ func TestRunBackupNoDeviceHasBackup(t *testing.T) {
 	useFormatter(t, output.NewTableFormatter(), "")
 
 	got := runBackup(t, "table", http.StatusConflict,
-		`{"error":"No device in this organization has backup enabled","code":"BACKUP_NO_ELIGIBLE_DEVICES","skipped":[]}`, "--org")
+		`{"error":"No device in this organization has backup enabled","code":"BACKUP_NO_ELIGIBLE_DEVICES","skipped":[]}`, "--all")
 
 	want := "Error: [BACKUP_NO_ELIGIBLE_DEVICES] No device in this organization has backup enabled\n" +
 		"  Hint: Backup is enabled per device: 'ndcli backup enable <device>'.\n"
@@ -252,7 +253,7 @@ func TestRunBackupNoDeviceHasBackup(t *testing.T) {
 // TestRunBackupTargetsResolveToNothing: an OU with no members, or devices that
 // are not enabled, give the same 409 with an empty list as an organization where
 // no device has backup. Only the latter is cured by enabling backup, so the hint
-// is given only to --org.
+// is given only to --all.
 func TestRunBackupTargetsResolveToNothing(t *testing.T) {
 	const serverMessage = "The targets include no enabled device"
 	body := `{"error":"` + serverMessage + `","code":"BACKUP_NO_ELIGIBLE_DEVICES","skipped":[]}`
@@ -266,7 +267,7 @@ func TestRunBackupTargetsResolveToNothing(t *testing.T) {
 		{"an OU with no members", []string{"--ou", "empty-ou"}, false},
 		{"a named device", []string{"--device", "fw-a"}, false},
 		{"devices and OUs", []string{"--device", "fw-a", "--ou", "empty-ou"}, false},
-		{"every device that has backup", []string{"--org"}, true},
+		{"every device that has backup", []string{"--all"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			useFormatter(t, output.NewTableFormatter(), "")
@@ -293,7 +294,7 @@ func TestRunBackupConfigDisabledWithAnEmptyList(t *testing.T) {
 	useFormatter(t, output.NewTableFormatter(), "")
 
 	got := runBackup(t, "table", http.StatusConflict,
-		`{"error":"The backup configuration is disabled; enable it before backing up devices","code":"BACKUP_CONFIG_DISABLED","skipped":[]}`, "--org")
+		`{"error":"The backup configuration is disabled; enable it before backing up devices","code":"BACKUP_CONFIG_DISABLED","skipped":[]}`, "--all")
 
 	want := "Error: [BACKUP_CONFIG_DISABLED] The backup configuration is disabled; enable it before backing up devices\n" +
 		"  Hint: Enable it first: 'ndcli backup config enable'.\n"
@@ -306,7 +307,7 @@ func TestRunBackupJSONRefusal(t *testing.T) {
 	useFormatter(t, output.NewJSONFormatter(), "json")
 
 	got := runBackup(t, "json", http.StatusConflict,
-		`{"error":"The backup configuration is disabled; enable it before backing up devices","code":"BACKUP_CONFIG_DISABLED"}`, "--org")
+		`{"error":"The backup configuration is disabled; enable it before backing up devices","code":"BACKUP_CONFIG_DISABLED"}`, "--all")
 
 	doc := decodeCommandError(t, printed(got.err))
 	if doc["code"] != "BACKUP_CONFIG_DISABLED" ||
@@ -319,7 +320,7 @@ func TestRunBackupConfigurationMissing(t *testing.T) {
 	useFormatter(t, output.NewTableFormatter(), "")
 
 	got := runBackup(t, "table", http.StatusNotFound,
-		`{"error":"This organization has no backup configuration; create one before backing up devices","code":"BACKUP_NOT_CONFIGURED"}`, "--org")
+		`{"error":"This organization has no backup configuration; create one before backing up devices","code":"BACKUP_NOT_CONFIGURED"}`, "--all")
 
 	want := "Error: [BACKUP_NOT_CONFIGURED] This organization has no backup configuration; create one before backing up devices\n" +
 		"  Hint: Create the backup configuration first: 'ndcli backup config set'.\n"

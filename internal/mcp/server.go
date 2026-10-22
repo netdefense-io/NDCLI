@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -271,11 +272,11 @@ func (s *Server) successResultWithPagination(data interface{}, page, perPage, to
 }
 
 // errorResult creates an error tool result. Recognises both the legacy
-// *ToolError (from pre-service handlers) and the unified *service.Error so
-// the wire-level error code stays stable across the migration. When the error
-// carries the code NDManager answered with, that code is error.code instead
-// (service.ErrorCode): it is the one the CLI shows, and API_ERROR on its own
-// says only that the request failed.
+// *ToolError (from pre-service handlers) and the unified *service.Error, also
+// when wrapped, so the wire-level error code stays stable across the migration.
+// When the error carries the code NDManager answered with, that code is
+// error.code instead (service.ErrorCode): it is the one the CLI shows, and
+// API_ERROR on its own says only that the request failed.
 func (s *Server) errorResult(err error) (*mcp.CallToolResult, error) {
 	return s.errorResultWithData(err, nil)
 }
@@ -292,11 +293,13 @@ func (s *Server) errorResultWithData(err error, data interface{}) (*mcp.CallTool
 		},
 	}
 
-	switch e := err.(type) {
-	case *ToolError:
-		response.Error.Code = e.Code
-	case *service.Error:
-		response.Error.Code = e.Code
+	var toolErr *ToolError
+	var svcErr *service.Error
+	switch {
+	case errors.As(err, &toolErr):
+		response.Error.Code = toolErr.Code
+	case errors.As(err, &svcErr):
+		response.Error.Code = svcErr.Code
 	}
 	if code := service.ErrorCode(err); code != "" {
 		response.Error.Code = code

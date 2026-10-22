@@ -152,8 +152,7 @@ func newStreamForTest(t *testing.T, readFD int) (*ShellSession, <-chan []byte) {
 			}
 		}
 	}()
-	// A stream holds a 100,000-slot buffer and a worker goroutine until it is
-	// closed.
+	// A stream holds a 100,000-slot buffer until it is closed.
 	t.Cleanup(func() {
 		close(stop)
 		shellStream.Close()

@@ -43,7 +43,10 @@ the command lists it with the reason. Backup is enabled per device with
   Target (at least one required, repeatable):
     --device <name>   Back up a specific device. May be repeated.
     --ou <name>       Back up the devices of the OU that have backup enabled. May be repeated.
-    --org             Back up every device in the current org that has backup enabled.
+    --all             Back up every device in the org that has backup enabled.
+
+  -o <name> chooses the organization, as on other commands. --org (no value) is
+  the deprecated spelling of --all.
 
 The backup starts now and cannot be deferred or scheduled: --at and --schedule
 are refused. Recurring backups are set with 'ndcli backup config set --schedule <name>'.
@@ -56,7 +59,8 @@ The encryption key is the device's own, else the organization's, set on the
 control plane. It is never sent from here.`,
 	Example: `  ndcli run backup --device fw-prod-01
   ndcli run backup --ou edge-routers
-  ndcli run backup --org`,
+  ndcli run backup --all
+  ndcli run backup --all -o branch-office`,
 	Args: cobra.NoArgs,
 	RunE: runRunBackup,
 }
@@ -64,7 +68,7 @@ control plane. It is never sent from here.`,
 func init() {
 	runBackupCmd.Flags().StringSlice("device", nil, "Back up this device (repeatable)")
 	runBackupCmd.Flags().StringSlice("ou", nil, "Back up the devices of this OU that have backup enabled (repeatable)")
-	runBackupCmd.Flags().Bool("org", false, "Back up every device in the current org that has backup enabled")
+	addAllDevicesFlags(runBackupCmd, "Back up every device in the org that has backup enabled")
 
 	// The scheduling flags every other run command takes exist here only to be
 	// refused with an explanation, rather than with cobra's "unknown flag".
@@ -72,9 +76,6 @@ func init() {
 	runBackupCmd.Flags().String("schedule", "", "Not supported: recurring backups are set with 'ndcli backup config set --schedule'")
 	_ = runBackupCmd.Flags().MarkHidden("at")
 	_ = runBackupCmd.Flags().MarkHidden("schedule")
-
-	runBackupCmd.MarkFlagsMutuallyExclusive("org", "device")
-	runBackupCmd.MarkFlagsMutuallyExclusive("org", "ou")
 
 	_ = runBackupCmd.RegisterFlagCompletionFunc("device", completeDevices)
 	_ = runBackupCmd.RegisterFlagCompletionFunc("ou", completeOUs)
@@ -91,13 +92,13 @@ func runRunBackup(cmd *cobra.Command, args []string) error {
 
 	devices, _ := cmd.Flags().GetStringSlice("device")
 	ous, _ := cmd.Flags().GetStringSlice("ou")
-	all, _ := cmd.Flags().GetBool("org")
+	all := allDevicesFlag(cmd)
 
 	if !all && len(devices) == 0 && len(ous) == 0 {
-		return &service.Error{Code: service.CodeInvalidInput, Message: "at least one of --device, --ou, or --org is required"}
+		return &service.Error{Code: service.CodeInvalidInput, Message: "at least one of --device, --ou, or --all is required"}
 	}
 	if all && (len(devices) > 0 || len(ous) > 0) {
-		return &service.Error{Code: service.CodeInvalidInput, Message: "--org cannot be combined with --device or --ou"}
+		return &service.Error{Code: service.CodeInvalidInput, Message: "--all cannot be combined with --device or --ou"}
 	}
 
 	opts := service.BackupRunOpts{Devices: devices, OUs: ous, AllDevices: all}

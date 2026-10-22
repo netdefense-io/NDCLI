@@ -30,7 +30,8 @@ type runBackupInput struct {
 	Organization string   `json:"organization,omitempty"`
 	Devices      []string `json:"devices,omitempty"`
 	OUs          []string `json:"ous,omitempty"`
-	Org          bool     `json:"org,omitempty"`
+	All          bool     `json:"all,omitempty"`
+	Org          bool     `json:"org,omitempty"` // deprecated spelling of All
 	Confirm      bool     `json:"confirm,omitempty"`
 
 	At          string          `json:"at,omitempty"`
@@ -38,6 +39,9 @@ type runBackupInput struct {
 	ScheduledAt string          `json:"scheduled_at,omitempty"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
 }
+
+// allDevices reports all, or the deprecated org that means the same.
+func (in *runBackupInput) allDevices() bool { return in.All || in.Org }
 
 // backupSkipCodeGuide lists the codes a skipped device can carry, for the tool
 // description. The list is open: a newer control plane may add codes.
@@ -60,7 +64,7 @@ func (s *Server) registerRunBackupTool() {
 			"waiting for approval, has a backup already waiting or running, or has no encryption key is not, and comes back in `skipped` with a " +
 			"`code` and a `reason` (" + backupSkipCodeGuide + "); show the reason as it is, and treat a code not " +
 			"listed as a skip too. A request that starts no backup is an error, BACKUP_NO_ELIGIBLE_DEVICES, whose " +
-			"data carries the same `skipped` list. Name devices or ous, or set org=true for every device that has " +
+			"data carries the same `skipped` list. Name devices or ous, or set all=true for every device that has " +
 			"backup enabled; one of the three is required. The backup starts now and cannot be deferred or " +
 			"scheduled: there is no `at`, `timezone` or `schedule` parameter, and one is refused. Recurring " +
 			"backups are set with ndcli.backup.config_set_schedule. Each task expires a minute after it is " +
@@ -73,7 +77,8 @@ func (s *Server) registerRunBackupTool() {
 				"organization": organizationProperty(),
 				"devices":      stringArrayProperty("Device names to back up (repeatable). A device without backup enabled is skipped, not backed up."),
 				"ous":          stringArrayProperty("OU names; expands to the OU's enabled devices that have backup enabled"),
-				"org":          boolProperty("Back up every device in the org that has backup enabled (excludes devices and ous)"),
+				"all":          boolProperty("Back up every device in the org that has backup enabled (excludes devices and ous)"),
+				"org":          boolProperty(deprecatedOrgParam),
 				"confirm":      confirmProperty(),
 			},
 		},
@@ -99,7 +104,7 @@ func (s *Server) runBackup(ctx context.Context, input *runBackupInput) (*mcp.Cal
 	if err := refuseBackupDeferral(input); err != nil {
 		return s.errorResult(err)
 	}
-	opts := service.BackupRunOpts{Devices: input.Devices, OUs: input.OUs, AllDevices: input.Org}
+	opts := service.BackupRunOpts{Devices: input.Devices, OUs: input.OUs, AllDevices: input.allDevices()}
 	if err := opts.Validate(); err != nil {
 		return s.errorResult(err)
 	}

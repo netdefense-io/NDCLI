@@ -310,13 +310,35 @@ func runResultHeader(result *models.RunResult) string {
 	if result.Total != 1 {
 		noun = "tasks"
 	}
-	if result.ScheduledAt != "" {
-		return fmt.Sprintf("Scheduled %d %s %s in org %q — fires at %s",
-			result.Total, result.Type, noun, result.Organization,
-			FormatTimestamp(parseRunTime(result.ScheduledAt)))
+	what := fmt.Sprintf("%d %s %s in org %q", result.Total, result.Type, noun, result.Organization)
+	if code := runCode(result); code != "" {
+		what += fmt.Sprintf(" (run %s)", code)
 	}
-	return fmt.Sprintf("Created %d %s %s in org %q",
-		result.Total, result.Type, noun, result.Organization)
+	if result.ScheduledAt != "" {
+		return fmt.Sprintf("Scheduled %s — fires at %s", what, FormatTimestamp(parseRunTime(result.ScheduledAt)))
+	}
+	return "Created " + what
+}
+
+// runCode is the code of the run a result reports, or "" when the control
+// plane sent none or sent something that is not a run code.
+func runCode(result *models.RunResult) string {
+	if models.RunIDPattern.MatchString(result.RunID) {
+		return result.RunID
+	}
+	return ""
+}
+
+// runResultFollowUp is the command that lists a run's tasks, or "" when the
+// result carries no run code. The organization in it is the one the server
+// echoed, so it goes in only when it has an organization name's shape: the
+// line is one the user may paste.
+func runResultFollowUp(result *models.RunResult) string {
+	code := runCode(result)
+	if code == "" || !models.OrganizationNamePattern.MatchString(result.Organization) {
+		return ""
+	}
+	return fmt.Sprintf("List the run's tasks with: ndcli task list --run %s -o %s", code, result.Organization)
 }
 
 // parseRunTime parses an RFC3339 timestamp into time.Time. Returns the

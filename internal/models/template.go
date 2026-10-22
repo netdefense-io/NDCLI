@@ -1,5 +1,14 @@
 package models
 
+// Template positions, spelled as the server takes them: upper case only.
+const (
+	TemplatePositionPrepend = "PREPEND"
+	TemplatePositionAppend  = "APPEND"
+)
+
+// TemplatePositions are the positions a template can have.
+var TemplatePositions = []string{TemplatePositionPrepend, TemplatePositionAppend}
+
 // Template represents a configuration template
 type Template struct {
 	Name         string       `json:"name"`

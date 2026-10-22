@@ -112,3 +112,10 @@ type SyncApplyResponse struct {
 	Tasks           []SyncTaskResult `json:"tasks"`
 	Errors          []SyncError      `json:"errors,omitempty"`
 }
+
+// AllRefused reports a sync that triggered no device and refused at least
+// one, which NDManager answers with a 400. Skipped devices (already in sync)
+// are not refusals: a sync that only skipped succeeded.
+func (r *SyncApplyResponse) AllRefused() bool {
+	return r != nil && len(r.Errors) > 0 && r.DevicesAffected == 0
+}

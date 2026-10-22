@@ -70,29 +70,32 @@ func (syncResource) Actions() []registry.Action {
 func (syncResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
 	case "s":
-		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org, Device: id}, false)
+		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org, Device: service.ExactNamePattern(id)}, false)
 		if err != nil {
 			return "", err
 		}
-		return summarizeSync(res), nil
+		return summarizeSync(res)
 	case "S":
 		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org}, false)
 		if err != nil {
 			return "", err
 		}
-		return summarizeSync(res), nil
+		return summarizeSync(res)
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
 }
 
-func summarizeSync(res *service.SyncApplyResult) string {
+func summarizeSync(res *service.SyncApplyResult) (string, error) {
 	r := res.Response
 	if r == nil {
-		return "sync requested"
+		return "sync requested", nil
+	}
+	if err := service.SyncApplyRefusal(res); err != nil {
+		return "", fmt.Errorf("%v: %d error(s)", err, len(r.Errors))
 	}
 	msg := fmt.Sprintf("sync: %d affected, %d task(s)", r.DevicesAffected, len(r.Tasks))
 	if len(r.Errors) > 0 {
 		msg += fmt.Sprintf(", %d error(s)", len(r.Errors))
 	}
-	return msg
+	return msg, nil
 }

@@ -233,7 +233,7 @@ func getOrganization() string {
 func requireOrganization() string {
 	org := getOrganization()
 	if org == "" {
-		printCommandError(os.Stderr, errors.New("Organization is required. Use --org flag or set in config."))
+		printCommandError(os.Stderr, errors.New("Organization is required. Use -o <name>, or set a default with 'ndcli config set org <name>'."))
 		os.Exit(1)
 	}
 	return org

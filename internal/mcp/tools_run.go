@@ -25,7 +25,8 @@ type runInput struct {
 	Organization string   `json:"organization,omitempty"`
 	Devices      []string `json:"devices,omitempty"`
 	OUs          []string `json:"ous,omitempty"`
-	Org          bool     `json:"org,omitempty"`
+	All          bool     `json:"all,omitempty"`
+	Org          bool     `json:"org,omitempty"` // deprecated spelling of All
 	At           string   `json:"at,omitempty"`
 	Timezone     string   `json:"timezone,omitempty"` // IANA name; interprets a bare At timestamp
 	Schedule     string   `json:"schedule,omitempty"` // recurring spec registration
@@ -43,6 +44,13 @@ type runInput struct {
 	Confirm bool `json:"confirm,omitempty"`
 }
 
+// allDevices reports all, or the deprecated org that means the same.
+func (in *runInput) allDevices() bool { return in.All || in.Org }
+
+// deprecatedOrgParam describes the org parameter the run tools keep for callers
+// written before all, as the CLI keeps its boolean --org.
+const deprecatedOrgParam = "Deprecated: same as all, kept for existing callers. Use all."
+
 // atParamDescription and timezoneParamDescription are the single source of
 // truth for how the scheduling parameters are advertised: the MCPB manifest
 // and the Smithery server card are both generated from the live tool registry
@@ -53,8 +61,8 @@ type runInput struct {
 // in the transcript looks wrong.
 const atParamDescription = "Defer execution to a future instant. Three accepted forms: " +
 	"a relative offset (30m, 2h, 3d, 1w); RFC3339 with an explicit UTC offset or Z " +
-	"(2026-05-12T03:00:00-03:00, 2026-05-12T03:00:00Z); or a bare timestamp " +
-	"(2026-05-12 03:00, 2026-05-12T03:00), which REQUIRES the timezone parameter. " +
+	"(2030-05-12T03:00:00-03:00, 2030-05-12T03:00:00Z); or a bare timestamp " +
+	"(2030-05-12 03:00, 2030-05-12T03:00), which REQUIRES the timezone parameter. " +
 	"Scheduling is timezone-sensitive: the user's timezone, the device's local timezone " +
 	"and UTC can differ, so unless the user stated the timezone explicitly, ask which one " +
 	"they mean before calling with confirm=true, and state the resolved UTC time back to " +
@@ -120,7 +128,7 @@ func resolveRunScheduledAt(at, timezone, schedule string) (*service.ScheduledAt,
 			return nil, &service.Error{
 				Code: service.CodeInvalidInput,
 				Message: fmt.Sprintf(
-					"at: %q carries no timezone, so the instant it names is ambiguous. Pass timezone with an IANA name (NDCLI is configured for %s), or give `at` an explicit UTC offset or Z (2026-05-12T03:00:00-03:00). Confirm with the user which timezone the time refers to before scheduling.",
+					"at: %q carries no timezone, so the instant it names is ambiguous. Pass timezone with an IANA name (NDCLI is configured for %s), or give `at` an explicit UTC offset or Z (2030-05-12T03:00:00-03:00). Confirm with the user which timezone the time refers to before scheduling.",
 					at, configuredTimezoneHint()),
 			}
 		}
@@ -207,6 +215,11 @@ func runResultResponse(result *models.RunResult, resolved *service.ScheduledAt, 
 		"tasks":        tasks,
 	}
 	summary := fmt.Sprintf("%d %s task(s) created", result.Total, taskType)
+	// Unlike the CLI's follow-up line, run_id builds no command line here, so
+	// it goes out as the server sent it, without a shape check.
+	if result.RunID != "" {
+		data["run_id"] = result.RunID
+	}
 	if resolved != nil {
 		// Prefer the instant this client resolved over the server echo: it is
 		// the value that was actually sent, and it is guaranteed UTC.
@@ -215,6 +228,9 @@ func runResultResponse(result *models.RunResult, resolved *service.ScheduledAt, 
 		}
 		summary = fmt.Sprintf("%d %s task(s) scheduled for %s (%s %s)",
 			result.Total, taskType, resolved.RFC3339UTC(), resolved.RFC3339Zoned(), resolved.Zone)
+	}
+	if result.RunID != "" {
+		summary += fmt.Sprintf("; run %s", result.RunID)
 	}
 	return data, summary
 }
@@ -226,7 +242,8 @@ func (s *Server) registerRunTools() {
 		"organization": organizationProperty(),
 		"devices":      stringArrayProperty("Target device names (repeatable)"),
 		"ous":          stringArrayProperty("Target OU names; expands to enabled members"),
-		"org":          boolProperty("Target every enabled device in the current org"),
+		"all":          boolProperty("Target every enabled device in the org"),
+		"org":          boolProperty(deprecatedOrgParam),
 		"at":           stringProperty(atParamDescription),
 		"timezone":     stringProperty(timezoneParamDescription),
 		"schedule":     stringProperty("Register as a recurring spec on this named schedule instead of running immediately. Mutually exclusive with at."),
@@ -386,7 +403,7 @@ func (s *Server) firmwareUpgrade(ctx context.Context, input *runInput) (*mcp.Cal
 		Type:       models.TaskTypeFirmwareUpgrade,
 		Devices:    input.Devices,
 		OUs:        input.OUs,
-		AllDevices: input.Org,
+		AllDevices: input.allDevices(),
 		Schedule:   input.Schedule,
 	}
 	if resolved != nil {
@@ -481,7 +498,7 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 		Type:       taskType,
 		Devices:    input.Devices,
 		OUs:        input.OUs,
-		AllDevices: input.Org,
+		AllDevices: input.allDevices(),
 		Schedule:   input.Schedule,
 	}
 	if resolved != nil {
@@ -524,7 +541,7 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 }
 
 func runScopeDescription(in *runInput) string {
-	if in.Org {
+	if in.allDevices() {
 		return "every device in org"
 	}
 	if len(in.Devices) > 0 && len(in.OUs) > 0 {

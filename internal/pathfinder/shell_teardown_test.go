@@ -12,7 +12,7 @@ import (
 
 // TestShellRun_TeardownReturnsOnImmediateClose drives the FULL shell session
 // teardown — not just forwardInput — through the real StreamManager, stream
-// dataWorker, output io.Copy and deferred terminal restore, against a paired
+// reads, output io.Copy and deferred terminal restore, against a paired
 // relay with no socket. It reproduces the operator repro: a shell that emits a
 // burst of output and is then closed immediately (Logout / option 0), which
 // maximizes the startup/teardown overlap. The invariant: run() must RETURN

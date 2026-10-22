@@ -122,7 +122,7 @@ func (m *StreamManager) handleData(frame *Frame) {
 	}
 
 	// Non-blocking send to pending queue - this keeps the read pump responsive
-	// for ping/pong handling. The worker goroutine handles backpressure.
+	// for ping/pong handling.
 	select {
 	case stream.pendingData <- frame.Data:
 	case <-stream.closed:
@@ -178,14 +178,13 @@ type Stream struct {
 	manager     *StreamManager
 	serviceName string
 
-	// pendingData is a large buffer for incoming data from the read pump.
-	// This allows handleData to be non-blocking, keeping the read pump
-	// responsive for ping/pong handling.
+	// pendingData holds incoming frames in arrival order. It is large so that
+	// handleData never blocks, keeping the read pump responsive for ping/pong
+	// handling; Read consumes it directly.
 	pendingData chan []byte
 
-	// recvChan is the consumer-facing channel that Read() pulls from.
-	// The worker goroutine moves data from pendingData to recvChan.
-	recvChan chan []byte
+	// unread is the rest of a frame that a short Read did not consume.
+	unread []byte
 
 	closed     chan struct{}
 	closeOnce  sync.Once
@@ -198,55 +197,14 @@ type Stream struct {
 	closeErr error
 }
 
-// newStream creates a new stream and starts its worker goroutine
+// newStream creates a new stream
 func newStream(id uint32, manager *StreamManager, serviceName string) *Stream {
-	s := &Stream{
+	return &Stream{
 		id:          id,
 		manager:     manager,
 		serviceName: serviceName,
 		pendingData: make(chan []byte, 100000), // Large buffer for burst traffic
-		recvChan:    make(chan []byte, 4096),   // Consumer buffer
 		closed:      make(chan struct{}),
-	}
-
-	// Start worker goroutine that moves data from pendingData to recvChan.
-	// This applies backpressure (blocks) when recvChan is full, without
-	// blocking the read pump.
-	go s.dataWorker()
-
-	return s
-}
-
-// dataWorker moves data from pendingData to recvChan.
-// It blocks when recvChan is full, applying backpressure.
-func (s *Stream) dataWorker() {
-	for {
-		select {
-		case data, ok := <-s.pendingData:
-			if !ok {
-				return
-			}
-			// Blocking send to recvChan - this is where backpressure happens
-			select {
-			case s.recvChan <- data:
-			case <-s.closed:
-				return
-			}
-		case <-s.closed:
-			// Drain remaining pending data before exiting
-			for {
-				select {
-				case data := <-s.pendingData:
-					select {
-					case s.recvChan <- data:
-					default:
-						return
-					}
-				default:
-					return
-				}
-			}
-		}
 	}
 }
 
@@ -267,42 +225,42 @@ func (s *Stream) Closed() <-chan struct{} {
 	return s.closed
 }
 
-// Read reads data from the stream
+// Read reads data from the stream in arrival order. A frame larger than p is
+// returned over several calls. After the stream closes, Read still returns
+// everything received before the close, and only then io.EOF (or the error
+// the stream was closed with).
 func (s *Stream) Read(p []byte) (int, error) {
-	// First check if there's buffered data, even if stream is closed
-	select {
-	case data, ok := <-s.recvChan:
-		if !ok {
-			return 0, io.EOF
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for len(s.unread) == 0 {
+		data, err := s.nextFrame()
+		if err != nil {
+			return 0, err
 		}
-		n := copy(p, data)
-		return n, nil
+		s.unread = data
+	}
+	n := copy(p, s.unread)
+	s.unread = s.unread[n:]
+	return n, nil
+}
+
+func (s *Stream) nextFrame() ([]byte, error) {
+	select {
+	case data := <-s.pendingData:
+		return data, nil
+	case <-s.closed:
+	}
+	// Closed, but frames that arrived before the close may still be queued.
+	select {
+	case data := <-s.pendingData:
+		return data, nil
 	default:
 	}
-
-	// No buffered data, wait for data or close
-	select {
-	case data, ok := <-s.recvChan:
-		if !ok {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		return n, nil
-	case <-s.closed:
-		// Check one more time for buffered data before returning EOF
-		select {
-		case data, ok := <-s.recvChan:
-			if ok {
-				n := copy(p, data)
-				return n, nil
-			}
-		default:
-		}
-		if s.closeErr != nil {
-			return 0, s.closeErr
-		}
-		return 0, io.EOF
+	if s.closeErr != nil {
+		return nil, s.closeErr
 	}
+	return nil, io.EOF
 }
 
 // Write writes data to the stream

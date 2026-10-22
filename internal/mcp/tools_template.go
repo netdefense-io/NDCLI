@@ -93,7 +93,7 @@ func (s *Server) registerTemplateTools() {
 				"organization": organizationProperty(),
 				"name":         stringProperty("Template name"),
 				"description":  stringProperty("Description (optional)"),
-				"position":     stringEnumProperty("Snippet position (default PREPEND)", []string{"PREPEND", "APPEND"}),
+				"position":     stringEnumProperty("Snippet position (default PREPEND)", models.TemplatePositions),
 			},
 			"required": []string{"name"},
 		},
@@ -101,7 +101,7 @@ func (s *Server) registerTemplateTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.template.update",
-		Description: "Update a template. At least one of new_name/description/position must be set. Requires confirm=true.",
+		Description: "Update a template. At least one of new_name/description/position must be set. A new position takes effect at each affected device's next sync; none is triggered. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -109,7 +109,7 @@ func (s *Server) registerTemplateTools() {
 				"name":         stringProperty("Current template name"),
 				"new_name":     stringProperty("New name (rename)"),
 				"description":  stringProperty("New description"),
-				"position":     stringEnumProperty("New position", []string{"PREPEND", "APPEND"}),
+				"position":     stringEnumProperty("New position", models.TemplatePositions),
 				"confirm":      confirmProperty(),
 			},
 			"required": []string{"name"},
@@ -269,6 +269,10 @@ func (s *Server) handleTemplateUpdate(ctx context.Context, req *mcp.CallToolRequ
 	if err != nil {
 		return s.errorResult(err)
 	}
+	position, err := service.NormalizeTemplatePosition(input.Position)
+	if err != nil {
+		return s.errorResult(err)
+	}
 	if !input.Confirm {
 		changes := []string{}
 		if input.NewName != "" {
@@ -277,8 +281,8 @@ func (s *Server) handleTemplateUpdate(ctx context.Context, req *mcp.CallToolRequ
 		if input.Description != "" {
 			changes = append(changes, "description")
 		}
-		if input.Position != "" {
-			changes = append(changes, fmt.Sprintf("position → %s", input.Position))
+		if position != "" {
+			changes = append(changes, fmt.Sprintf("position → %s", position))
 		}
 		return s.previewResult("update template", fmt.Sprintf("%s [%v]", input.Name, changes))
 	}
@@ -289,7 +293,7 @@ func (s *Server) handleTemplateUpdate(ctx context.Context, req *mcp.CallToolRequ
 	finalName, err := s.svc.TemplateUpdate(apiCtx, org, input.Name, service.TemplateUpdateOpts{
 		NewName:     input.NewName,
 		Description: input.Description,
-		Position:    input.Position,
+		Position:    position,
 	})
 	if err != nil {
 		return s.errorResult(err)

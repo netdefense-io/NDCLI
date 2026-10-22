@@ -1111,17 +1111,13 @@ func provisionMessage(variable, device, network, value string, created bool, pub
 
 // provisionError prepares a NetworkPrefixProvision failure for errorResult.
 //
-// Two things have to survive. The service leaves VariableMismatchHint as a
-// marker rather than naming a CLI command an MCP caller cannot run, so the
-// tool name is substituted here. And the machine-readable code has to reach
-// the response: errorResult reads it from a type switch on the *concrete*
-// type, so an error flattened through fmt.Errorf — or left as a
-// *NetworkPrefixProvisionError that merely wraps a *service.Error — arrives
-// with error.code empty, for a bad CIDR and a genuine mismatch alike. The
-// sibling branch below passes its error through untouched and does get a code;
-// this keeps the two consistent.
+// The service leaves VariableMismatchHint as a marker rather than naming a CLI
+// command an MCP caller cannot run, so the tool name is substituted here. A
+// changed message means a new error, and it wraps the original so the chain,
+// and with it error.code, survives: errorResult finds the code with errors.As.
+// Setting Code here as well is not needed for that, only explicit.
 //
-// Rewrapping only where errors.As confirms there is a code to carry mirrors
+// An error with no code to carry is handed back as it is, mirroring
 // namedOverwriteFlag in cli/ticket.go: the typed error is what means
 // something, the rendered string is only how it reads.
 func provisionError(err error) error {

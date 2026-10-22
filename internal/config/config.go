@@ -243,38 +243,31 @@ func Save() error {
 		}
 	}
 
-	// Update organization settings
-	if orgName := viper.GetString("organization.name"); orgName != "" {
-		if existingConfig["organization"] == nil {
-			existingConfig["organization"] = map[string]interface{}{}
-		}
-		existingConfig["organization"].(map[string]interface{})["name"] = orgName
-	}
-
-	// Update output settings
-	if format := viper.GetString("output.format"); format != "" {
-		if existingConfig["output"] == nil {
-			existingConfig["output"] = map[string]interface{}{}
-		}
-		existingConfig["output"].(map[string]interface{})["format"] = format
-	}
-	if timezone := viper.GetString("output.timezone"); timezone != "" {
-		if existingConfig["output"] == nil {
-			existingConfig["output"] = map[string]interface{}{}
-		}
-		existingConfig["output"].(map[string]interface{})["timezone"] = timezone
-	}
-
-	// Update auth settings.
-	//
 	// Only fields this process actually assigned through UpdateValue are
 	// written. Reading viper.GetString here instead would pick up an
 	// environment-resolved value and bake it into the file, turning a session
 	// override into a permanent setting: `NDCLI_AUTH_STORAGE=file ndcli config
 	// set output.timezone ...` would pin credentials to plaintext on disk for
 	// good, long after the variable is gone, from a command that has nothing
-	// to do with authentication. Whatever is already in the file is left
-	// exactly as it is — this never rewrites a value it did not set.
+	// to do with authentication, and an NDCLI_ORGANIZATION_NAME would become
+	// the default organization every later command acts on. Whatever is
+	// already in the file is left exactly as it is — this never rewrites a
+	// value it did not set.
+	for _, key := range []string{"organization.name", "output.format", "output.timezone"} {
+		value := viper.GetString(key)
+		if !wasExplicitlySet(key) || value == "" {
+			continue
+		}
+		sectionName, field, _ := strings.Cut(key, ".")
+		section, _ := existingConfig[sectionName].(map[string]interface{})
+		if section == nil {
+			section = map[string]interface{}{}
+		}
+		section[field] = value
+		existingConfig[sectionName] = section
+	}
+
+	// Update auth settings, under the same rule.
 	//
 	// Assigning the empty string is how a field is cleared (logout does it for
 	// auth.account through KeyringStorage.Clear), so that removes the key.

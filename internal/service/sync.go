@@ -1,8 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/models"
@@ -26,6 +30,13 @@ type SyncFilter struct {
 	Schedule     string // schedule name; when set, registers a recurring spec
 }
 
+// ExactNamePattern is the SyncFilter.Device pattern that selects one device
+// and nothing else. NDManager searches with the pattern unanchored, so a bare
+// "fw-01" also selects "fw-010" and "lab-fw-01".
+func ExactNamePattern(name string) string {
+	return "^" + regexp.QuoteMeta(name) + "$"
+}
+
 // SyncApplyResult bundles the parsed sync apply response with the raw HTTP
 // status, so callers can distinguish full success (200), partial (207), and
 // total failure (400) without re-issuing the request. Response is always
@@ -33,6 +44,16 @@ type SyncFilter struct {
 type SyncApplyResult struct {
 	Response   *models.SyncApplyResponse
 	StatusCode int
+}
+
+// SyncApplyRefusal is the error a front-end returns, after showing the
+// result, for a sync that every targeted device refused; nil otherwise. The
+// per-device reasons stay in the result.
+func SyncApplyRefusal(res *SyncApplyResult) error {
+	if res == nil || !res.Response.AllRefused() {
+		return nil
+	}
+	return &Error{Code: CodeAPIError, Message: "sync failed for all devices"}
 }
 
 // SyncStatus returns the per-device sync status matching the filter.
@@ -64,14 +85,33 @@ func (s *Service) SyncApply(ctx context.Context, defaultOrg string, filter SyncF
 	}
 	defer resp.Body.Close()
 
+	// 400 is the one error status that carries a sync result. Any other
+	// refuses the request itself (403 ACCESS_DENIED or TOKEN_READ_ONLY, 404,
+	// 422) with the usual error body.
+	if resp.StatusCode > 400 {
+		return nil, wrapAPI("%v", api.ParseError(resp))
+	}
+
 	// 200 / 207 / 400 all return the same body shape; decode directly so
 	// non-2xx doesn't get folded into an error. DeviceName/Error strings in
 	// the response reach the terminal via formatter.FormatSyncApply, so
 	// route through api.DecodeJSON for the same cap+sanitize treatment
 	// ParseResponse gives every other decode path.
+	raw, err := api.ReadBody(resp.Body)
+	if err != nil {
+		return nil, wrapAPI(fmt.Sprintf("failed to read response: %v", err), err)
+	}
 	var body models.SyncApplyResponse
-	if err := api.DecodeJSON(resp.Body, &body); err != nil {
-		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", err), err)
+	decodeErr := api.DecodeJSON(bytes.NewReader(raw), &body)
+
+	// The 400 sync result always names the refused devices. A 400 that names
+	// none is a plain refusal of the request, read as the error it carries.
+	if resp.StatusCode == 400 && (decodeErr != nil || len(body.Errors) == 0) {
+		refusal := &http.Response{StatusCode: resp.StatusCode, Body: io.NopCloser(bytes.NewReader(raw))}
+		return nil, wrapAPI("%v", api.ParseError(refusal))
+	}
+	if decodeErr != nil {
+		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", decodeErr), decodeErr)
 	}
 	return &SyncApplyResult{Response: &body, StatusCode: resp.StatusCode}, nil
 }
@@ -117,9 +157,12 @@ func (s *Service) SyncRegisterSpec(ctx context.Context, defaultOrg string, filte
 		return nil, wrapAPI("%v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, wrapAPI("%v", api.ParseError(resp))
+	}
 
-	// Same dual-shape decode as SyncApply above (ScheduleName/CreatedBy are
-	// server-supplied and formatter-rendered) — cap+sanitize via DecodeJSON.
+	// ScheduleName/CreatedBy are server-supplied and formatter-rendered, so
+	// the decode goes through api.DecodeJSON for its cap+sanitize treatment.
 	var result models.ScheduledTaskRegisterResult
 	if err := api.DecodeJSON(resp.Body, &result); err != nil {
 		return nil, wrapAPI(fmt.Sprintf("failed to parse response: %v", err), err)

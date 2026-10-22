@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
@@ -100,6 +101,18 @@ func (s *Service) TemplateGet(ctx context.Context, org, name string) (*models.Te
 	return &t, nil
 }
 
+// NormalizeTemplatePosition returns position upper-cased, as the server takes
+// it, or "" when none is given. Anything but PREPEND or APPEND is refused
+// before a request is made.
+func NormalizeTemplatePosition(position string) (string, error) {
+	p := strings.ToUpper(strings.TrimSpace(position))
+	switch p {
+	case "", models.TemplatePositionPrepend, models.TemplatePositionAppend:
+		return p, nil
+	}
+	return "", &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("position must be PREPEND or APPEND, not %q", position)}
+}
+
 // TemplateCreateOpts holds the fields needed to create a template.
 type TemplateCreateOpts struct {
 	Name        string
@@ -112,12 +125,16 @@ func (s *Service) TemplateCreate(ctx context.Context, org string, opts TemplateC
 	if opts.Name == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "template name is required"}
 	}
+	position, err := NormalizeTemplatePosition(opts.Position)
+	if err != nil {
+		return nil, err
+	}
 	payload := map[string]string{"name": opts.Name}
 	if opts.Description != "" {
 		payload["description"] = opts.Description
 	}
-	if opts.Position != "" {
-		payload["position"] = opts.Position
+	if position != "" {
+		payload["position"] = position
 	}
 	resp, err := s.api.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates", org), payload)
 	if err != nil {
@@ -147,7 +164,11 @@ func (s *Service) TemplateUpdate(ctx context.Context, org, name string, opts Tem
 	if name == "" {
 		return "", &Error{Code: CodeInvalidInput, Message: "template name is required"}
 	}
-	if opts.NewName == "" && opts.Description == "" && opts.Position == "" {
+	position, err := NormalizeTemplatePosition(opts.Position)
+	if err != nil {
+		return "", err
+	}
+	if opts.NewName == "" && opts.Description == "" && position == "" {
 		return "", &Error{Code: CodeInvalidInput, Message: "no updates specified (NewName, Description, or Position must be set)"}
 	}
 
@@ -163,13 +184,13 @@ func (s *Service) TemplateUpdate(ctx context.Context, org, name string, opts Tem
 		current = opts.NewName
 	}
 
-	if opts.Description != "" || opts.Position != "" {
+	if opts.Description != "" || position != "" {
 		payload := map[string]string{}
 		if opts.Description != "" {
 			payload["description"] = opts.Description
 		}
-		if opts.Position != "" {
-			payload["position"] = opts.Position
+		if position != "" {
+			payload["position"] = position
 		}
 		resp, err := s.api.Patch(ctx, fmt.Sprintf("/api/v1/organizations/%s/templates/%s", org, current), payload)
 		if err != nil {

@@ -107,11 +107,11 @@ func init() {
 	templateListCmd.Flags().String("updated-before", "", "Filter by updated date (e.g., 30m, 2h, 7d, 2w or ISO 8601)")
 
 	templateCreateCmd.Flags().String("description", "", "Template description")
-	templateCreateCmd.Flags().String("position", "", "Snippet position: PREPEND (default) or APPEND")
+	templateCreateCmd.Flags().String("position", "", "Snippet position: PREPEND (default) or APPEND, in any case")
 
 	templateUpdateCmd.Flags().String("description", "", "New description")
 	templateUpdateCmd.Flags().String("name", "", "New name")
-	templateUpdateCmd.Flags().String("position", "", "New position: PREPEND or APPEND")
+	templateUpdateCmd.Flags().String("position", "", "New position: PREPEND or APPEND, in any case. Takes effect at each affected device's next sync; none is triggered")
 }
 
 func runTemplateList(cmd *cobra.Command, args []string) error {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -138,5 +139,28 @@ func TestSyncFilters_SendOrgAndOUAsBareNames(t *testing.T) {
 	}
 	if got := queries[2]["organization"]; len(got) != 1 || got[0] != "default-org" {
 		t.Errorf("an empty organization must fall back to the default org as given, got %v", got)
+	}
+}
+
+// TestExactNamePatternSelectsOnlyThatName: NDManager compiles the sync device
+// filter with RE2, case-insensitive, and searches it unanchored. Go's regexp is
+// RE2 too, so it stands in for the server here.
+func TestExactNamePatternSelectsOnlyThatName(t *testing.T) {
+	if got, want := ExactNamePattern("fw.01"), `^fw\.01$`; got != want {
+		t.Fatalf("ExactNamePattern(%q) = %q, want %q", "fw.01", got, want)
+	}
+
+	fleet := []string{"fw-01", "fw-010", "lab-fw-01", "fw-01.old", "fw.01", "fwx01"}
+	for _, name := range []string{"fw-01", "fw.01"} {
+		re := regexp.MustCompile("(?i)" + ExactNamePattern(name))
+		var selected []string
+		for _, candidate := range fleet {
+			if re.MatchString(candidate) {
+				selected = append(selected, candidate)
+			}
+		}
+		if len(selected) != 1 || selected[0] != name {
+			t.Errorf("pattern for %q selects %v, want only %q", name, selected, name)
+		}
 	}
 }

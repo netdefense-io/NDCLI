@@ -136,11 +136,11 @@ func (deviceResource) Execute(ctx context.Context, svc *service.Service, org, id
 		}
 		return "renamed " + id + " to " + newName, nil
 	case "s":
-		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org, Device: id}, false)
+		res, err := svc.SyncApply(ctx, org, service.SyncFilter{Organization: org, Device: service.ExactNamePattern(id)}, false)
 		if err != nil {
 			return "", err
 		}
-		return summarizeSync(res), nil
+		return summarizeSync(res)
 	case "x":
 		if err := svc.DeviceRemove(ctx, org, id); err != nil {
 			return "", err

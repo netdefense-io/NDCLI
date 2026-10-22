@@ -47,7 +47,7 @@ func (s *Server) registerSyncTools() {
 	// ndcli.sync.apply
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.sync.apply",
-		Description: "Trigger configuration sync for every device matching the filter. device and template are regex patterns; organization and ou are exact names, and organization defaults to the configured org. Requires confirm=true for immediate apply. Pass schedule to register a recurring sync spec instead.",
+		Description: "Trigger configuration sync for every device matching the filter. device and template are regex patterns; organization and ou are exact names, and organization defaults to the configured org. Requires confirm=true for immediate apply. Pass schedule to register a recurring sync spec instead. A sync that every matched device refused is a failed call, with each device's reason in data.errors.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -199,14 +199,18 @@ func (s *Server) syncApply(ctx context.Context, input *syncApplyInput) (*mcp.Cal
 			"trust_issues": e.TrustIssues,
 		})
 	}
-	return s.successResult(map[string]interface{}{
+	data := map[string]interface{}{
 		"message":          applied.Response.Message,
 		"devices_affected": applied.Response.DevicesAffected,
 		"skipped":          applied.Response.Skipped,
 		"tasks":            tasks,
 		"errors":           errs,
 		"status_code":      applied.StatusCode,
-	}, applied.Response.Message)
+	}
+	if err := service.SyncApplyRefusal(applied); err != nil {
+		return s.errorResultWithData(err, data)
+	}
+	return s.successResult(data, applied.Response.Message)
 }
 
 func syncStatusItem(it *models.SyncStatusItem) map[string]interface{} {

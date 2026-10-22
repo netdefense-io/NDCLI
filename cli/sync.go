@@ -153,8 +153,5 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	if err := formatter.FormatSyncApply(applied.Response); err != nil {
 		return err
 	}
-	if applied.StatusCode == 400 && len(applied.Response.Errors) > 0 {
-		return fmt.Errorf("sync failed for all devices")
-	}
-	return nil
+	return service.SyncApplyRefusal(applied)
 }

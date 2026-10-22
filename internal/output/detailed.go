@@ -289,6 +289,10 @@ func (f *DetailedFormatter) FormatRunResult(result *models.RunResult) error {
 		}
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Expires", FormatTimestamp(parseRunTime(t.ExpiresAt)))
 	}
+	if followUp := runResultFollowUp(result); followUp != "" {
+		fmt.Fprintln(f.Writer)
+		fmt.Fprintln(f.Writer, followUp)
+	}
 	return nil
 }
 
@@ -852,7 +856,11 @@ func (f *DetailedFormatter) FormatSyncStatus(items []models.SyncStatusItem, tota
 func (f *DetailedFormatter) FormatSyncApply(result *models.SyncApplyResponse) error {
 	const width = 55
 
-	ColorSuccess.Fprintf(f.Writer, "✓ %s\n", result.Message)
+	if result.AllRefused() {
+		ColorError.Fprintf(f.Writer, "✗ %s\n", result.Message)
+	} else {
+		ColorSuccess.Fprintf(f.Writer, "✓ %s\n", result.Message)
+	}
 	fmt.Fprintln(f.Writer)
 	fmt.Fprintf(f.Writer, "  %-20s %d\n", "Devices affected", result.DevicesAffected)
 	fmt.Fprintf(f.Writer, "  %-20s %d\n", "Skipped", result.Skipped)

@@ -12,10 +12,10 @@ import (
 // Teardown diagnostics.
 //
 // The connect-session teardown spans several goroutines (the relay read/write
-// pumps, each stream's dataWorker, the shell output copy, the input reader) and
-// a chain of deferred cleanup. A deadlock in any of them wedges the process
-// with no output — the operator-visible symptom is "WebAdmin tunnel still
-// active" never printing and Ctrl-C doing nothing.
+// pumps, the shell output copy, the input reader) and a chain of deferred
+// cleanup. A deadlock in any of them wedges the process with no output — the
+// operator-visible symptom is "WebAdmin tunnel still active" never printing
+// and Ctrl-C doing nothing.
 //
 // Isolated unit tests can't reproduce that cross-goroutine interaction, so this
 // instrumentation captures the truth from a live hang: staged stage logging

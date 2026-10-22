@@ -217,3 +217,80 @@ func TestSaveLeavesAnOnDiskAuthStorageAlone(t *testing.T) {
 		t.Errorf("the environment override overwrote the file's own value:\n%s", got)
 	}
 }
+
+func readSaved(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	return string(raw)
+}
+
+// TestSaveDoesNotPersistEnvSourcedOrganizationOrOutput: an organization set in
+// the environment for one command must not become the default because a
+// later, unrelated command saved the config. Every command without -o would
+// then act on that organization's devices.
+func TestSaveDoesNotPersistEnvSourcedOrganizationOrOutput(t *testing.T) {
+	t.Setenv("NDCLI_ORGANIZATION_NAME", "acme")
+	t.Setenv("NDCLI_OUTPUT_FORMAT", "json")
+
+	path := prepareSaveTest(t, "output:\n  timezone: UTC\n")
+	if got := viper.GetString("organization.name"); got != "acme" {
+		t.Fatalf("expected the environment override to resolve, got %q", got)
+	}
+
+	if err := UpdateValue("output.timezone", "America/New_York"); err != nil {
+		t.Fatalf("UpdateValue: %v", err)
+	}
+
+	got := readSaved(t, path)
+	if !strings.Contains(got, "America/New_York") {
+		t.Errorf("the setting the user actually changed was not written:\n%s", got)
+	}
+	for _, leaked := range []string{"organization", "acme", "json"} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("an environment-sourced value was persisted (%q):\n%s", leaked, got)
+		}
+	}
+}
+
+// TestSaveLeavesAnOnDiskOrganizationAlone: the organization already in the file
+// stays, and is not rewritten to whatever the environment says.
+func TestSaveLeavesAnOnDiskOrganizationAlone(t *testing.T) {
+	t.Setenv("NDCLI_ORGANIZATION_NAME", "acme")
+
+	path := prepareSaveTest(t, "organization:\n  name: corp\n")
+
+	if err := UpdateValue("output.timezone", "UTC"); err != nil {
+		t.Fatalf("UpdateValue: %v", err)
+	}
+
+	got := readSaved(t, path)
+	if !strings.Contains(got, "name: corp") || strings.Contains(got, "acme") {
+		t.Errorf("the on-disk organization should be untouched:\n%s", got)
+	}
+}
+
+// TestSavePersistsAnExplicitlySetOrganization: `config set org` still reaches
+// the file, and nothing it did not set rides along with it.
+func TestSavePersistsAnExplicitlySetOrganization(t *testing.T) {
+	t.Setenv("NDCLI_ORGANIZATION_NAME", "acme")
+	t.Setenv("NDCLI_OUTPUT_FORMAT", "json")
+
+	path := prepareSaveTest(t, "")
+
+	if err := UpdateValue("organization.name", "corp"); err != nil {
+		t.Fatalf("UpdateValue: %v", err)
+	}
+
+	got := readSaved(t, path)
+	if !strings.Contains(got, "name: corp") {
+		t.Errorf("an explicitly assigned organization must be written:\n%s", got)
+	}
+	for _, unwanted := range []string{"acme", "output", "json"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("a value this process did not set was written (%q):\n%s", unwanted, got)
+		}
+	}
+}

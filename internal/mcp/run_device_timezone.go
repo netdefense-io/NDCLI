@@ -26,7 +26,7 @@ import (
 // singleDeviceTarget returns the one device a run targets, or "" when the
 // target is an OU, the whole org, several devices, or nothing.
 func singleDeviceTarget(in *runInput) string {
-	if in == nil || in.Org || len(in.OUs) > 0 || len(in.Devices) != 1 {
+	if in == nil || in.allDevices() || len(in.OUs) > 0 || len(in.Devices) != 1 {
 		return ""
 	}
 	return strings.TrimSpace(in.Devices[0])

@@ -126,7 +126,7 @@ func ParseFutureTimeZoned(input string, loc *time.Location) (time.Time, error) {
 		}
 	}
 
-	return time.Time{}, fmt.Errorf("could not parse %q (accepts relative like 30m/2h/1d/1w, or 2026-05-12, 2026-05-12 03:00, 2026-05-12T03:00:00Z)", input)
+	return time.Time{}, fmt.Errorf("could not parse %q (accepts relative like 30m/2h/1d/1w, or 2030-05-12, 2030-05-12 03:00, 2030-05-12T03:00:00Z)", input)
 }
 
 // relativeFilterPattern is a list filter's relative bound: 45s, 30m, 2h, 7d,

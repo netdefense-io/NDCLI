@@ -116,6 +116,6 @@ func (s *Service) ResolveOrg(input string) (string, error) {
 	}
 	return "", &Error{
 		Code:    CodeOrgRequired,
-		Message: "Organization is required. Provide --org or set organization.name in config.",
+		Message: "Organization is required: pass organization, or set organization.name in the config.",
 	}
 }
