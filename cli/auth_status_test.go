@@ -401,5 +401,8 @@ func TestStaticTokenModeNeverDereferencesTheAuthManager(t *testing.T) {
 		if !strings.Contains(out, "Auth storage: static-token (NDCLI_TOKEN)") {
 			t.Errorf("config show output lacks the static storage name:\n%s", out)
 		}
+		if !strings.Contains(out, "Connection relay (pathfinder):") || strings.Contains(out, "Pathfinder") {
+			t.Errorf("config show should head the relay section by its role and config key:\n%s", out)
+		}
 	})
 }

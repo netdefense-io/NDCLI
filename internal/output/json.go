@@ -84,10 +84,10 @@ func (f *JSONFormatter) FormatRunResult(result *models.RunResult) error {
 }
 
 // FormatOrganizations formats organizations as JSON
-func (f *JSONFormatter) FormatOrganizations(orgs []models.Organization) error {
+func (f *JSONFormatter) FormatOrganizations(orgs []models.Organization, total int) error {
 	return f.output(map[string]interface{}{
 		"organizations": orgs,
-		"total":         len(orgs),
+		"total":         total,
 	})
 }
 
@@ -97,10 +97,10 @@ func (f *JSONFormatter) FormatOrganization(org *models.Organization) error {
 }
 
 // FormatOUs formats organizational units as JSON
-func (f *JSONFormatter) FormatOUs(ous []models.OrganizationalUnit) error {
+func (f *JSONFormatter) FormatOUs(ous []models.OrganizationalUnit, total int) error {
 	return f.output(map[string]interface{}{
 		"organizational_units": ous,
-		"total":                len(ous),
+		"total":                total,
 	})
 }
 
@@ -110,10 +110,10 @@ func (f *JSONFormatter) FormatOU(ou *models.OrganizationalUnit) error {
 }
 
 // FormatTemplates formats templates as JSON
-func (f *JSONFormatter) FormatTemplates(templates []models.Template) error {
+func (f *JSONFormatter) FormatTemplates(templates []models.Template, total int) error {
 	return f.output(map[string]interface{}{
 		"templates": templates,
-		"total":     len(templates),
+		"total":     total,
 	})
 }
 
@@ -123,10 +123,10 @@ func (f *JSONFormatter) FormatTemplate(template *models.Template) error {
 }
 
 // FormatSnippets formats snippets as JSON
-func (f *JSONFormatter) FormatSnippets(snippets []models.Snippet) error {
+func (f *JSONFormatter) FormatSnippets(snippets []models.Snippet, total int) error {
 	return f.output(map[string]interface{}{
 		"snippets": snippets,
-		"total":    len(snippets),
+		"total":    total,
 	})
 }
 
@@ -136,10 +136,10 @@ func (f *JSONFormatter) FormatSnippet(snippet *models.Snippet) error {
 }
 
 // FormatSoftwarePolicies formats software policies as JSON
-func (f *JSONFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+func (f *JSONFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy, total int) error {
 	return f.output(map[string]interface{}{
 		"software_policies": policies,
-		"total":             len(policies),
+		"total":             total,
 	})
 }
 
@@ -149,10 +149,10 @@ func (f *JSONFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
 }
 
 // FormatAccounts formats accounts as JSON
-func (f *JSONFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
+func (f *JSONFormatter) FormatAccounts(accounts []models.Account, total int, quota *models.Quota) error {
 	out := map[string]interface{}{
 		"accounts": accounts,
-		"total":    len(accounts),
+		"total":    total,
 	}
 	if quota != nil {
 		out["quota"] = quota

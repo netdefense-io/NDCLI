@@ -66,7 +66,7 @@ func TestSimpleFormatter_EntryCounts(t *testing.T) {
 	if err := f.FormatSoftwarePolicies([]models.SoftwarePolicy{
 		{Name: "plain", Content: `{"present":[],"absent":[]}`},
 		{Name: "rich", Content: policyWithEntries},
-	}); err != nil {
+	}, 2); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -107,7 +107,7 @@ func renderPolicies(t *testing.T, policies ...models.SoftwarePolicy) string {
 	t.Helper()
 	var formatErr error
 	out := captureStdout(t, func() {
-		formatErr = NewTableFormatter().FormatSoftwarePolicies(policies)
+		formatErr = NewTableFormatter().FormatSoftwarePolicies(policies, len(policies))
 	})
 	if formatErr != nil {
 		t.Fatal(formatErr)

@@ -131,29 +131,29 @@ type Formatter interface {
 	FormatRunResult(result *models.RunResult) error
 
 	// Organizations
-	FormatOrganizations(orgs []models.Organization) error
+	FormatOrganizations(orgs []models.Organization, total int) error
 	FormatOrganization(org *models.Organization) error
 	FormatOrgQuota(quota *models.OrgQuota) error
 
 	// Organizational Units
-	FormatOUs(ous []models.OrganizationalUnit) error
+	FormatOUs(ous []models.OrganizationalUnit, total int) error
 	FormatOU(ou *models.OrganizationalUnit) error
 
 	// Templates
-	FormatTemplates(templates []models.Template) error
+	FormatTemplates(templates []models.Template, total int) error
 	FormatTemplate(template *models.Template) error
 
 	// Snippets
-	FormatSnippets(snippets []models.Snippet) error
+	FormatSnippets(snippets []models.Snippet, total int) error
 	FormatSnippet(snippet *models.Snippet) error
 	FormatSnippetPull(pull *models.SnippetPull) error
 
 	// Software policies
-	FormatSoftwarePolicies(policies []models.SoftwarePolicy) error
+	FormatSoftwarePolicies(policies []models.SoftwarePolicy, total int) error
 	FormatSoftwarePolicy(policy *models.SoftwarePolicy) error
 
 	// Accounts
-	FormatAccounts(accounts []models.Account, quota *models.Quota) error
+	FormatAccounts(accounts []models.Account, total int, quota *models.Quota) error
 
 	// Invitations
 	FormatInvitations(invitations []models.Invitation) error
@@ -228,6 +228,8 @@ type Formatter interface {
 
 	// VPN prefix provisioning (network prefix add --value)
 	FormatVpnPrefixProvisioned(p VpnPrefixProvision) error
+	// network prefix add without --value
+	FormatVpnPrefixAdded(p *models.VpnMemberPrefix) error
 
 	// Firmware tracks (staged OPNsense updates)
 	FormatFirmwareConfig(config *models.FirmwareConfig) error

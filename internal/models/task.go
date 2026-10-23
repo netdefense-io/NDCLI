@@ -186,6 +186,12 @@ func TaskValuesHelp(values []string) string {
 	return strings.Join(values, ", ")
 }
 
+// FirmwareMajorCheckMinAgentVersion is the first ndagent release whose major
+// FIRMWARE_UPGRADE runs its own firmware check whatever check_first says, and
+// upgrades only on an offer from that check. An older agent skips the check
+// for a major too when check_first is false.
+const FirmwareMajorCheckMinAgentVersion = "1.27.0"
+
 // FirmwareUpgradeData is the result data block reported by NDAgent for
 // FIRMWARE_UPGRADE tasks. The agent stores it serialised as JSON inside
 // Task.Message. Field names mirror the NDDataModels / NDAgent wire contract

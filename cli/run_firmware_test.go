@@ -271,3 +271,32 @@ func TestFirmwareUpgradeHelpNamesOnlyRealFlags(t *testing.T) {
 		t.Errorf("the examples should show --no-reboot:\n%s", cmd.Example)
 	}
 }
+
+// TestFirmwareUpgradeHelpStatesTheMajorCheck: from ndagent 1.27.0 a major
+// upgrade runs its own firmware check whatever check_first says, and a major
+// reboots up to three times. The help said --no-check skipped the check for
+// either mode and that a major rebooted up to twice.
+func TestFirmwareUpgradeHelpStatesTheMajorCheck(t *testing.T) {
+	cmd := firmwareUpgradeCommand(t)
+
+	long := strings.Join(strings.Fields(cmd.Long), " ")
+	for _, want := range []string{
+		"--mode major upgrades to the next series and always reboots, up to three times; --no-reboot is refused with --mode major.",
+		"--no-check skips the firmware availability check before a minor upgrade. With ndagent 1.27.0 or later, " +
+			"a major upgrade always runs its own check first and upgrades only on an offer from that check, " +
+			"--no-check or not; an older agent skips the check for a major too.",
+	} {
+		if !strings.Contains(long, want) {
+			t.Errorf("the help lacks %q:\n%s", want, cmd.Long)
+		}
+	}
+	if strings.Contains(long, "twice") {
+		t.Errorf("the help still says a major reboots twice:\n%s", cmd.Long)
+	}
+
+	const usage = "Skip the firmware availability check before a minor upgrade (check_first=false); " +
+		"a major upgrade always runs its own check (ndagent 1.27.0 or later)"
+	if got := cmd.Flags().Lookup("no-check").Usage; got != usage {
+		t.Errorf("--no-check usage = %q, want %q", got, usage)
+	}
+}

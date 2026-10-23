@@ -158,7 +158,7 @@ func (f *SimpleFormatter) FormatRunResult(result *models.RunResult) error {
 }
 
 // FormatOrganizations formats a list of organizations
-func (f *SimpleFormatter) FormatOrganizations(orgs []models.Organization) error {
+func (f *SimpleFormatter) FormatOrganizations(orgs []models.Organization, total int) error {
 	if len(orgs) == 0 {
 		f.Info("No organizations found")
 		return nil
@@ -201,7 +201,7 @@ func (f *SimpleFormatter) FormatOrganization(org *models.Organization) error {
 }
 
 // FormatOUs formats a list of organizational units
-func (f *SimpleFormatter) FormatOUs(ous []models.OrganizationalUnit) error {
+func (f *SimpleFormatter) FormatOUs(ous []models.OrganizationalUnit, total int) error {
 	if len(ous) == 0 {
 		f.Info("No organizational units found")
 		return nil
@@ -236,7 +236,7 @@ func (f *SimpleFormatter) FormatOU(ou *models.OrganizationalUnit) error {
 }
 
 // FormatTemplates formats a list of templates
-func (f *SimpleFormatter) FormatTemplates(templates []models.Template) error {
+func (f *SimpleFormatter) FormatTemplates(templates []models.Template, total int) error {
 	if len(templates) == 0 {
 		f.Info("No templates found")
 		return nil
@@ -271,7 +271,7 @@ func (f *SimpleFormatter) FormatTemplate(template *models.Template) error {
 }
 
 // FormatSnippets formats a list of snippets
-func (f *SimpleFormatter) FormatSnippets(snippets []models.Snippet) error {
+func (f *SimpleFormatter) FormatSnippets(snippets []models.Snippet, total int) error {
 	if len(snippets) == 0 {
 		f.Info("No snippets found")
 		return nil
@@ -293,7 +293,7 @@ func (f *SimpleFormatter) FormatSnippet(snippet *models.Snippet) error {
 }
 
 // FormatSoftwarePolicies formats a list of software policies.
-func (f *SimpleFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+func (f *SimpleFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy, total int) error {
 	if len(policies) == 0 {
 		f.Info("No software policies found")
 		return nil
@@ -333,7 +333,7 @@ func (f *SimpleFormatter) FormatSoftwarePolicy(p *models.SoftwarePolicy) error {
 }
 
 // FormatAccounts formats a list of accounts
-func (f *SimpleFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
+func (f *SimpleFormatter) FormatAccounts(accounts []models.Account, total int, quota *models.Quota) error {
 	if len(accounts) == 0 {
 		f.Info("No accounts found")
 		return nil

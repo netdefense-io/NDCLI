@@ -332,7 +332,7 @@ func runSnippetList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := formatter.FormatSnippets(result.Snippets); err != nil {
+	if err := formatter.FormatSnippets(result.Snippets, result.Total); err != nil {
 		return err
 	}
 	output.PrintPagination(result.Page, result.Total, result.PerPage)

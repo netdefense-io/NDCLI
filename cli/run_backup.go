@@ -40,10 +40,12 @@ a backup already waiting or running, or has no encryption key is not backed up;
 the command lists it with the reason. Backup is enabled per device with
 'ndcli backup enable <device>'.
 
-  Target (at least one required, repeatable):
+  Target (required):
     --device <name>   Back up a specific device. May be repeated.
     --ou <name>       Back up the devices of the OU that have backup enabled. May be repeated.
-    --all             Back up every device in the org that has backup enabled.
+    --all             Back up every device in the org that has backup enabled. Use it alone.
+
+  --device and --ou combine; --all cannot be combined with either.
 
   -o <name> chooses the organization, as on other commands. --org (no value) is
   the deprecated spelling of --all.
@@ -68,7 +70,7 @@ control plane. It is never sent from here.`,
 func init() {
 	runBackupCmd.Flags().StringSlice("device", nil, "Back up this device (repeatable)")
 	runBackupCmd.Flags().StringSlice("ou", nil, "Back up the devices of this OU that have backup enabled (repeatable)")
-	addAllDevicesFlags(runBackupCmd, "Back up every device in the org that has backup enabled")
+	addAllDevicesFlags(runBackupCmd, "Back up every device in the org that has backup enabled (not with --device or --ou)")
 
 	// The scheduling flags every other run command takes exist here only to be
 	// refused with an explanation, rather than with cobra's "unknown flag".

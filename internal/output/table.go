@@ -384,7 +384,7 @@ func (f *TableFormatter) FormatRunResult(result *models.RunResult) error {
 }
 
 // FormatOrganizations formats a list of organizations as a table
-func (f *TableFormatter) FormatOrganizations(orgs []models.Organization) error {
+func (f *TableFormatter) FormatOrganizations(orgs []models.Organization, total int) error {
 	if len(orgs) == 0 {
 		f.Info("No organizations found")
 		return nil
@@ -462,7 +462,7 @@ func (f *TableFormatter) FormatOrganization(org *models.Organization) error {
 }
 
 // FormatOUs formats a list of organizational units as a table
-func (f *TableFormatter) FormatOUs(ous []models.OrganizationalUnit) error {
+func (f *TableFormatter) FormatOUs(ous []models.OrganizationalUnit, total int) error {
 	if len(ous) == 0 {
 		f.Info("No organizational units found")
 		return nil
@@ -520,7 +520,7 @@ func (f *TableFormatter) FormatOU(ou *models.OrganizationalUnit) error {
 }
 
 // FormatTemplates formats a list of templates as a table
-func (f *TableFormatter) FormatTemplates(templates []models.Template) error {
+func (f *TableFormatter) FormatTemplates(templates []models.Template, total int) error {
 	if len(templates) == 0 {
 		f.Info("No templates found")
 		return nil
@@ -569,11 +569,11 @@ func (f *TableFormatter) FormatTemplate(template *models.Template) error {
 	}
 
 	fmt.Printf("Snippets (%d):\n", len(template.Snippets))
-	return f.FormatSnippets(template.Snippets)
+	return f.FormatSnippets(template.Snippets, len(template.Snippets))
 }
 
 // FormatSnippets formats a list of snippets as a table
-func (f *TableFormatter) FormatSnippets(snippets []models.Snippet) error {
+func (f *TableFormatter) FormatSnippets(snippets []models.Snippet, total int) error {
 	if len(snippets) == 0 {
 		f.Info("No snippets found")
 		return nil
@@ -600,7 +600,7 @@ func (f *TableFormatter) FormatSnippets(snippets []models.Snippet) error {
 
 // FormatSnippet formats a single snippet as a table, followed by its content
 func (f *TableFormatter) FormatSnippet(snippet *models.Snippet) error {
-	if err := f.FormatSnippets([]models.Snippet{*snippet}); err != nil {
+	if err := f.FormatSnippets([]models.Snippet{*snippet}, 1); err != nil {
 		return err
 	}
 	writeContent(f.Writer, snippet.Content)
@@ -610,7 +610,7 @@ func (f *TableFormatter) FormatSnippet(snippet *models.Snippet) error {
 // FormatSoftwarePolicies formats a list of software policies as a table.
 // Counts come from parsing the JSON content cheaply — full content lives in
 // the describe view rather than the table.
-func (f *TableFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy) error {
+func (f *TableFormatter) FormatSoftwarePolicies(policies []models.SoftwarePolicy, total int) error {
 	if len(policies) == 0 {
 		f.Info("No software policies found")
 		return nil
@@ -683,7 +683,7 @@ func templatesCell(names []string) string {
 // FormatSoftwarePolicy formats a single policy as a table, followed by its
 // content.
 func (f *TableFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) error {
-	if err := f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy}); err != nil {
+	if err := f.FormatSoftwarePolicies([]models.SoftwarePolicy{*policy}, 1); err != nil {
 		return err
 	}
 	writeContent(f.Writer, policy.Content)
@@ -691,7 +691,7 @@ func (f *TableFormatter) FormatSoftwarePolicy(policy *models.SoftwarePolicy) err
 }
 
 // FormatAccounts formats a list of accounts as a table
-func (f *TableFormatter) FormatAccounts(accounts []models.Account, quota *models.Quota) error {
+func (f *TableFormatter) FormatAccounts(accounts []models.Account, total int, quota *models.Quota) error {
 	if len(accounts) == 0 {
 		f.Info("No accounts found")
 		return nil

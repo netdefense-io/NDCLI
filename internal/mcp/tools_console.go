@@ -180,7 +180,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	if pfErr != nil {
 		return s.errorResult(&service.Error{
 			Code:    service.CodeAPIError,
-			Message: "pathfinder client init failed: " + pfErr.Error(),
+			Message: "relay client init failed: " + pfErr.Error(),
 			Err:     pfErr,
 		})
 	}
@@ -189,7 +189,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	if pfErr != nil {
 		return s.errorResult(&service.Error{
 			Code:    service.CodeAPIError,
-			Message: "pathfinder connect failed: " + pfErr.Error(),
+			Message: "relay connect failed: " + pfErr.Error(),
 			Err:     pfErr,
 		})
 	}

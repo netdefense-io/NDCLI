@@ -119,7 +119,7 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  SSL Verify: %v\n", cfg.Controlplane.SSLVerify)
 	fmt.Println()
 
-	color.Cyan("Pathfinder:")
+	color.Cyan("Connection relay (pathfinder):")
 	if cfg.Pathfinder.Host != "" {
 		fmt.Printf("  Host:       %s\n", cfg.Pathfinder.Host)
 		fmt.Printf("  SSL Verify: %v\n", cfg.Pathfinder.SSLVerify)

@@ -242,7 +242,7 @@ func (s *Server) registerRunTools() {
 		"organization": organizationProperty(),
 		"devices":      stringArrayProperty("Target device names (repeatable)"),
 		"ous":          stringArrayProperty("Target OU names; expands to enabled members"),
-		"all":          boolProperty("Target every enabled device in the org"),
+		"all":          boolProperty("Target every enabled device in the org (excludes devices and ous)"),
 		"org":          boolProperty(deprecatedOrgParam),
 		"at":           stringProperty(atParamDescription),
 		"timezone":     stringProperty(timezoneParamDescription),
@@ -322,15 +322,17 @@ func (s *Server) registerRunTools() {
 
 	// ndcli.run.firmware_upgrade
 	firmwareUpgradeProps := mergeProps(targetingProps, map[string]interface{}{
-		"mode":        map[string]interface{}{"type": "string", "description": `Upgrade mode: "minor" (point release within current series) or "major" (series upgrade). Required.`, "enum": []string{"minor", "major"}},
-		"reboot":      boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only and leave base and kernel for a later run; the device stays in a mixed state until a firmware upgrade with reboot=true installs them. Not allowed when mode=major."),
-		"check_first": boolProperty("Run a firmware availability check before applying (default true). Set to false to skip the pre-upgrade check."),
-		"dry_run":     boolProperty("Report what would be applied without making any changes (default false)."),
+		"mode":   map[string]interface{}{"type": "string", "description": `Upgrade mode: "minor" (point release within current series) or "major" (series upgrade). Required.`, "enum": []string{"minor", "major"}},
+		"reboot": boolProperty("Reboot after applying the upgrade (default true). Set to false to apply packages only and leave base and kernel for a later run; the device stays in a mixed state until a firmware upgrade with reboot=true installs them. Not allowed when mode=major."),
+		"check_first": boolProperty("Run a firmware availability check before applying (default true). false skips the check before a minor upgrade. " +
+			"With ndagent " + models.FirmwareMajorCheckMinAgentVersion + " or later, a major upgrade always runs its own check first and upgrades " +
+			"only on an offer from that check, whatever check_first says; an older agent skips the check for a major too."),
+		"dry_run": boolProperty("Report what would be applied without making any changes (default false)."),
 	})
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.run.firmware_upgrade",
 		Description: "Upgrade OPNsense firmware on one or more devices. " +
-			"mode=minor applies a point release; mode=major upgrades the full series. " +
+			"mode=minor applies a point release; mode=major upgrades the full series and always reboots, up to three times. " +
 			"DESTRUCTIVE: triggers an upgrade and (by default) reboots the firewall. " +
 			"major+reboot=false is rejected by the server (422). " +
 			"A device in a firmware track is refused with FIRMWARE_DEVICE_MANAGED: its track moves it between " +

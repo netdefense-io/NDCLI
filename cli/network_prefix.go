@@ -128,11 +128,11 @@ func runNetworkPrefixAdd(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	if _, err := svc.NetworkPrefixAdd(context.Background(), org, vpnName, deviceName, variableName, publish); err != nil {
+	prefix, err := svc.NetworkPrefixAdd(context.Background(), org, vpnName, deviceName, variableName, publish)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Prefix added: %s on %s in %s", variableName, deviceName, vpnName)
-	return nil
+	return formatter.FormatVpnPrefixAdded(prefix)
 }
 
 // namedVariableSetCommand fills in the CLI's own way forward on a

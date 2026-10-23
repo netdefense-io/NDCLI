@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -228,5 +230,66 @@ func TestVpnPrefixProvisionJSON(t *testing.T) {
 	}
 	if doc["prefix_created"] != false {
 		t.Errorf("prefix_created = %v, want false", doc["prefix_created"])
+	}
+}
+
+// TestVpnPrefixAddedRendersEveryFormat: prefix add without --value printed a
+// green line and called no formatter, so -f json printed nothing. Its JSON
+// uses the --value path's keys for the facts it has.
+func TestVpnPrefixAddedRendersEveryFormat(t *testing.T) {
+	for _, publish := range []bool{true, false} {
+		p := &models.VpnMemberPrefix{VpnNetwork: "hq", DeviceName: "fw01", VariableName: "office-lan", Publish: publish}
+		var table, simple, detailed, jsonOut bytes.Buffer
+		for _, render := range []func() error{
+			func() error {
+				return (&TableFormatter{BaseFormatter: BaseFormatter{Writer: &table}}).FormatVpnPrefixAdded(p)
+			},
+			func() error {
+				return (&SimpleFormatter{BaseFormatter: BaseFormatter{Writer: &simple}}).FormatVpnPrefixAdded(p)
+			},
+			func() error {
+				return (&DetailedFormatter{BaseFormatter: BaseFormatter{Writer: &detailed}}).FormatVpnPrefixAdded(p)
+			},
+			func() error {
+				return (&JSONFormatter{BaseFormatter: BaseFormatter{Writer: &jsonOut}}).FormatVpnPrefixAdded(p)
+			},
+		} {
+			if err := render(); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		for name, out := range map[string]string{"table": table.String(), "simple": simple.String(), "detailed": detailed.String()} {
+			if !strings.Contains(out, "Prefix added: office-lan on fw01 in hq") {
+				t.Errorf("%s (publish=%t) lacks the sentence:\n%s", name, publish, out)
+			}
+			if note := strings.Contains(out, "publish=false — the prefix exists but is not advertised to peers."); note == publish {
+				t.Errorf("%s (publish=%t): not-advertised note shown = %t\n%s", name, publish, note, out)
+			}
+		}
+
+		var got map[string]any
+		if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
+			t.Fatalf("json is not one document: %v\n%s", err, jsonOut.String())
+		}
+		want := map[string]any{"network": "hq", "device": "fw01", "variable": "office-lan", "prefix_created": true, "published": publish}
+		if len(got) != len(want) {
+			t.Errorf("json = %v, want %v", got, want)
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("json %s = %v, want %v", k, got[k], v)
+			}
+		}
+
+		var provisioned map[string]any
+		if err := json.Unmarshal([]byte(renderAll(t, base())["json"]), &provisioned); err != nil {
+			t.Fatal(err)
+		}
+		for k := range got {
+			if _, ok := provisioned[k]; !ok {
+				t.Errorf("json key %q is not one the --value path prints", k)
+			}
+		}
 	}
 }

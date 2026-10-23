@@ -1,6 +1,10 @@
 package output
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/netdefense-io/NDCLI/internal/models"
+)
 
 // VpnPrefixProvision reports what `ndcli network prefix add --value` did.
 //
@@ -54,11 +58,14 @@ func (p VpnPrefixProvision) publishNote(label string) string {
 	case p.Published == nil:
 		return label + "the prefix already existed; its publish flag could not be read back and is unknown.\n"
 	case !*p.Published:
-		return label + "publish=false — the prefix exists but is not advertised to peers.\n"
+		return label + notAdvertised
 	default:
 		return ""
 	}
 }
+
+// notAdvertised is the caveat for a prefix whose publish flag is off.
+const notAdvertised = "publish=false — the prefix exists but is not advertised to peers.\n"
 
 // steps renders one line per step, saying whether this run did it.
 //
@@ -132,5 +139,54 @@ func (f *JSONFormatter) FormatVpnPrefixProvisioned(p VpnPrefixProvision) error {
 		"prefix_created":          p.PrefixCreated,
 		// null rather than a guess when the flag was never read back.
 		"published": p.Published,
+	})
+}
+
+// vpnPrefixAdded is the sentence for a prefix `prefix add` created without
+// --value. That path touches no variable, so it has none of the provisioning
+// steps to report.
+func vpnPrefixAdded(p *models.VpnMemberPrefix) string {
+	return fmt.Sprintf("Prefix added: %s on %s in %s", p.VariableName, p.DeviceName, p.VpnNetwork)
+}
+
+// FormatVpnPrefixAdded renders a prefix added without --value (table).
+func (f *TableFormatter) FormatVpnPrefixAdded(p *models.VpnMemberPrefix) error {
+	ColorSuccess.Fprintf(f.Writer, "✓ ")
+	fmt.Fprintf(f.Writer, "%s\n", vpnPrefixAdded(p))
+	if !p.Publish {
+		fmt.Fprint(f.Writer, "  Note: "+notAdvertised)
+	}
+	return nil
+}
+
+// FormatVpnPrefixAdded renders a prefix added without --value (simple).
+func (f *SimpleFormatter) FormatVpnPrefixAdded(p *models.VpnMemberPrefix) error {
+	fmt.Fprintf(f.Writer, "%s\n", vpnPrefixAdded(p))
+	if !p.Publish {
+		fmt.Fprint(f.Writer, "  "+notAdvertised)
+	}
+	return nil
+}
+
+// FormatVpnPrefixAdded renders a prefix added without --value (detailed).
+func (f *DetailedFormatter) FormatVpnPrefixAdded(p *models.VpnMemberPrefix) error {
+	ColorSuccess.Fprintf(f.Writer, "✓ ")
+	fmt.Fprintf(f.Writer, "%s\n", vpnPrefixAdded(p))
+	if !p.Publish {
+		fmt.Fprint(f.Writer, "  Note: "+notAdvertised)
+	}
+	return nil
+}
+
+// FormatVpnPrefixAdded renders a prefix added without --value as JSON, under
+// the keys the --value path uses for the same facts, so a script reads one
+// shape from either path.
+func (f *JSONFormatter) FormatVpnPrefixAdded(p *models.VpnMemberPrefix) error {
+	return f.output(map[string]interface{}{
+		"network":        p.VpnNetwork,
+		"device":         p.DeviceName,
+		"variable":       p.VariableName,
+		"prefix_created": true,
+		"published":      p.Publish,
 	})
 }

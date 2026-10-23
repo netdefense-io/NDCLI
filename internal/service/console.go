@@ -101,7 +101,7 @@ func (s *Service) ConsoleConnect(ctx context.Context, org, deviceName string, co
 				}
 			}
 			if payload.PathfinderSession == "" {
-				return nil, &Error{Code: CodeAPIError, Message: "connect payload has no pathfinder_session"}
+				return nil, &Error{Code: CodeAPIError, Message: "connect payload has no relay session (pathfinder_session)"}
 			}
 			return &ConsoleConnectResult{
 				PathfinderSession: payload.PathfinderSession,

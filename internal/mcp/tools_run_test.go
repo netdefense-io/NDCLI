@@ -638,3 +638,27 @@ func TestFirmwareUpgradeRebootParameter(t *testing.T) {
 		t.Errorf("required = %#v, want [mode]", schema["required"])
 	}
 }
+
+// TestFirmwareUpgradeCheckFirstParameter: from ndagent 1.27.0 a major upgrade
+// runs its own firmware check whatever check_first says, and it reboots up to
+// three times. check_first was described as skipping the check for either mode.
+func TestFirmwareUpgradeCheckFirstParameter(t *testing.T) {
+	schema := registeredToolSchema(t, "ndcli.run.firmware_upgrade")
+
+	props, _ := schema["properties"].(map[string]any)
+	want := map[string]any{
+		"type": "boolean",
+		"description": "Run a firmware availability check before applying (default true). false skips the check " +
+			"before a minor upgrade. With ndagent 1.27.0 or later, a major upgrade always runs its own check first " +
+			"and upgrades only on an offer from that check, whatever check_first says; an older agent skips the " +
+			"check for a major too.",
+	}
+	if !reflect.DeepEqual(props["check_first"], want) {
+		t.Errorf("check_first = %#v, want %#v", props["check_first"], want)
+	}
+
+	if desc := registeredToolDescription(t, "ndcli.run.firmware_upgrade"); !strings.Contains(desc,
+		"mode=major upgrades the full series and always reboots, up to three times.") {
+		t.Errorf("the description does not say a major reboots up to three times:\n%s", desc)
+	}
+}

@@ -82,13 +82,13 @@ func warnIfPathfinderSSLVerifyDisabled(w io.Writer) {
 	if config.Get().Pathfinder.SSLVerify {
 		return
 	}
-	color.New(color.FgYellow).Fprintln(w, "Warning: TLS certificate verification is disabled for the Pathfinder relay "+
+	color.New(color.FgYellow).Fprintln(w, "Warning: TLS certificate verification is disabled for the connection relay "+
 		"(pathfinder.ssl_verify=false). An on-path attacker can intercept the relay connection, reading or injecting "+
 		"traffic and potentially reaching an interactive shell on the device.")
 }
 
 // ErrPathfinderNotConfigured is returned when the pathfinder host is not set
-var ErrPathfinderNotConfigured = &PathfinderError{Message: "pathfinder host not configured"}
+var ErrPathfinderNotConfigured = &PathfinderError{Message: "connection relay host not configured (pathfinder.host)"}
 
 // PathfinderError represents a pathfinder-specific error
 type PathfinderError struct {

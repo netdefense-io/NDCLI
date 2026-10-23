@@ -24,6 +24,10 @@ func TestWarnIfPathfinderSSLVerifyDisabled(t *testing.T) {
 		if !strings.Contains(buf.String(), "TLS") {
 			t.Errorf("expected warning to mention TLS, got: %q", buf.String())
 		}
+		// The relay is named by its role; the config key stays literal.
+		if !strings.Contains(buf.String(), "for the connection relay (pathfinder.ssl_verify=false)") || strings.Contains(buf.String(), "Pathfinder") {
+			t.Errorf("expected warning to name the connection relay and its config key, got: %q", buf.String())
+		}
 	})
 
 	t.Run("ssl verify enabled prints nothing", func(t *testing.T) {

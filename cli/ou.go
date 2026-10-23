@@ -157,7 +157,7 @@ func runOUList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := formatter.FormatOUs(result.OUs); err != nil {
+	if err := formatter.FormatOUs(result.OUs, result.Total); err != nil {
 		return err
 	}
 	output.PrintPagination(result.Page, result.Total, result.PageSize)
@@ -288,5 +288,5 @@ func runOUTemplateList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return formatter.FormatTemplates(result.Items)
+	return formatter.FormatTemplates(result.Items, result.Total)
 }

@@ -74,8 +74,8 @@ var deviceApproveAllCmd = &cobra.Command{
 
 var deviceConnectCmd = &cobra.Command{
 	Use:   "connect [device]",
-	Short: "Connect to a device via Pathfinder",
-	Long: `Connect to a device via the NetDefense Pathfinder relay.
+	Short: "Connect to a device through the connection relay",
+	Long: `Connect to a device through the NetDefense connection relay.
 
 Opens an interactive PTY shell to the remote device and (unless --no-webadmin
 is set) starts a local WebAdmin tunnel on an automatically assigned port.

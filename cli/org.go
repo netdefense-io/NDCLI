@@ -200,7 +200,7 @@ func runOrgList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := formatter.FormatOrganizations(result.Orgs); err != nil {
+	if err := formatter.FormatOrganizations(result.Orgs, result.Total); err != nil {
 		return err
 	}
 	output.PrintPagination(result.Page, result.Total, result.PerPage)
@@ -367,7 +367,7 @@ func runOrgAccountList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return formatter.FormatAccounts(result.Accounts, result.Quota)
+	return formatter.FormatAccounts(result.Accounts, result.Total, result.Quota)
 }
 
 func runOrgAccountDisable(cmd *cobra.Command, args []string) error {

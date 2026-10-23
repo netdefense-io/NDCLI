@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
@@ -43,8 +45,8 @@ func TestRunTools_DescribeOrgAsDeprecatedAll(t *testing.T) {
 			props, _ := registeredToolSchema(t, tool)["properties"].(map[string]any)
 			all, _ := props["all"].(map[string]any)
 			org, _ := props["org"].(map[string]any)
-			if all["type"] != "boolean" {
-				t.Errorf("all = %v, want a boolean", all)
+			if all["type"] != "boolean" || !strings.HasSuffix(fmt.Sprint(all["description"]), "(excludes devices and ous)") {
+				t.Errorf("all = %v, want a boolean that says it excludes devices and ous", all)
 			}
 			if org["type"] != "boolean" || org["description"] != "Deprecated: same as all, kept for existing callers. Use all." {
 				t.Errorf("org = %v", org)

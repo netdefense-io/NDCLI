@@ -343,10 +343,7 @@ func runFirmwareTrackSet(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetInt("min-success")
 		opts.MinSuccess = &v
 	}
-	if cmd.Flags().Changed("auto-apply-major") {
-		v, _ := cmd.Flags().GetBool("auto-apply-major")
-		opts.AutoApplyMajor = &v
-	}
+	opts.AutoApplyMajor = explicitBoolFlag(cmd, "auto-apply-major")
 
 	// Refuse a bad request before asking anyone anything.
 	trackName, _, err := service.CheckFirmwareTrackUpdate(args[0], opts)
@@ -469,10 +466,7 @@ func runFirmwareDeviceSet(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 	var opts service.FirmwareDeviceAssignOpts
 	opts.Track, _ = cmd.Flags().GetString("track")
-	if cmd.Flags().Changed("boot-environment") {
-		v, _ := cmd.Flags().GetBool("boot-environment")
-		opts.BootEnvironment = &v
-	}
+	opts.BootEnvironment = explicitBoolFlag(cmd, "boot-environment")
 	result, err := svc.FirmwareDeviceAssign(context.Background(), org, args, opts)
 	if err != nil {
 		return firmwareAdvice(err)
@@ -893,7 +887,7 @@ func init() {
 
 	firmwareTrackSetCmd.Flags().Int("soak-days", 0, "Days a release soaks before the track takes it")
 	firmwareTrackSetCmd.Flags().Int("min-success", 0, "Distinct devices of the previous track that must have reached a release first (0 for the fast track)")
-	firmwareTrackSetCmd.Flags().Bool("auto-apply-major", false, "Whether the track's windows move its devices to the next OPNsense series: --auto-apply-major=true (asks first; offline, three reboots, no automatic rollback) or =false (cancels the queued upgrade steps)")
+	addExplicitBoolFlag(firmwareTrackSetCmd, "auto-apply-major", "Whether the track's windows move its devices to the next OPNsense series: --auto-apply-major=true (asks first; offline, three reboots, no automatic rollback) or =false (cancels the queued upgrade steps)")
 	firmwareTrackSetCmd.Flags().Bool("force", false, "Skip the confirmation prompt of --auto-apply-major=true (required when stdin is not a TTY)")
 	firmwareTrackSetCmd.MarkFlagsOneRequired("soak-days", "min-success", "auto-apply-major")
 	firmwareTrackSetCmd.MarkFlagsMutuallyExclusive("auto-apply-major", "soak-days")
@@ -902,7 +896,7 @@ func init() {
 	firmwareTrackScheduleCmd.Flags().Bool("no-schedule", false, "Detach the track from its schedule; it stops moving its devices")
 
 	firmwareDeviceSetCmd.Flags().String("track", "", "Track to move the devices to: "+strings.Join(models.FirmwareAssignTracks, ", ")+" (this and/or --boot-environment)")
-	firmwareDeviceSetCmd.Flags().Bool("boot-environment", false, "Whether the agent makes a ZFS boot environment before a major upgrade of the devices: --boot-environment=true (the default for a device in a track) or =false")
+	addExplicitBoolFlag(firmwareDeviceSetCmd, "boot-environment", "Whether the agent makes a ZFS boot environment before a major upgrade of the devices: --boot-environment=true (the default for a device in a track) or =false")
 	firmwareDeviceSetCmd.MarkFlagsOneRequired("track", "boot-environment")
 	_ = firmwareDeviceSetCmd.RegisterFlagCompletionFunc("track", completeFirmwareFlag(models.FirmwareAssignTracks))
 

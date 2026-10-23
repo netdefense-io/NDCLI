@@ -32,10 +32,10 @@ var runCmd = &cobra.Command{
 Use ` + "`ndcli run <command> --help`" + ` to see per-command flags. Every
 sub-command except backup accepts the same target and scheduling flags:
 
-  Target (at least one required, repeatable):
+  Target (required):
     --device <name>   Target a specific device. May be repeated.
     --ou <name>       Target every enabled device in the OU. May be repeated.
-    --all             Target every enabled device in the org.
+    --all             Target every enabled device in the org. Use it alone.
 
   Organization:
     -o <name>         The organization to run in, as on other commands.
@@ -50,8 +50,9 @@ sub-command except backup accepts the same target and scheduling flags:
                         Explicit timezone: 2030-05-12T03:00:00Z
                                            2030-05-12T03:00:00-03:00
 
-Targets are the UNION of all --device + --ou + --all. Duplicates are deduped
-server-side. An unresolved name rejects the whole batch.
+--device and --ou combine: the targets are the named devices and the enabled
+devices of the named OUs, each device once. --all stands alone and cannot be
+combined with --device or --ou. An unresolved name rejects the whole batch.
 
 --org (no value) is the deprecated spelling of --all. In the next major
 version, --org <name> selects the organization, as on other commands.
@@ -162,8 +163,13 @@ updates to its track ('ndcli firmware').
 kernel updates stay deferred, and the device runs the new packages on the old
 base and kernel until a later upgrade without --no-reboot completes them.
 
---mode major upgrades to the next series and always reboots, up to twice;
---no-reboot is refused with --mode major.
+--mode major upgrades to the next series and always reboots, up to three
+times; --no-reboot is refused with --mode major.
+
+--no-check skips the firmware availability check before a minor upgrade. With
+ndagent ` + models.FirmwareMajorCheckMinAgentVersion + ` or later, a major upgrade always runs its own check first and
+upgrades only on an offer from that check, --no-check or not; an older agent
+skips the check for a major too.
 
 --dry-run still creates a task: the device works out what would be applied
 and installs nothing. Read the result with "ndcli task describe <task-id>".`
@@ -172,7 +178,7 @@ and installs nothing. Read the result with "ndcli task describe <task-id>".`
   ndcli run firmware-upgrade --device fw-prod-01 --mode minor --dry-run`
 	firmwareUpgradeCmd.Flags().String("mode", "", `Upgrade mode: "minor" (point release) or "major" (series upgrade) (required)`)
 	firmwareUpgradeCmd.Flags().Bool("no-reboot", false, "Apply packages only and skip the reboot; base/kernel updates stay deferred (refused with --mode major)")
-	firmwareUpgradeCmd.Flags().Bool("no-check", false, "Skip the pre-upgrade firmware availability check (check_first=false)")
+	firmwareUpgradeCmd.Flags().Bool("no-check", false, "Skip the firmware availability check before a minor upgrade (check_first=false); a major upgrade always runs its own check (ndagent "+models.FirmwareMajorCheckMinAgentVersion+" or later)")
 	firmwareUpgradeCmd.Flags().Bool("dry-run", false, "Report what would be applied without making any changes")
 	_ = firmwareUpgradeCmd.MarkFlagRequired("mode")
 
@@ -261,7 +267,7 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 
 	cmd.Flags().StringSlice("device", nil, "Target device name (repeatable)")
 	cmd.Flags().StringSlice("ou", nil, "Target OU name (repeatable; expands to enabled members)")
-	addAllDevicesFlags(cmd, "Target every enabled device in the org")
+	addAllDevicesFlags(cmd, "Target every enabled device in the org (not with --device or --ou)")
 	cmd.Flags().String("at", "", "Schedule execution. Accepts:  relative (30m, 2h, 3d, 1w);  date+time in your configured timezone (2030-05-12 03:00);  RFC3339 with tz (2030-05-12T03:00:00Z, 2030-05-12T03:00:00-03:00).")
 	cmd.Flags().String("schedule", "", "Register as a recurring spec on this named schedule (mutually exclusive with --at).")
 
