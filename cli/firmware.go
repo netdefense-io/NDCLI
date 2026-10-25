@@ -608,7 +608,8 @@ func runFirmwareVersionHalt(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	reason, _ := cmd.Flags().GetString("reason")
-	result, err := svc.FirmwareHalt(context.Background(), org, firmwareKindOf(cmd), args[0], reason)
+	revision, _ := cmd.Flags().GetInt("revision")
+	result, err := svc.FirmwareHalt(context.Background(), org, firmwareKindOf(cmd), args[0], reason, revision)
 	if err != nil {
 		return firmwareAdvice(err)
 	}
@@ -641,6 +642,10 @@ func runFirmwareVersionUnhalt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	revision, _ := cmd.Flags().GetInt("revision")
+	if err := service.CheckFirmwareRevision(kind, name, revision); err != nil {
+		return err
+	}
 	if kind == models.FirmwareKindMajor {
 		force, _ := cmd.Flags().GetBool("force")
 		ok, err := helpers.ConfirmOrForce(fmt.Sprintf("Lift the halt on the major upgrade to %s? "+
@@ -654,7 +659,7 @@ func runFirmwareVersionUnhalt(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-	result, err := svc.FirmwareUnhalt(context.Background(), org, kind, name)
+	result, err := svc.FirmwareUnhalt(context.Background(), org, kind, name, revision)
 	if err != nil {
 		return firmwareAdvice(err)
 	}
@@ -699,6 +704,10 @@ func runFirmwareVersionPromote(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	revision, _ := cmd.Flags().GetInt("revision")
+	if err := service.CheckFirmwareRevision(kind, name, revision); err != nil {
+		return err
+	}
 	scope := "the " + normalized + " track"
 	if normalized == models.FirmwareAllTracks {
 		scope = "all three tracks"
@@ -717,7 +726,7 @@ func runFirmwareVersionPromote(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
-	result, err := svc.FirmwarePromote(context.Background(), org, kind, name, track)
+	result, err := svc.FirmwarePromote(context.Background(), org, kind, name, track, revision)
 	if err != nil {
 		return firmwareAdvice(err)
 	}
@@ -787,7 +796,8 @@ func runFirmwareFailureClear(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	track, _ := cmd.Flags().GetString("track")
-	result, err := svc.FirmwareFailuresClear(context.Background(), org, firmwareKindOf(cmd), args[0], track)
+	revision, _ := cmd.Flags().GetInt("revision")
+	result, err := svc.FirmwareFailuresClear(context.Background(), org, firmwareKindOf(cmd), args[0], track, revision)
 	if err != nil {
 		return firmwareAdvice(err)
 	}
@@ -911,6 +921,11 @@ func init() {
 	firmwareHistoryCmd.Flags().Int("page", 1, "Page number")
 	firmwareHistoryCmd.Flags().Int("per-page", 50, "Items per page (1-200)")
 
+	const revisionNote = ". A revision counts the times the release folder changed after it first appeared; the server refuses it while revisions are off"
+	firmwareVersionHaltCmd.Flags().Int("revision", 0, "Halt only this revision of the release (default: every revision)"+revisionNote)
+	firmwareVersionUnhaltCmd.Flags().Int("revision", 0, "Lift the halt on this revision only (default: the whole-release halt)"+revisionNote)
+	firmwareVersionPromoteCmd.Flags().Int("revision", 0, "Approve this revision of the release (default: the newest recorded one)"+revisionNote)
+	firmwareFailureClearCmd.Flags().Int("revision", 0, "Clear the failures of this revision only (default: every revision)"+revisionNote)
 	firmwareVersionHaltCmd.Flags().String("reason", "", "Why the release or major upgrade is halted: plain text, one line (required)")
 	firmwareVersionUnhaltCmd.Flags().Bool("force", false, "Skip the confirmation prompt of --major (required when stdin is not a TTY)")
 	_ = firmwareVersionHaltCmd.MarkFlagRequired("reason")

@@ -277,6 +277,8 @@ func firmwareBlockedText(blocked, agentVersion string) string {
 		return "agent too old for firmware tracks"
 	case models.FirmwareBlockedDeviceDisabled:
 		return "device disabled: no step is sent while it is"
+	case models.FirmwareBlockedAgentUpgradeRequired:
+		return "agent upgrade required: the release was revised after it was approved and this agent cannot prove a revision (needs 1.28.0 or newer)"
 	case "":
 		return ""
 	default:
@@ -291,6 +293,8 @@ func firmwareNoteText(note string) string {
 		return "agent too old for firmware tracks: no step is sent until it is upgraded"
 	case models.FirmwareBlockedDeviceDisabled:
 		return "device disabled: no step is sent while it is"
+	case models.FirmwareBlockedAgentUpgradeRequired:
+		return "agent upgrade required: the release was revised after it was approved and this agent cannot prove a revision (needs 1.28.0 or newer)"
 	default:
 		return note
 	}
@@ -740,6 +744,12 @@ func firmwareDeviceNotes(d *models.FirmwareDevice) []string {
 	if text := firmwareBlockedText(d.Blocked, d.AgentVersion); text != "" {
 		notes = append(notes, text)
 	}
+	if text := firmwarePendingText(d.Pending); text != "" {
+		notes = append(notes, text)
+	}
+	if text := firmwareHotfixWarningText(d.HotfixWarning); text != "" {
+		notes = append(notes, text)
+	}
 	if d.Drift != nil && *d.Drift {
 		notes = append(notes, "the pin had been changed outside NetDefense")
 	}
@@ -912,7 +922,7 @@ func firmwareDeviceFields(d *models.FirmwareDevice) []firmwareField {
 		fields = append(fields, firmwareField{"State", firmwareStateDisplay(d.State)})
 	}
 	if d.PinnedVersion != "" {
-		fields = append(fields, firmwareField{"Pinned", d.PinnedVersion})
+		fields = append(fields, firmwareField{"Pinned", firmwareWithRevision(d.PinnedVersion, d.Revision)})
 	}
 	if d.Series != "" {
 		fields = append(fields, firmwareField{"Series", d.Series})
@@ -983,7 +993,7 @@ func (f *TableFormatter) FormatFirmwareDevices(list *models.FirmwareDeviceList) 
 		if withMajor {
 			row = append(row, firmwareDashIfEmpty(d.Series))
 		}
-		row = append(row, firmwareDashIfEmpty(d.PinnedVersion), firmwareReasonCell(d.HeldReason), last, lastRun)
+		row = append(row, firmwareDashIfEmpty(firmwareWithRevision(d.PinnedVersion, d.Revision)), firmwareReasonCell(d.HeldReason), last, lastRun)
 		if withMajor {
 			row = append(row, firmwareMajorCell(d), firmwareBootEnvironmentCell(d))
 		}
@@ -1006,7 +1016,7 @@ func (f *SimpleFormatter) FormatFirmwareDevices(list *models.FirmwareDeviceList)
 			line += "/" + firmwareStateDisplay(d.State)
 		}
 		if d.PinnedVersion != "" {
-			line += ", pinned " + d.PinnedVersion
+			line += ", pinned " + firmwareWithRevision(d.PinnedVersion, d.Revision)
 		}
 		if d.Series != "" {
 			line += " (series " + d.Series + ")"
@@ -1117,7 +1127,7 @@ func firmwareHistoryFields(item *models.FirmwareHistoryItem) []firmwareField {
 	fields = append(fields,
 		firmwareField{"Outcome", firmwareOutcomeDisplay(item.Outcome)},
 		firmwareField{"Reason", firmwareReasonFull(item.Reason)},
-		firmwareField{"Target", firmwareDashIfEmpty(item.Target)},
+		firmwareField{"Target", firmwareDashIfEmpty(firmwareWithRevision(item.Target, item.Revision))},
 		firmwareField{"Versions", firmwareVersionMove(item.FromVersion, item.ToVersion)},
 		firmwareField{"Applied", firmwareYesNo(item.Applied)},
 	)
@@ -1150,7 +1160,7 @@ func (f *TableFormatter) FormatFirmwareHistory(h *models.FirmwareHistory) error 
 		table.Append(append(row,
 			firmwareOutcomeDisplay(item.Outcome),
 			firmwareReasonCell(item.Reason),
-			firmwareDashIfEmpty(item.Target),
+			firmwareDashIfEmpty(firmwareWithRevision(item.Target, item.Revision)),
 			firmwareVersionMove(item.FromVersion, item.ToVersion),
 			firmwareYesNo(item.Applied),
 			firmwareHistoryNote(item),

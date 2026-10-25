@@ -84,10 +84,11 @@ func firmwareTargetCell(s models.FirmwareSeriesStatus) string {
 	if s.Target == "" {
 		return "-"
 	}
+	target := firmwareWithRevision(s.Target, s.TargetRevision)
 	if s.TargetSource == "manual" {
-		return s.Target + " (manual)"
+		return target + " (manual)"
 	}
-	return s.Target
+	return target
 }
 
 // firmwareRolloutRow is one track in one series.
@@ -113,12 +114,18 @@ func firmwareRolloutRows(r *models.FirmwareRollout) []firmwareRolloutRow {
 		for _, s := range t.Series {
 			row := firmwareRolloutRow{track: t.Track, series: s.Series, target: firmwareTargetCell(s), next: "-", state: "-"}
 			if c := s.NextCandidate; c != nil {
-				row.next = c.Version
+				row.next = firmwareWithRevision(c.Version, c.Revision)
 				row.state = c.State
 				row.candidate = c
 				if c.Stalled {
 					row.stall = firmwareStallText(c.StallReason)
 				}
+			}
+			if note := firmwareLatestNote(s); note != "" {
+				if row.stall != "" {
+					row.stall += "; "
+				}
+				row.stall += note
 			}
 			rows = append(rows, row)
 		}
@@ -135,7 +142,7 @@ func firmwareRolloutHeader(r *models.FirmwareRollout) []firmwareField {
 }
 
 func firmwareFailureLine(fl models.FirmwareFailure) string {
-	return fmt.Sprintf("%s in %s: %s — %s, last %s", fl.Version, fl.Track,
+	return fmt.Sprintf("%s in %s: %s — %s, last %s", firmwareWithRevision(fl.Version, fl.Revision), fl.Track,
 		firmwarePlural(fl.Count, "failure", "failures"), strings.Join(fl.Devices, ", "), firmwareTimestampShort(fl.LastAt))
 }
 
@@ -156,7 +163,7 @@ func firmwareHaltSubject(h models.FirmwareHalt) string {
 	if h.IsMajor() {
 		return "major upgrade to " + h.Name()
 	}
-	return "release " + h.Name()
+	return "release " + firmwareHaltLabel(h)
 }
 
 // firmwareHaltTitle titles the box of a halt. A release keeps the title it
@@ -166,7 +173,7 @@ func firmwareHaltTitle(h models.FirmwareHalt) string {
 	if h.IsMajor() {
 		return "Halt on major upgrade to " + h.Name()
 	}
-	return "Halt on " + h.Name()
+	return "Halt on " + firmwareHaltLabel(h)
 }
 
 func firmwareHaltFields(h models.FirmwareHalt) []firmwareField {
@@ -175,7 +182,7 @@ func firmwareHaltFields(h models.FirmwareHalt) []firmwareField {
 		label = "Major upgrade"
 	}
 	return []firmwareField{
-		{label, h.Name()},
+		{label, firmwareHaltLabel(h)},
 		{"Status", firmwareHaltStatus(h)},
 		{"Halted", firmwareTimestamp(h.HaltedAt) + " by " + h.HaltedBy},
 		{"Reason", h.Reason},
@@ -195,7 +202,7 @@ func firmwareHaltsTable(f BaseFormatter, halts []models.FirmwareHalt) {
 	}
 	table := NewStyledTable(headers)
 	for _, h := range halts {
-		row := []string{h.Name(), firmwareHaltStatus(h), firmwareTimestampShort(h.HaltedAt), h.HaltedBy, h.Reason}
+		row := []string{firmwareHaltLabel(h), firmwareHaltStatus(h), firmwareTimestampShort(h.HaltedAt), h.HaltedBy, h.Reason}
 		if withKind {
 			kind := models.FirmwareKindMinor
 			if h.IsMajor() {
@@ -229,7 +236,7 @@ func (f *TableFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) error 
 	} else {
 		table := NewStyledTable([]string{"Release", "Track", "Devices", "Count", "Last"})
 		for _, fl := range r.Failures {
-			table.Append([]string{fl.Version, fl.Track, strings.Join(fl.Devices, ", "), strconv.Itoa(fl.Count), firmwareTimestampShort(fl.LastAt)})
+			table.Append([]string{firmwareWithRevision(fl.Version, fl.Revision), fl.Track, strings.Join(fl.Devices, ", "), strconv.Itoa(fl.Count), firmwareTimestampShort(fl.LastAt)})
 		}
 		fmt.Fprintln(f.Writer, "Failures blocking a release:")
 		table.RenderTo(f.Writer)
@@ -260,7 +267,7 @@ func (f *SimpleFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) error
 		for _, s := range t.Series {
 			line := fmt.Sprintf("    %s: target %s", s.Series, firmwareTargetCell(s))
 			if c := s.NextCandidate; c != nil {
-				line += fmt.Sprintf("; next %s %s", c.Version, firmwareCandidateLabel(c.State))
+				line += fmt.Sprintf("; next %s %s", firmwareWithRevision(c.Version, c.Revision), firmwareCandidateLabel(c.State))
 				if c.SoakRemainingSeconds != nil {
 					line += ", soak left " + firmwareSoakLeft(c)
 				}
@@ -270,6 +277,9 @@ func (f *SimpleFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) error
 				if c.Stalled {
 					line += " — " + firmwareStallText(c.StallReason)
 				}
+			}
+			if note := firmwareLatestNote(s); note != "" {
+				line += "; " + note
 			}
 			fmt.Fprintln(f.Writer, line)
 		}
@@ -283,7 +293,7 @@ func (f *SimpleFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) error
 	if len(r.Halts) > 0 {
 		fmt.Fprintln(f.Writer, "  Halts in force:")
 		for _, h := range r.Halts {
-			fmt.Fprintf(f.Writer, "    • %s since %s by %s: %s\n", h.Name(), firmwareTimestampShort(h.HaltedAt), h.HaltedBy, h.Reason)
+			fmt.Fprintf(f.Writer, "    • %s since %s by %s: %s\n", firmwareHaltLabel(h), firmwareTimestampShort(h.HaltedAt), h.HaltedBy, h.Reason)
 		}
 	}
 	writeFirmwareMajorsSimple(f.BaseFormatter, r)
@@ -308,8 +318,11 @@ func (f *DetailedFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) err
 			if s.TargetApprovedAt != "" {
 				trackFields = append(trackFields, firmwareField{"  approved", firmwareTimestamp(s.TargetApprovedAt)})
 			}
+			if note := firmwareLatestNote(s); note != "" {
+				trackFields = append(trackFields, firmwareField{"  latest", strings.TrimPrefix(note, "latest ")})
+			}
 			if c := s.NextCandidate; c != nil {
-				trackFields = append(trackFields, firmwareField{"  next", c.Version + ": " + firmwareCandidateDisplay(c.State)})
+				trackFields = append(trackFields, firmwareField{"  next", firmwareWithRevision(c.Version, c.Revision) + ": " + firmwareCandidateDisplay(c.State)})
 				if c.SoakEndsAt != "" {
 					trackFields = append(trackFields, firmwareField{"  soak ends", firmwareTimestamp(c.SoakEndsAt) + " (left: " + firmwareSoakLeft(c) + ")"})
 				}
@@ -325,7 +338,7 @@ func (f *DetailedFormatter) FormatFirmwareRollout(r *models.FirmwareRollout) err
 	}
 	for _, fl := range r.Failures {
 		fmt.Fprintln(f.Writer)
-		firmwareFieldBox("Failure blocking "+fl.Version, []firmwareField{
+		firmwareFieldBox("Failure blocking "+firmwareWithRevision(fl.Version, fl.Revision), []firmwareField{
 			{"Track", fl.Track},
 			{"Devices", strings.Join(fl.Devices, ", ")},
 			{"Failures", strconv.Itoa(fl.Count)},
@@ -389,7 +402,7 @@ func firmwareHaltHeadline(r *models.FirmwareHaltResult) string {
 	if r.Halt.UnhaltedAt != "" {
 		return fmt.Sprintf("Halt on %s lifted: it competes for the tracks again", firmwareHaltSubject(r.Halt))
 	}
-	head := fmt.Sprintf("Release %s halted: no track will approve it; devices already on it stay on it", r.Halt.Version)
+	head := fmt.Sprintf("Release %s halted: no track will approve it; devices already on it stay on it", firmwareHaltLabel(r.Halt))
 	if r.Halt.IsMajor() {
 		head = fmt.Sprintf("Major upgrade to %s halted: no track will approve it; devices already upgrading are left alone and devices already on the series stay on it", r.Halt.Series)
 	}
@@ -449,9 +462,9 @@ func firmwarePromotionHeadline(p *models.FirmwarePromotion) string {
 			"upgrades its eligible devices at its next window", p.Series, strings.Join(approved, ", "))
 	}
 	if len(approved) == 0 {
-		return fmt.Sprintf("Release %s was already approved in every track asked", p.Version)
+		return fmt.Sprintf("Release %s was already approved in every track asked", firmwareWithRevision(p.Version, p.Revision))
 	}
-	return fmt.Sprintf("Release %s approved in %s without waiting for its soak", p.Version, strings.Join(approved, ", "))
+	return fmt.Sprintf("Release %s approved in %s without waiting for its soak", firmwareWithRevision(p.Version, p.Revision), strings.Join(approved, ", "))
 }
 
 // firmwarePromotionTargetLabel names what a promotion result's target is, as a
@@ -472,7 +485,7 @@ func (f *TableFormatter) FormatFirmwarePromotion(p *models.FirmwarePromotion) er
 		header, _ := firmwarePromotionTargetLabel(p)
 		table := NewStyledTable([]string{"Track", "Result", header})
 		for _, r := range p.Results {
-			table.Append([]string{r.Track, firmwarePromotionResultText(r.Result), firmwareDashIfEmpty(r.Target)})
+			table.Append([]string{r.Track, firmwarePromotionResultText(r.Result), firmwareDashIfEmpty(firmwareWithRevision(r.Target, r.TargetRevision))})
 		}
 		table.RenderTo(f.Writer)
 	}
@@ -484,7 +497,7 @@ func (f *SimpleFormatter) FormatFirmwarePromotion(p *models.FirmwarePromotion) e
 	_, field := firmwarePromotionTargetLabel(p)
 	for _, r := range p.Results {
 		fmt.Fprintf(f.Writer, "• %s: %s (%s %s)\n", r.Track, firmwarePromotionResultText(r.Result),
-			strings.ToLower(field), firmwareDashIfEmpty(r.Target))
+			strings.ToLower(field), firmwareDashIfEmpty(firmwareWithRevision(r.Target, r.TargetRevision)))
 	}
 	return nil
 }
@@ -496,7 +509,7 @@ func (f *DetailedFormatter) FormatFirmwarePromotion(p *models.FirmwarePromotion)
 		fmt.Fprintln(f.Writer)
 		firmwareFieldBox("Track "+r.Track, []firmwareField{
 			{"Result", firmwarePromotionResultText(r.Result)},
-			{field, firmwareDashIfEmpty(r.Target)},
+			{field, firmwareDashIfEmpty(firmwareWithRevision(r.Target, r.TargetRevision))},
 		}).render(f.BaseFormatter)
 	}
 	return nil
@@ -511,7 +524,7 @@ func firmwareClearedHeadline(c *models.FirmwareFailuresCleared) string {
 	if c.Track != "" {
 		scope = "the " + c.Track + " track"
 	}
-	subject := "release " + c.Version
+	subject := "release " + firmwareWithRevision(c.Version, c.Revision)
 	if c.IsMajor() {
 		subject = "the major upgrade to " + c.Series
 	}

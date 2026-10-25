@@ -212,6 +212,7 @@ type firmwareHaltInput struct {
 	Version      string `json:"version"`
 	Kind         string `json:"kind,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+	Revision     int    `json:"revision,omitempty"`
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
@@ -220,6 +221,7 @@ type firmwareVersionTrackInput struct {
 	Version      string `json:"version"`
 	Kind         string `json:"kind,omitempty"`
 	Track        string `json:"track,omitempty"`
+	Revision     int    `json:"revision,omitempty"`
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
@@ -399,7 +401,7 @@ func (s *Server) registerFirmwareTools() {
 			"track=unmanaged, changing it cancels the device's queued major-upgrade step that was not yet dispatched "+
 			"(cancelled_tasks), and like moving into a track it is refused on a plan without firmware tracks. An NDManager "+
 			"that predates the setting is reported as such (SERVER_TOO_OLD). Each result carries boot_environment (the setting "+
-			"afterwards) and notes: agent_too_old or device_disabled mean no step is sent until that changes. "+
+			"afterwards) and notes: agent_too_old, agent_upgrade_required or device_disabled mean no step is sent until that changes. "+
 			"Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
 			"devices": stringArrayProperty("Device names (required)"),
@@ -412,9 +414,10 @@ func (s *Server) registerFirmwareTools() {
 
 	add("ndcli.firmware.status",
 		"List the organization's devices and where each stands in the firmware tracks: track and state (enrolling, "+
+			firmwareDeviceRevisionGuide+" "+
 			"managed, held, unenrolling; both absent when unmanaged), pinned_version, held_reason (the reason of the agent's "+
 			"last hold), last_status and last_run_at, last_error, drift (the pin had been changed outside NetDefense), "+
-			"blocked (agent_too_old or device_disabled: why no step is sent) and released ({at, reason} on an unmanaged "+
+			"blocked (agent_too_old, agent_upgrade_required or device_disabled: why no step is sent; the last means the release "+"folder changed after approval and the agent is below 1.28.0) and released ({at, reason} on an unmanaged "+
 			"device the control plane released by itself). For a device with a pin it also returns series (the OPNsense series "+
 			"of the pinned release); for a device in a track, managed and enabled, major {eligible, blocked_by}: whether the "+
 			"next window would send it a major upgrade as far as the device itself goes, and when not the first thing that "+
@@ -437,7 +440,7 @@ func (s *Server) registerFirmwareTools() {
 			"outcome, reason, target, the releases it moved between (from_version, to_version) and whether it applied "+
 			"anything. kind is minor (an ordinary update) or major (a major upgrade; target is then the series); it is absent "+
 			"from an NDManager that predates major upgrades. A failed step an operator cleared carries cleared_at and "+
-			"cleared_by. "+firmwareOutcomeGuide+" The reason codes are the ones ndcli.firmware.status lists.",
+			"cleared_by. revision (when present) is the revision of the release the step's answer reported. "+firmwareOutcomeGuide+" The reason codes are the ones ndcli.firmware.status lists.",
 		firmwareOrgProps(mergeProps(map[string]interface{}{
 			"device": stringProperty("Device name (required)"),
 		}, pageProps)), []string{"device"},
@@ -451,7 +454,7 @@ func (s *Server) registerFirmwareTools() {
 			"blocked_by_failure), soak_ends_at and soak_remaining_seconds (computed by the server), evidence {reached, "+
 			"required} (absent for fast), and stalled with stall_reason (evidence_unreachable: too few devices in the "+
 			"previous track can still reach it; blocked_by_failure). Also lists the failures that block a release and "+
-			"the halts in force; these lists hold releases only. plan_enabled is whether the plan includes firmware tracks; "+
+			"the halts in force; these lists hold releases only. "+firmwareBoardRevisionGuide+" plan_enabled is whether the plan includes firmware tracks; "+
 			"if false, "+firmwarePlanOff+". "+
 			"Major upgrades are beside them: majors, one entry per track (in conveyor order) and series with source_series, "+
 			"state ("+firmwareMajorStateGuide+"), the soak and evidence like a release's, stalled and stall_reason, "+
@@ -475,7 +478,8 @@ func (s *Server) registerFirmwareTools() {
 		"List the halts on releases and major upgrades, newest first. By default only the halts in force; all=true adds "+
 			"the ones that have been lifted (unhalted_at and unhalted_by set). By default only the halts of releases are "+
 			"listed, each with its version; kind=major lists those of major upgrades, each with its series and no version, "+
-			"and kind=all both, told apart by each row's kind.",
+			"and kind=all both, told apart by each row's kind. revision (when present) is the one revision halted; absent "+
+			"means every revision of the release.",
 		firmwareOrgProps(mergeProps(map[string]interface{}{
 			"all":  boolProperty("Also list the halts that have been lifted"),
 			"kind": stringEnumProperty("minor (default): halts of releases. major: halts of major upgrades. all: both", models.FirmwareHaltKinds),
@@ -491,10 +495,11 @@ func (s *Server) registerFirmwareTools() {
 			"supported upgrade. reason is plain text, one line. Lift it with ndcli.firmware.version_unhalt (same kind). "+
 			firmwareNeedsPlan+" Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
-			"version": stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
-			"kind":    firmwareKindProperty(),
-			"reason":  stringProperty("Why the release or major upgrade is halted: plain text, one line (required)"),
-			"confirm": confirmProperty(),
+			"version":  stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
+			"kind":     firmwareKindProperty(),
+			"reason":   stringProperty("Why the release or major upgrade is halted: plain text, one line (required)"),
+			"revision": firmwareRevisionProperty("Halt only this revision of the release; omit to halt every revision"),
+			"confirm":  confirmProperty(),
 		}), []string{"version", "reason"},
 		firmwareHandler(s, func(in *firmwareHaltInput) string { return in.Organization }, s.firmwareVersionHalt))
 
@@ -504,9 +509,10 @@ func (s *Server) registerFirmwareTools() {
 			"has approved the series upgrade every device that passes the gates at its next window. "+firmwareMajorWhat+" "+
 			firmwareNeedsPlan+" Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
-			"version": stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
-			"kind":    firmwareKindProperty(),
-			"confirm": confirmProperty(),
+			"version":  stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
+			"kind":     firmwareKindProperty(),
+			"revision": firmwareRevisionProperty("Lift the halt on this revision only; omit to lift the whole-release halt"),
+			"confirm":  confirmProperty(),
 		}), []string{"version"},
 		firmwareHandler(s, func(in *firmwareVersionTrackInput) string { return in.Organization }, s.firmwareVersionUnhalt))
 
@@ -520,10 +526,11 @@ func (s *Server) registerFirmwareTools() {
 			" The series must be the target of a supported upgrade, not halted, and OPNsense's upgrade path for it must be "+
 			"open (FIRMWARE_UPGRADE_NOT_OPEN otherwise). "+firmwareNeedsPlan+" Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
-			"version": stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
-			"kind":    firmwareKindProperty(),
-			"track":   stringEnumProperty("Track to approve the release in, or all", models.FirmwarePromoteTracks),
-			"confirm": confirmProperty(),
+			"version":  stringProperty("Release directory name, such as 26.7.5; with kind=major the target series, such as 26.7 (required)"),
+			"kind":     firmwareKindProperty(),
+			"track":    stringEnumProperty("Track to approve the release in, or all", models.FirmwarePromoteTracks),
+			"revision": firmwareRevisionProperty("Approve this revision of the release; omit for the newest recorded one"),
+			"confirm":  confirmProperty(),
 		}), []string{"version", "track"},
 		firmwareHandler(s, func(in *firmwareVersionTrackInput) string { return in.Organization }, s.firmwareVersionPromote))
 
@@ -534,10 +541,11 @@ func (s *Server) registerFirmwareTools() {
 			"later tracks only; after a manual rollback of a device, clear the failures it caused once the device is rebound. "+
 			firmwareNeedsPlan+" Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
-			"version": stringProperty("Release whose recorded failures are cleared; with kind=major the target series, such as 26.7 (required)"),
-			"kind":    firmwareKindProperty(),
-			"track":   stringEnumProperty("Limit to one track (omit for every track)", models.FirmwareTracks),
-			"confirm": confirmProperty(),
+			"version":  stringProperty("Release whose recorded failures are cleared; with kind=major the target series, such as 26.7 (required)"),
+			"kind":     firmwareKindProperty(),
+			"track":    stringEnumProperty("Limit to one track (omit for every track)", models.FirmwareTracks),
+			"revision": firmwareRevisionProperty("Clear the failures of this revision only; omit for every revision"),
+			"confirm":  confirmProperty(),
 		}), []string{"version"},
 		firmwareHandler(s, func(in *firmwareVersionTrackInput) string { return in.Organization }, s.firmwareFailureClear))
 }
@@ -822,6 +830,39 @@ func (s *Server) firmwareHalts(ctx context.Context, in *firmwareHaltsInput, org 
 	return s.successResultWithPagination(map[string]interface{}{"halts": list.Items}, list.Page, list.PerPage, list.Total)
 }
 
+// firmwareDeviceRevisionGuide and firmwareBoardRevisionGuide describe the
+// release-revision fields of the read tools; they are null or absent while the
+// control plane's revision switch is off.
+const (
+	firmwareDeviceRevisionGuide = "Release revisions (absent while the control plane does not track them): revision is the revision " +
+		"of the pinned release the device last proved; pending {count, kind, checked_at} is the package updates its last " +
+		"completed check found, kind hotfix when installing them would not change the OPNsense version (present it as " +
+		"\"Hotfix: N package updates pending\"), update otherwise; hotfix_warning {release, revision, detected_at, " +
+		"approved_in_track} says the device is pinned below a release whose newest revision is a hotfix, and when " +
+		"approved_in_track is false, version_promote moves it up."
+	firmwareBoardRevisionGuide = "Release revisions (absent while the control plane does not track them): each series has " +
+		"target_revision and target_fingerprint, and latest_release {version, latest_revision, revised_at}; next_candidate " +
+		"has revision and fingerprint; failures and halts carry revision."
+)
+
+// firmwareRevisionProperty is the optional revision of a release. The server
+// refuses it (422 on field revision) while revisions are not in force.
+func firmwareRevisionProperty(description string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":        "integer",
+		"minimum":     1,
+		"description": description + ". A release's revision counts the times its folder changed after it first appeared; refused with 422 while revisions are off.",
+	}
+}
+
+// withFirmwareRevision adds the revision to the data of a preview when named.
+func withFirmwareRevision(extra map[string]interface{}, revision int) map[string]interface{} {
+	if revision > 0 {
+		extra["revision"] = revision
+	}
+	return extra
+}
+
 // firmwareThing names what a release-or-series tool addresses in a sentence:
 // "release 26.7.5", or "major upgrade to 26.7".
 func firmwareThing(kind, name string) string {
@@ -836,6 +877,9 @@ func (s *Server) firmwareVersionHalt(ctx context.Context, in *firmwareHaltInput,
 	if err != nil {
 		return s.errorResult(err)
 	}
+	if err := service.CheckFirmwareRevision(kind, name, in.Revision); err != nil {
+		return s.errorResult(err)
+	}
 	reason := strings.TrimSpace(in.Reason)
 	if reason == "" {
 		return s.errorResult(&service.Error{Code: service.CodeInvalidInput, Message: "reason is required"})
@@ -847,11 +891,11 @@ func (s *Server) firmwareVersionHalt(ctx context.Context, in *firmwareHaltInput,
 			action = "halt firmware major upgrade to series"
 			extra = map[string]interface{}{"organization": org, "version": name, "kind": kind, "reason": reason}
 		}
-		return s.previewResultWithData(action, name, extra)
+		return s.previewResultWithData(action, name, withFirmwareRevision(extra, in.Revision))
 	}
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
-	result, err := s.svc.FirmwareHalt(apiCtx, org, kind, name, reason)
+	result, err := s.svc.FirmwareHalt(apiCtx, org, kind, name, reason, in.Revision)
 	if err != nil {
 		return s.firmwareError(err)
 	}
@@ -864,6 +908,9 @@ func (s *Server) firmwareVersionUnhalt(ctx context.Context, in *firmwareVersionT
 	if err != nil {
 		return s.errorResult(err)
 	}
+	if err := service.CheckFirmwareRevision(kind, name, in.Revision); err != nil {
+		return s.errorResult(err)
+	}
 	if !in.Confirm {
 		if kind == models.FirmwareKindMajor {
 			return s.previewResultWithNote("lift the halt on firmware major upgrade to series", name,
@@ -872,11 +919,11 @@ func (s *Server) firmwareVersionUnhalt(ctx context.Context, in *firmwareVersionT
 				map[string]interface{}{"organization": org, "version": name, "kind": kind})
 		}
 		return s.previewResultWithData("lift the halt on firmware release", name,
-			map[string]interface{}{"organization": org, "version": name})
+			withFirmwareRevision(map[string]interface{}{"organization": org, "version": name}, in.Revision))
 	}
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
-	result, err := s.svc.FirmwareUnhalt(apiCtx, org, kind, name)
+	result, err := s.svc.FirmwareUnhalt(apiCtx, org, kind, name, in.Revision)
 	if err != nil {
 		return s.firmwareError(err)
 	}
@@ -886,6 +933,9 @@ func (s *Server) firmwareVersionUnhalt(ctx context.Context, in *firmwareVersionT
 func (s *Server) firmwareVersionPromote(ctx context.Context, in *firmwareVersionTrackInput, org string) (*mcp.CallToolResult, error) {
 	kind, name, err := service.CheckFirmwareTarget(in.Kind, in.Version)
 	if err != nil {
+		return s.errorResult(err)
+	}
+	if err := service.CheckFirmwareRevision(kind, name, in.Revision); err != nil {
 		return s.errorResult(err)
 	}
 	track, err := service.NormalizeFirmwareChoice("track", in.Track, models.FirmwarePromoteTracks)
@@ -906,11 +956,11 @@ func (s *Server) firmwareVersionPromote(ctx context.Context, in *firmwareVersion
 		}
 		return s.previewResultWithData("promote firmware release without waiting for its soak",
 			fmt.Sprintf("%s → %s", name, scope),
-			map[string]interface{}{"organization": org, "version": name, "track": track})
+			withFirmwareRevision(map[string]interface{}{"organization": org, "version": name, "track": track}, in.Revision))
 	}
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
-	result, err := s.svc.FirmwarePromote(apiCtx, org, kind, name, track)
+	result, err := s.svc.FirmwarePromote(apiCtx, org, kind, name, track, in.Revision)
 	if err != nil {
 		return s.firmwareError(err)
 	}
@@ -920,6 +970,9 @@ func (s *Server) firmwareVersionPromote(ctx context.Context, in *firmwareVersion
 func (s *Server) firmwareFailureClear(ctx context.Context, in *firmwareVersionTrackInput, org string) (*mcp.CallToolResult, error) {
 	kind, name, err := service.CheckFirmwareTarget(in.Kind, in.Version)
 	if err != nil {
+		return s.errorResult(err)
+	}
+	if err := service.CheckFirmwareRevision(kind, name, in.Revision); err != nil {
 		return s.errorResult(err)
 	}
 	track := strings.TrimSpace(in.Track)
@@ -941,11 +994,11 @@ func (s *Server) firmwareFailureClear(ctx context.Context, in *firmwareVersionTr
 			action = "clear the failures blocking firmware major upgrade to series"
 			extra = map[string]interface{}{"organization": org, "version": name, "kind": kind, "track": track}
 		}
-		return s.previewResultWithData(action, fmt.Sprintf("%s (%s)", name, scope), extra)
+		return s.previewResultWithData(action, fmt.Sprintf("%s (%s)", name, scope), withFirmwareRevision(extra, in.Revision))
 	}
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
-	result, err := s.svc.FirmwareFailuresClear(apiCtx, org, kind, name, track)
+	result, err := s.svc.FirmwareFailuresClear(apiCtx, org, kind, name, track, in.Revision)
 	if err != nil {
 		return s.firmwareError(err)
 	}

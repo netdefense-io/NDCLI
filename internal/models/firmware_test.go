@@ -36,6 +36,7 @@ var (
 		"held_downgrade_risk", "held_unsupported_edition", "held_custom_flavour", "held_firmware_busy",
 		"held_unexpected_plan", "held_reboot_pending", "held_test_mode",
 		"held_late_dispatch", "held_insufficient_space", "held_ha_member", "held_agent_abi_unavailable", "held_upgrade_aborted",
+		"held_revision_mismatch",
 		"applied", "enrolled", "unenrolled",
 		"dead_man",
 	}
@@ -91,7 +92,7 @@ func TestFirmwareWireValuesMatchNDDataModels(t *testing.T) {
 	}
 	// The reasons are held to the tag's order too: it is part of NDDataModels' contract.
 	if !slices.Equal(FirmwareReasons, nddataModelsFirmwareReasons) {
-		t.Errorf("reasons = %v, want the NDDataModels v1.42.0 list, in its order: %v", FirmwareReasons, nddataModelsFirmwareReasons)
+		t.Errorf("reasons = %v, want the NDDataModels v1.44.0 list, in its order: %v", FirmwareReasons, nddataModelsFirmwareReasons)
 	}
 	if !slices.Equal(FirmwareNotes, nddataModelsFirmwareNotes) {
 		t.Errorf("notes = %v, want the NDDataModels v1.42.0 list, in its order: %v", FirmwareNotes, nddataModelsFirmwareNotes)
@@ -169,8 +170,11 @@ func TestFirmwareReasonsCarryTheFiveHoldsOfTheMajorUpgradeInPlace(t *testing.T) 
 	if start == 0 || !slices.Equal(FirmwareReasons[start:start+5], five) {
 		t.Fatalf("the five holds are not right after held_test_mode: %v", FirmwareReasons)
 	}
-	if FirmwareReasons[start+5] != "applied" {
-		t.Errorf("applied must follow them, got %q", FirmwareReasons[start+5])
+	if FirmwareReasons[start+5] != "held_revision_mismatch" || FirmwareReasons[start+6] != "applied" {
+		t.Errorf("held_revision_mismatch then applied must follow them, got %q %q", FirmwareReasons[start+5], FirmwareReasons[start+6])
+	}
+	if FirmwareReasonText("held_revision_mismatch") == "held_revision_mismatch" {
+		t.Error("held_revision_mismatch has no sentence")
 	}
 	for _, code := range five {
 		if FirmwareReasonText(code) == code {

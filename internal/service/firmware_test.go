@@ -189,30 +189,30 @@ func TestFirmwareRoutes(t *testing.T) {
 			"GET", "/api/v1/organizations/acme/firmware/halts", map[string]string{"active": "false"}, nil},
 		{"halt", haltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareHalt(context.Background(), "acme", "", " 26.7.5 ", " regression ")
+				return s.FirmwareHalt(context.Background(), "acme", "", " 26.7.5 ", " regression ", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/halts", nil,
 			map[string]interface{}{"version": "26.7.5", "reason": "regression"}},
 		{"unhalt", haltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareUnhalt(context.Background(), "acme", "minor", "24.7.12_2")
+				return s.FirmwareUnhalt(context.Background(), "acme", "minor", "24.7.12_2", 0)
 			},
 			"DELETE", "/api/v1/organizations/acme/firmware/halts/24.7.12_2", nil, nil},
 		{"promote", promoBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "ALL")
+				return s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "ALL", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/promote", nil,
 			map[string]interface{}{"version": "26.7.5", "track": "all"}},
 		{"failures clear in one track", clearBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "Fast")
+				return s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "Fast", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/failures/clear", nil,
 			map[string]interface{}{"version": "26.7.5", "track": "fast"}},
 		{"failures clear in every track sends no track", clearBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareFailuresClear(context.Background(), "acme", "minor", "26.7.5", "")
+				return s.FirmwareFailuresClear(context.Background(), "acme", "minor", "26.7.5", "", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/failures/clear", nil,
 			map[string]interface{}{"version": "26.7.5"}},
@@ -252,12 +252,12 @@ func TestFirmwareResultsCarryWhatTheClientKnows(t *testing.T) {
 	}
 
 	srv, _ = firmwareServer(t, http.StatusOK, clearBody)
-	cleared, err := newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "stable")
+	cleared, err := newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "stable", 0)
 	if err != nil || cleared.Track != "stable" || cleared.Cleared != 2 {
 		t.Errorf("clear = %+v, %v; want the track the clear was limited to", cleared, err)
 	}
 	srv, _ = firmwareServer(t, http.StatusOK, clearBody)
-	cleared, err = newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "")
+	cleared, err = newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "", 0)
 	if err != nil || cleared.Track != "" {
 		t.Errorf("clear in every track = %+v, %v; want no track", cleared, err)
 	}
@@ -346,47 +346,47 @@ func TestFirmwareRefusesBadInputBeforeSending(t *testing.T) {
 			return err
 		}, "device name is required"},
 		{"halt without a reason", func(s *Service) error {
-			_, err := s.FirmwareHalt(context.Background(), "acme", "", "26.7.5", "  ")
+			_, err := s.FirmwareHalt(context.Background(), "acme", "", "26.7.5", "  ", 0)
 			return err
 		}, "reason is required"},
 		{"halt without a version", func(s *Service) error {
-			_, err := s.FirmwareHalt(context.Background(), "acme", "", "", "r")
+			_, err := s.FirmwareHalt(context.Background(), "acme", "", "", "r", 0)
 			return err
 		}, "version is required"},
 		{"halt of a major upgrade without a series", func(s *Service) error {
-			_, err := s.FirmwareHalt(context.Background(), "acme", "major", " ", "r")
+			_, err := s.FirmwareHalt(context.Background(), "acme", "major", " ", "r", 0)
 			return err
 		}, "series is required"},
 		{"halt of a kind that is neither", func(s *Service) error {
-			_, err := s.FirmwareHalt(context.Background(), "acme", "all", "26.7", "r")
+			_, err := s.FirmwareHalt(context.Background(), "acme", "all", "26.7", "r", 0)
 			return err
 		}, `unknown kind "all"`},
 		{"unhalt without a version", func(s *Service) error {
-			_, err := s.FirmwareUnhalt(context.Background(), "acme", "", "")
+			_, err := s.FirmwareUnhalt(context.Background(), "acme", "", "", 0)
 			return err
 		}, "version is required"},
 		{"unhalt of a major upgrade without a series", func(s *Service) error {
-			_, err := s.FirmwareUnhalt(context.Background(), "acme", "major", "")
+			_, err := s.FirmwareUnhalt(context.Background(), "acme", "major", "", 0)
 			return err
 		}, "series is required"},
 		{"promote to unmanaged", func(s *Service) error {
-			_, err := s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "unmanaged")
+			_, err := s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "unmanaged", 0)
 			return err
 		}, `unknown track "unmanaged"`},
 		{"promote without a track", func(s *Service) error {
-			_, err := s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "")
+			_, err := s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "", 0)
 			return err
 		}, "track is required"},
 		{"promote of a major upgrade to unmanaged", func(s *Service) error {
-			_, err := s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "unmanaged")
+			_, err := s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "unmanaged", 0)
 			return err
 		}, `unknown track "unmanaged"`},
 		{"clear with a bad track", func(s *Service) error {
-			_, err := s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "all")
+			_, err := s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "all", 0)
 			return err
 		}, `unknown track "all"`},
 		{"clear of a major upgrade without a series", func(s *Service) error {
-			_, err := s.FirmwareFailuresClear(context.Background(), "acme", "major", "", "")
+			_, err := s.FirmwareFailuresClear(context.Background(), "acme", "major", "", "", 0)
 			return err
 		}, "series is required"},
 		{"halt list of a kind that does not exist", func(s *Service) error {
@@ -744,13 +744,13 @@ func TestFirmwareResponsesAreSanitized(t *testing.T) {
 				return s.FirmwareHaltList(context.Background(), "acme", FirmwareHaltListOpts{})
 			}},
 		{"halt", poisonJSON(t, haltBody), func(s *Service) (interface{}, error) {
-			return s.FirmwareHalt(context.Background(), "acme", "", "26.7.5", "r")
+			return s.FirmwareHalt(context.Background(), "acme", "", "26.7.5", "r", 0)
 		}},
 		{"promotion", poisonJSON(t, promoBody), func(s *Service) (interface{}, error) {
-			return s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "fast")
+			return s.FirmwarePromote(context.Background(), "acme", "", "26.7.5", "fast", 0)
 		}},
 		{"cleared", poisonJSON(t, clearBody), func(s *Service) (interface{}, error) {
-			return s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "")
+			return s.FirmwareFailuresClear(context.Background(), "acme", "", "26.7.5", "", 0)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1067,41 +1067,41 @@ func TestFirmwareSeriesOperationsAreAddressedBySeries(t *testing.T) {
 	}{
 		{"halt", seriesHaltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareHalt(context.Background(), "acme", " Major ", " 26.7 ", " payload changed ")
+				return s.FirmwareHalt(context.Background(), "acme", " Major ", " 26.7 ", " payload changed ", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/halts", nil,
 			map[string]interface{}{"series": "26.7", "reason": "payload changed"}},
 		{"unhalt has a path of its own", seriesHaltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareUnhalt(context.Background(), "acme", "major", "26.7")
+				return s.FirmwareUnhalt(context.Background(), "acme", "major", "26.7", 0)
 			},
 			"DELETE", "/api/v1/organizations/acme/firmware/halts/series/26.7", nil, nil},
 		{"unhalt escapes the series", seriesHaltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareUnhalt(context.Background(), "acme", "major", "26/7")
+				return s.FirmwareUnhalt(context.Background(), "acme", "major", "26/7", 0)
 			},
 			"DELETE", "/api/v1/organizations/acme/firmware/halts/series/26%2F7", nil, nil},
 		{"promote", seriesPromoBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "FAST")
+				return s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "FAST", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/promote", nil,
 			map[string]interface{}{"series": "26.7", "track": "fast"}},
 		{"clear in one track", seriesClearBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "stable")
+				return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "stable", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/failures/clear", nil,
 			map[string]interface{}{"series": "26.7", "track": "stable"}},
 		{"clear in every track sends no track", seriesClearBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "")
+				return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/failures/clear", nil,
 			map[string]interface{}{"series": "26.7"}},
 		{"a release keeps its version, whatever else is true of its name", haltBody,
 			func(s *Service) (interface{}, error) {
-				return s.FirmwareHalt(context.Background(), "acme", "minor", "26.7", "r")
+				return s.FirmwareHalt(context.Background(), "acme", "minor", "26.7", "r", 0)
 			},
 			"POST", "/api/v1/organizations/acme/firmware/halts", nil,
 			map[string]interface{}{"version": "26.7", "reason": "r"}},
@@ -1147,17 +1147,17 @@ func TestFirmwareSeriesOperationsAreAddressedBySeries(t *testing.T) {
 	})
 	t.Run("the answers keep their series", func(t *testing.T) {
 		srv, _ := firmwareServer(t, http.StatusOK, seriesHaltBody)
-		halt, err := newTestService(t, srv).FirmwareHalt(context.Background(), "acme", "major", "26.7", "r")
+		halt, err := newTestService(t, srv).FirmwareHalt(context.Background(), "acme", "major", "26.7", "r", 0)
 		if err != nil || halt.Halt.Series != "26.7" || halt.Halt.Version != "" || !halt.Halt.IsMajor() || halt.CancelledTasks != 1 {
 			t.Errorf("halt = %+v, %v", halt, err)
 		}
 		srv, _ = firmwareServer(t, http.StatusOK, seriesPromoBody)
-		promo, err := newTestService(t, srv).FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast")
+		promo, err := newTestService(t, srv).FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast", 0)
 		if err != nil || promo.Series != "26.7" || promo.Version != "" || !promo.IsMajor() {
 			t.Errorf("promotion = %+v, %v", promo, err)
 		}
 		srv, _ = firmwareServer(t, http.StatusOK, seriesClearBody)
-		cleared, err := newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "fast")
+		cleared, err := newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "fast", 0)
 		if err != nil || cleared.Series != "26.7" || cleared.Track != "fast" || cleared.Cleared != 1 || !cleared.IsMajor() {
 			t.Errorf("cleared = %+v, %v", cleared, err)
 		}
@@ -1209,7 +1209,7 @@ func TestFirmwareAdviceForTheSeriesUpgradeRefusals(t *testing.T) {
 	refusal := func(t *testing.T, body string) error {
 		t.Helper()
 		srv, _ := firmwareServer(t, 409, body)
-		_, err := newTestService(t, srv).FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast")
+		_, err := newTestService(t, srv).FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast", 0)
 		return err
 	}
 
@@ -1287,13 +1287,13 @@ func TestFirmwareMajorResponsesAreSanitized(t *testing.T) {
 		}},
 		{"rollout", rollout, func(s *Service) (interface{}, error) { return s.FirmwareRollout(context.Background(), "acme") }},
 		{"series halt", poisonJSON(t, seriesHaltBody), func(s *Service) (interface{}, error) {
-			return s.FirmwareHalt(context.Background(), "acme", "major", "26.7", "r")
+			return s.FirmwareHalt(context.Background(), "acme", "major", "26.7", "r", 0)
 		}},
 		{"series promotion", poisonJSON(t, seriesPromoBody), func(s *Service) (interface{}, error) {
-			return s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast")
+			return s.FirmwarePromote(context.Background(), "acme", "major", "26.7", "fast", 0)
 		}},
 		{"series clear", poisonJSON(t, seriesClearBody), func(s *Service) (interface{}, error) {
-			return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "")
+			return s.FirmwareFailuresClear(context.Background(), "acme", "major", "26.7", "", 0)
 		}},
 		{"track", poisonJSON(t, trackOffBody), func(s *Service) (interface{}, error) {
 			off := false
@@ -1398,5 +1398,97 @@ func TestErrorCodeShowsTheServersCodeExceptForAVersionSkew(t *testing.T) {
 		if got := ErrorCode(tc.err); got != tc.want {
 			t.Errorf("%s: ErrorCode = %q, want %q", name, got, tc.want)
 		}
+	}
+}
+
+func TestFirmwareRevisionIsSentWhenNamed(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		body   string
+		call   func(*Service) (interface{}, error)
+		method string
+		path   string
+		query  map[string]string
+		want   map[string]interface{}
+	}{
+		{"halt", haltBody, func(s *Service) (interface{}, error) { return s.FirmwareHalt(ctx, "acme", "", "26.1.11", "r", 2) },
+			"POST", "/api/v1/organizations/acme/firmware/halts", nil,
+			map[string]interface{}{"version": "26.1.11", "reason": "r", "revision": float64(2)}},
+		{"unhalt", haltBody, func(s *Service) (interface{}, error) { return s.FirmwareUnhalt(ctx, "acme", "", "26.1.11", 2) },
+			"DELETE", "/api/v1/organizations/acme/firmware/halts/26.1.11", map[string]string{"revision": "2"}, nil},
+		{"promote", promotionBodyForRevision, func(s *Service) (interface{}, error) {
+			return s.FirmwarePromote(ctx, "acme", "", "26.1.11", "all", 2)
+		}, "POST", "/api/v1/organizations/acme/firmware/promote", nil,
+			map[string]interface{}{"version": "26.1.11", "track": "all", "revision": float64(2)}},
+		{"clear", clearBody, func(s *Service) (interface{}, error) {
+			return s.FirmwareFailuresClear(ctx, "acme", "", "26.1.11", "", 2)
+		},
+			"POST", "/api/v1/organizations/acme/firmware/failures/clear", nil,
+			map[string]interface{}{"version": "26.1.11", "revision": float64(2)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, seen := firmwareServer(t, http.StatusOK, tc.body)
+			if _, err := tc.call(newTestService(t, srv)); err != nil {
+				t.Fatal(err)
+			}
+			if seen.method != tc.method || seen.path != tc.path {
+				t.Errorf("request = %s %s, want %s %s", seen.method, seen.path, tc.method, tc.path)
+			}
+			for k, v := range tc.query {
+				if got := seen.query.Get(k); got != v {
+					t.Errorf("query %s = %q, want %q", k, got, v)
+				}
+			}
+			if !reflect.DeepEqual(seen.body, tc.want) {
+				t.Errorf("body = %v, want %v", seen.body, tc.want)
+			}
+		})
+	}
+}
+
+func TestFirmwareRevisionRefusedBeforeSending(t *testing.T) {
+	ctx := context.Background()
+	srv, seen := firmwareServer(t, http.StatusOK, haltBody)
+	s := newTestService(t, srv)
+	if _, err := s.FirmwareHalt(ctx, "acme", "major", "26.7", "r", 2); err == nil {
+		t.Error("a revision beside a major upgrade must be refused")
+	}
+	if _, err := s.FirmwarePromote(ctx, "acme", "", "26.1.11", "all", -1); err == nil {
+		t.Error("a negative revision must be refused")
+	}
+	if _, err := s.FirmwareUnhalt(ctx, "acme", "major", "26.7", 2); err == nil {
+		t.Error("a revision beside the unhalt of a major upgrade must be refused")
+	}
+	if _, err := s.FirmwareFailuresClear(ctx, "acme", "major", "26.7", "", 2); err == nil {
+		t.Error("a revision beside the clear of a major upgrade must be refused")
+	}
+	if seen.hits != 0 {
+		t.Errorf("%d request(s) reached the server", seen.hits)
+	}
+}
+
+func TestFirmwareClearedCarriesTheRevision(t *testing.T) {
+	srv, _ := firmwareServer(t, http.StatusOK, clearBody)
+	cleared, err := newTestService(t, srv).FirmwareFailuresClear(context.Background(), "acme", "", "26.1.11", "", 3)
+	if err != nil || cleared.Revision == nil || *cleared.Revision != 3 {
+		t.Errorf("clear = %+v, %v; want the revision the clear was limited to", cleared, err)
+	}
+}
+
+const promotionBodyForRevision = `{"version":"26.1.11","revision":2,"results":[{"track":"fast","result":"approved","target":"26.1.11","target_revision":2}]}`
+
+func TestFirmwareRevisionFieldsDecode(t *testing.T) {
+	body := `{"items":[{"device_name":"fw-a","device_uuid":"u","device_status":"ENABLED","track":"fast","state":"enrolled","pinned_version":"26.1.10","blocked":"agent_upgrade_required","revision":2,"pending":{"count":17,"kind":"hotfix","checked_at":"2026-10-23T18:14:08Z"},"hotfix_warning":{"release":"26.1.11","revision":2,"detected_at":"2026-10-23T10:33:00Z","approved_in_track":false}}],"total":1,"page":1,"per_page":50,"pages":1}`
+	srv, _ := firmwareServer(t, http.StatusOK, body)
+	list, err := newTestService(t, srv).FirmwareDeviceList(context.Background(), "acme", FirmwareDeviceListOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := list.Items[0]
+	if d.Blocked != models.FirmwareBlockedAgentUpgradeRequired || d.Revision == nil || *d.Revision != 2 ||
+		d.Pending == nil || d.Pending.Count != 17 || d.Pending.Kind != models.FirmwarePendingHotfix ||
+		d.HotfixWarning == nil || d.HotfixWarning.Release != "26.1.11" || d.HotfixWarning.ApprovedInTrack {
+		t.Errorf("device = %+v", d)
 	}
 }

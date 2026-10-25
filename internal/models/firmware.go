@@ -116,6 +116,15 @@ const (
 const (
 	FirmwareBlockedAgentTooOld    = "agent_too_old"
 	FirmwareBlockedDeviceDisabled = "device_disabled"
+	// FirmwareBlockedAgentUpgradeRequired: the release folder changed after the
+	// track approved it and the agent is below 1.28.0, which cannot prove a revision.
+	FirmwareBlockedAgentUpgradeRequired = "agent_upgrade_required"
+)
+
+// What a device's pending package updates are (FirmwarePending.Kind).
+const (
+	FirmwarePendingHotfix = "hotfix"
+	FirmwarePendingUpdate = "update"
 )
 
 // What moving a device did (FirmwareAssignmentResult.Result). "updated" is the
@@ -162,7 +171,7 @@ const (
 // followed by the control plane's own dead_man. held_test_mode is at index 14;
 // the five holds of the major upgrade (held_late_dispatch, held_insufficient_space,
 // held_ha_member, held_agent_abi_unavailable, held_upgrade_aborted) follow it,
-// before applied. An older server never sends the ones it predates. A reason not
+// then held_revision_mismatch (NDDataModels v1.44.0), before applied. An older server never sends the ones it predates. A reason not
 // in the list still renders, as the code itself: the list is what has a sentence
 // of its own, not a filter. models.FirmwareReasonText is the one place the
 // sentences live.
@@ -172,6 +181,7 @@ var FirmwareReasons = []string{
 	"held_downgrade_risk", "held_unsupported_edition", "held_custom_flavour", "held_firmware_busy",
 	"held_unexpected_plan", "held_reboot_pending", "held_test_mode",
 	"held_late_dispatch", "held_insufficient_space", "held_ha_member", "held_agent_abi_unavailable", "held_upgrade_aborted",
+	"held_revision_mismatch",
 	"applied", "enrolled", "unenrolled",
 	"dead_man",
 }
@@ -197,6 +207,7 @@ var firmwareReasonText = map[string]string{
 	"held_ha_member":              "the device is a member of an HA pair, and a major upgrade is held for one",
 	"held_agent_abi_unavailable":  "no usable NetDefense repository for the new FreeBSD version (the url is not ABI-nested, the host is unreachable, or the tree is missing)",
 	"held_upgrade_aborted":        "a major upgrade attempt aborted before it changed the device, or the agent is waiting before trying again",
+	"held_revision_mismatch":      "the release folder changed again after it was approved; the device holds until the new revision is approved",
 	"applied":                     "the update was applied",
 	"enrolled":                    "pinned at the installed release",
 	"unenrolled":                  "the original firmware setting was restored",
@@ -543,6 +554,15 @@ type FirmwareDevice struct {
 	// Blocked is why no step is sent to the device: agent_too_old or
 	// device_disabled.
 	Blocked string `json:"blocked,omitempty"`
+	// Revision is the revision of the pinned release the device last proved;
+	// nil when unknown, unmanaged, or revisions are not in force.
+	Revision *int `json:"revision,omitempty"`
+	// Pending is the package updates the last completed check found; nil when
+	// no check is known.
+	Pending *FirmwarePending `json:"pending,omitempty"`
+	// HotfixWarning is set when the device is pinned below a release whose
+	// newest revision is a hotfix.
+	HotfixWarning *FirmwareHotfixWarning `json:"hotfix_warning,omitempty"`
 	// Released is set on an unmanaged device the control plane released by
 	// itself, until it is added again.
 	Released *FirmwareReleasedInfo `json:"released,omitempty"`
@@ -561,6 +581,25 @@ type FirmwareDevice struct {
 	// package name. omitzero keeps the difference between absent (an NDManager
 	// that predates them) and the empty list a current one sends.
 	Notes []string `json:"notes,omitzero"`
+}
+
+// FirmwarePending counts the package updates a device's last completed check
+// found, in any repository. Kind is hotfix when installing them would not
+// change the OPNsense version, update otherwise, empty when Count is 0.
+type FirmwarePending struct {
+	Count     int    `json:"count"`
+	Kind      string `json:"kind,omitempty"`
+	CheckedAt string `json:"checked_at,omitempty"`
+}
+
+// FirmwareHotfixWarning says a device is pinned below the newest release of its
+// series and that release was revised after it appeared. ApprovedInTrack false
+// means promoting it now moves the device up.
+type FirmwareHotfixWarning struct {
+	Release         string `json:"release"`
+	Revision        int    `json:"revision"`
+	DetectedAt      string `json:"detected_at,omitempty"`
+	ApprovedInTrack bool   `json:"approved_in_track"`
 }
 
 // FirmwareDeviceMajor says whether the next window would send a device a
@@ -607,6 +646,8 @@ type FirmwareHistoryItem struct {
 	FromVersion string `json:"from_version,omitempty"`
 	ToVersion   string `json:"to_version,omitempty"`
 	Applied     bool   `json:"applied"`
+	// Revision is the revision of the release the step's answer reported.
+	Revision *int `json:"revision,omitempty"`
 	// ClearedAt and ClearedBy say when an operator cleared the failure.
 	ClearedAt string `json:"cleared_at,omitempty"`
 	ClearedBy string `json:"cleared_by,omitempty"`
@@ -635,7 +676,11 @@ type FirmwareEvidence struct {
 // what holds it.
 type FirmwareCandidate struct {
 	Version string `json:"version"`
-	State   string `json:"state"`
+	// Revision and Fingerprint identify the content of the release folder the
+	// candidate is; nil while revisions are not in force.
+	Revision    *int   `json:"revision,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	State       string `json:"state"`
 	// SoakEndsAt is when the soak is over; empty until its clock has started.
 	SoakEndsAt string `json:"soak_ends_at,omitempty"`
 	// SoakRemainingSeconds is computed by the server and 0 once the soak is
@@ -649,14 +694,27 @@ type FirmwareCandidate struct {
 	StallReason string `json:"stall_reason,omitempty"` // evidence_unreachable, blocked_by_failure
 }
 
+// FirmwareLatestRelease is the newest release of a series with its newest revision.
+type FirmwareLatestRelease struct {
+	Version        string `json:"version"`
+	LatestRevision int    `json:"latest_revision"`
+	RevisedAt      string `json:"revised_at,omitempty"`
+}
+
 // FirmwareSeriesStatus is a track's standing in one OPNsense series.
 type FirmwareSeriesStatus struct {
 	Series string `json:"series"`
 	// Target is the release the track moves its devices of this series to.
-	Target           string             `json:"target,omitempty"`
-	TargetApprovedAt string             `json:"target_approved_at,omitempty"`
-	TargetSource     string             `json:"target_source,omitempty"` // auto, manual
-	NextCandidate    *FirmwareCandidate `json:"next_candidate,omitempty"`
+	Target           string `json:"target,omitempty"`
+	TargetApprovedAt string `json:"target_approved_at,omitempty"`
+	TargetSource     string `json:"target_source,omitempty"` // auto, manual
+	// TargetRevision and TargetFingerprint are the revision the track approved
+	// for the target; nil while revisions are not in force.
+	TargetRevision    *int   `json:"target_revision,omitempty"`
+	TargetFingerprint string `json:"target_fingerprint,omitempty"`
+	// LatestRelease is the newest release of the series and its newest revision.
+	LatestRelease *FirmwareLatestRelease `json:"latest_release,omitempty"`
+	NextCandidate *FirmwareCandidate     `json:"next_candidate,omitempty"`
 }
 
 // FirmwareTrackStatus is one track's part of the rollout status.
@@ -675,10 +733,11 @@ type FirmwareTrackStatus struct {
 type FirmwareFailure struct {
 	Version string `json:"version"`
 	// Track is the track the failures happened in.
-	Track   string   `json:"track"`
-	Devices []string `json:"devices"`
-	Count   int      `json:"count"`
-	LastAt  string   `json:"last_at"`
+	Track    string   `json:"track"`
+	Revision *int     `json:"revision,omitempty"`
+	Devices  []string `json:"devices"`
+	Count    int      `json:"count"`
+	LastAt   string   `json:"last_at"`
 }
 
 // FirmwareMajorFailure is a set of unresolved failures of a major upgrade.
@@ -699,8 +758,10 @@ type FirmwareMajorFailure struct {
 // upgrade (Series set, Kind major, no Version); UnhaltedAt is set once it is
 // lifted.
 type FirmwareHalt struct {
-	Version    string `json:"version,omitempty"`
-	Series     string `json:"series,omitempty"`
+	Version string `json:"version,omitempty"`
+	Series  string `json:"series,omitempty"`
+	// Revision is the one revision halted; nil halts every revision.
+	Revision   *int   `json:"revision,omitempty"`
 	Kind       string `json:"kind"`
 	Reason     string `json:"reason"`
 	HaltedAt   string `json:"halted_at"`
@@ -838,14 +899,18 @@ type FirmwarePromotionResult struct {
 	Result string `json:"result"` // approved, already_approved
 	// Target is the track's target for the release's series afterwards.
 	Target string `json:"target,omitempty"`
+	// TargetRevision is the revision approved; nil while revisions are not in force.
+	TargetRevision *int `json:"target_revision,omitempty"`
 }
 
 // FirmwarePromotion is the answer of promoting a release (Version) or a major
 // upgrade (Series, no Version).
 type FirmwarePromotion struct {
-	Version string                    `json:"version,omitempty"`
-	Series  string                    `json:"series,omitempty"`
-	Results []FirmwarePromotionResult `json:"results"`
+	Version string `json:"version,omitempty"`
+	Series  string `json:"series,omitempty"`
+	// Revision is the revision promoted; nil while revisions are not in force.
+	Revision *int                      `json:"revision,omitempty"`
+	Results  []FirmwarePromotionResult `json:"results"`
 }
 
 // IsMajor reports whether a major upgrade was promoted.
@@ -866,7 +931,10 @@ type FirmwareFailuresCleared struct {
 	Version string `json:"version,omitempty"`
 	Series  string `json:"series,omitempty"`
 	Track   string `json:"track,omitempty"`
-	Cleared int    `json:"cleared"`
+	// Revision is the revision the clear was limited to, filled in by the
+	// client; nil for every revision.
+	Revision *int `json:"revision,omitempty"`
+	Cleared  int  `json:"cleared"`
 }
 
 // IsMajor reports whether the failures of a major upgrade were cleared.

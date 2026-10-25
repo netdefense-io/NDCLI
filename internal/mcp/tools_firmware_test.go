@@ -1488,3 +1488,58 @@ func TestFirmwareMajorToolOutputIsSanitized(t *testing.T) {
 		t.Errorf("the strings should survive, minus the escapes:\n%s", text)
 	}
 }
+
+func TestFirmwareToolsTakeARevision(t *testing.T) {
+	defs := toolDefinitions(t)
+	for _, name := range []string{"version_halt", "version_unhalt", "version_promote", "failure_clear"} {
+		props, _ := schemaProps(t, defs["ndcli.firmware."+name])
+		rev, ok := props["revision"].(map[string]interface{})
+		if !ok || rev["type"] != "integer" {
+			t.Errorf("%s has no integer revision property: %v", name, props["revision"])
+		}
+	}
+	for _, tc := range []struct {
+		tool, args, response, method, path string
+		query                              string
+		body                               map[string]interface{}
+	}{
+		{"ndcli.firmware.version_halt", `{"version":"26.1.11","reason":"r","revision":2}`, mcpHalt, "POST",
+			"/api/v1/organizations/acme/firmware/halts", "", map[string]interface{}{"version": "26.1.11", "reason": "r", "revision": float64(2)}},
+		{"ndcli.firmware.version_unhalt", `{"version":"26.1.11","revision":2}`, mcpHalt, "DELETE",
+			"/api/v1/organizations/acme/firmware/halts/26.1.11", "2", nil},
+		{"ndcli.firmware.version_promote", `{"version":"26.1.11","track":"all","revision":2}`, mcpPromote, "POST",
+			"/api/v1/organizations/acme/firmware/promote", "", map[string]interface{}{"version": "26.1.11", "track": "all", "revision": float64(2)}},
+		{"ndcli.firmware.failure_clear", `{"version":"26.1.11","revision":2}`, mcpCleared, "POST",
+			"/api/v1/organizations/acme/firmware/failures/clear", "", map[string]interface{}{"version": "26.1.11", "revision": float64(2)}},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			cs, seen := firmwareClient(t, http.StatusOK, tc.response)
+			preview := callTool(t, cs, tc.tool, tc.args)
+			if data, _ := preview.Data.(map[string]interface{}); data["revision"] != float64(2) {
+				t.Errorf("preview data lacks the revision: %v", preview.Data)
+			}
+			resp := callTool(t, cs, tc.tool, strings.TrimSuffix(tc.args, "}")+`,"confirm":true}`)
+			if !resp.Success {
+				t.Fatalf("confirmed call failed: %+v", resp.Error)
+			}
+			if seen.method != tc.method || seen.path != tc.path || seen.query.Get("revision") != tc.query || !reflect.DeepEqual(seen.body, tc.body) {
+				t.Errorf("sent %s %s ?%v %v", seen.method, seen.path, seen.query, seen.body)
+			}
+		})
+	}
+}
+
+func TestFirmwareToolsRefuseARevisionBesideAMajorUpgrade(t *testing.T) {
+	for _, tool := range []string{"version_halt", "version_unhalt", "version_promote", "failure_clear"} {
+		cs, seen := firmwareClient(t, http.StatusOK, mcpHalt)
+		args := `{"version":"26.7","kind":"major","reason":"r","track":"all","revision":2}`
+		resp := callTool(t, cs, "ndcli.firmware."+tool, args)
+		if resp.Success {
+			t.Errorf("%s: a revision beside a major upgrade must be refused", tool)
+		}
+		resp = callTool(t, cs, "ndcli.firmware."+tool, strings.TrimSuffix(args, "}")+`,"confirm":true}`)
+		if resp.Success || seen.hits != 0 {
+			t.Errorf("%s: confirmed call succeeded or sent %d request(s)", tool, seen.hits)
+		}
+	}
+}

@@ -632,6 +632,31 @@ func CheckFirmwareTarget(kind, name string) (string, string, error) {
 	return models.FirmwareKindMinor, target.name, nil
 }
 
+// checkFirmwareRevision validates a revision named beside a release: 0 is not
+// named, else it is a positive number, and a major upgrade has none.
+func checkFirmwareRevision(t firmwareTarget, revision int) error {
+	if revision == 0 {
+		return nil
+	}
+	if revision < 0 {
+		return &Error{Code: CodeInvalidInput, Message: "revision must be a positive number"}
+	}
+	if t.major {
+		return &Error{Code: CodeInvalidInput, Message: "revision applies to a release, not to a major upgrade"}
+	}
+	return nil
+}
+
+// CheckFirmwareRevision is checkFirmwareRevision for a front-end that refuses a
+// request before it previews or asks.
+func CheckFirmwareRevision(kind, name string, revision int) error {
+	target, err := resolveFirmwareTarget(kind, name)
+	if err != nil {
+		return err
+	}
+	return checkFirmwareRevision(target, revision)
+}
+
 // field is the body key that names the target.
 func (t firmwareTarget) field() string {
 	if t.major {
@@ -645,7 +670,7 @@ func (t firmwareTarget) field() string {
 // queued for it and not yet dispatched are cancelled. Devices already on it, or
 // already upgrading, stay; there is no rollback. A release must be in the
 // catalog, a series the target of a supported major upgrade.
-func (s *Service) FirmwareHalt(ctx context.Context, org, kind, name, reason string) (*models.FirmwareHaltResult, error) {
+func (s *Service) FirmwareHalt(ctx context.Context, org, kind, name, reason string, revision int) (*models.FirmwareHaltResult, error) {
 	target, err := resolveFirmwareTarget(kind, name)
 	if err != nil {
 		return nil, err
@@ -654,22 +679,35 @@ func (s *Service) FirmwareHalt(ctx context.Context, org, kind, name, reason stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeFirmware[models.FirmwareHaltResult](
-		s.api.Post(ctx, firmwarePath(org, "halts"), map[string]string{target.field(): target.name, "reason": reason}))
+	if err := checkFirmwareRevision(target, revision); err != nil {
+		return nil, err
+	}
+	body := map[string]interface{}{target.field(): target.name, "reason": reason}
+	if revision > 0 {
+		body["revision"] = revision
+	}
+	return decodeFirmware[models.FirmwareHaltResult](s.api.Post(ctx, firmwarePath(org, "halts"), body))
 }
 
 // FirmwareUnhalt lifts the halt on a release or a major upgrade; it competes
 // for the tracks again. A series has a path of its own, never a kind flag on the
 // release's.
-func (s *Service) FirmwareUnhalt(ctx context.Context, org, kind, name string) (*models.FirmwareHaltResult, error) {
+func (s *Service) FirmwareUnhalt(ctx context.Context, org, kind, name string, revision int) (*models.FirmwareHaltResult, error) {
 	target, err := resolveFirmwareTarget(kind, name)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkFirmwareRevision(target, revision); err != nil {
 		return nil, err
 	}
 	if target.major {
 		return decodeFirmware[models.FirmwareHaltResult](s.api.Delete(ctx, firmwarePath(org, "halts", "series", target.name)))
 	}
-	return decodeFirmware[models.FirmwareHaltResult](s.api.Delete(ctx, firmwarePath(org, "halts", target.name)))
+	path := firmwarePath(org, "halts", target.name)
+	if revision > 0 {
+		path += "?" + url.Values{"revision": {strconv.Itoa(revision)}}.Encode()
+	}
+	return decodeFirmware[models.FirmwareHaltResult](s.api.Delete(ctx, path))
 }
 
 // FirmwarePromote approves a release or a major upgrade in one track, or in all
@@ -679,7 +717,7 @@ func (s *Service) FirmwareUnhalt(ctx context.Context, org, kind, name string) (*
 // halted, and its upgrade path open (409 FIRMWARE_UPGRADE_NOT_OPEN otherwise).
 // Approving a series starts no upgrade by itself: a track upgrades its devices
 // only with auto_apply_major on.
-func (s *Service) FirmwarePromote(ctx context.Context, org, kind, name, track string) (*models.FirmwarePromotion, error) {
+func (s *Service) FirmwarePromote(ctx context.Context, org, kind, name, track string, revision int) (*models.FirmwarePromotion, error) {
 	target, err := resolveFirmwareTarget(kind, name)
 	if err != nil {
 		return nil, err
@@ -688,19 +726,31 @@ func (s *Service) FirmwarePromote(ctx context.Context, org, kind, name, track st
 	if err != nil {
 		return nil, err
 	}
-	return decodeFirmware[models.FirmwarePromotion](
-		s.api.Post(ctx, firmwarePath(org, "promote"), map[string]string{target.field(): target.name, "track": track}))
+	if err := checkFirmwareRevision(target, revision); err != nil {
+		return nil, err
+	}
+	body := map[string]interface{}{target.field(): target.name, "track": track}
+	if revision > 0 {
+		body["revision"] = revision
+	}
+	return decodeFirmware[models.FirmwarePromotion](s.api.Post(ctx, firmwarePath(org, "promote"), body))
 }
 
 // FirmwareFailuresClear clears the recorded failures that block a release or a
 // major upgrade, in one track or (track empty) in every track, so it can move
 // on. The records stay in the history.
-func (s *Service) FirmwareFailuresClear(ctx context.Context, org, kind, name, track string) (*models.FirmwareFailuresCleared, error) {
+func (s *Service) FirmwareFailuresClear(ctx context.Context, org, kind, name, track string, revision int) (*models.FirmwareFailuresCleared, error) {
 	target, err := resolveFirmwareTarget(kind, name)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]string{target.field(): target.name}
+	if err := checkFirmwareRevision(target, revision); err != nil {
+		return nil, err
+	}
+	body := map[string]interface{}{target.field(): target.name}
+	if revision > 0 {
+		body["revision"] = revision
+	}
 	if strings.TrimSpace(track) != "" {
 		track, err = NormalizeFirmwareChoice("track", track, models.FirmwareTracks)
 		if err != nil {
@@ -715,6 +765,9 @@ func (s *Service) FirmwareFailuresClear(ctx context.Context, org, kind, name, tr
 		return nil, err
 	}
 	out.Track = track
+	if revision > 0 {
+		out.Revision = &revision
+	}
 	return out, nil
 }
 
