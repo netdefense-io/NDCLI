@@ -1,6 +1,9 @@
 package models
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Device represents a managed firewall device
 type Device struct {
@@ -28,6 +31,45 @@ type Device struct {
 	// newer agent's facts are never dropped by an older CLI. See
 	// device_facts.go for the typed accessors and the rules.
 	Facts map[string]interface{} `json:"facts,omitempty"`
+	// KeyState is "mismatch" when the device's agent presented a key other
+	// than the one bound to the device, and absent otherwise (also from an
+	// NDManager that predates the field). Only a known mismatch is reported.
+	KeyState       string          `json:"key_state,omitempty"`
+	KeyStateDetail *KeyStateDetail `json:"key_state_detail,omitempty"`
+}
+
+// KeyStateDetail is the evidence behind a key mismatch.
+type KeyStateDetail struct {
+	BoundKID     string `json:"bound_kid,omitempty"`
+	PresentedKID string `json:"presented_kid,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Since        string `json:"since,omitempty"`
+}
+
+// KeyStateMismatch is the only key_state value NDManager reports.
+const KeyStateMismatch = "mismatch"
+
+// HasKeyMismatch reports whether the control plane flags the device's key.
+func (d *Device) HasKeyMismatch() bool {
+	return d.KeyState == KeyStateMismatch
+}
+
+// RebindCommand is the command that recovers a device in key mismatch.
+func (d *Device) RebindCommand() string {
+	return "ndcli device rebind-token " + d.Name
+}
+
+// MarshalJSON adds rebind_command to a device in key mismatch so the JSON
+// output names the recovery command like the human formats do.
+func (d Device) MarshalJSON() ([]byte, error) {
+	type plain Device
+	if !d.HasKeyMismatch() {
+		return json.Marshal(plain(d))
+	}
+	return json.Marshal(struct {
+		plain
+		RebindCommand string `json:"rebind_command"`
+	}{plain(d), d.RebindCommand()})
 }
 
 // IsSynced returns true if the device has a synced hash

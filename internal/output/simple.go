@@ -32,6 +32,9 @@ func (f *SimpleFormatter) FormatDevices(devices []models.Device, total int, quot
 			drift = fmt.Sprintf(" drift:%s", DriftStatusDisplay(d.DriftStatus))
 		}
 		fmt.Fprintf(f.Writer, "• %s [%s] %s %s - %s%s\n", d.Name, status, OnlineIndicator(d.Online), synced, d.GetOUsDisplay(), drift)
+		if d.HasKeyMismatch() {
+			fmt.Fprintf(f.Writer, "  %s\n", keyMismatchText(&d))
+		}
 	}
 	if quota != nil {
 		fmt.Fprintf(f.Writer, "\n%s\n", formatQuotaFooterSimple("enabled devices", quota))
@@ -44,6 +47,10 @@ func (f *SimpleFormatter) FormatDevice(device *models.Device) error {
 	fmt.Fprintf(f.Writer, "Device: %s\n", device.Name)
 	fmt.Fprintf(f.Writer, "  Status: %s\n", ColoredStatus(device.Status))
 	fmt.Fprintf(f.Writer, "  Online: %s %s\n", OnlineIndicator(device.Online), OnlineLabel(device.Online))
+	if device.HasKeyMismatch() {
+		fmt.Fprintf(f.Writer, "  Key: %s\n", keyMismatchText(device))
+		writeKeyMismatchDetail(f.Writer, device, "    ")
+	}
 	fmt.Fprintf(f.Writer, "  Organization: %s\n", device.Organization)
 	if len(device.OrganizationalUnits) > 0 {
 		fmt.Fprintf(f.Writer, "  OUs: %s\n", device.GetOUsDisplay())

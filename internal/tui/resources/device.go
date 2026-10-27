@@ -42,7 +42,7 @@ func (deviceResource) Fetch(ctx context.Context, svc *service.Service, org strin
 		rows = append(rows, registry.Row{
 			ID: d.Name,
 			Cells: []string{
-				d.Name,
+				uihelp.KeyMismatchPrefix(&d),
 				d.Status,
 				uihelp.OnlineLabel(d.Online),
 				d.GetOUsDisplay(),
@@ -209,6 +209,13 @@ func (deviceResource) Describe(ctx context.Context, svc *service.Service, org, i
 		{Label: "Drift status", Value: uihelp.Default(d.DriftStatus, "—")},
 		{Label: "Auto-sync", Value: fmt.Sprintf("%t", d.AutoSync)},
 		{Label: "Created", Value: fullTime(d.CreatedAt)},
+	}
+	for i, line := range uihelp.KeyMismatchLines(d) {
+		label := "Key"
+		if i > 0 {
+			label = ""
+		}
+		fields = append(fields, registry.Field{Label: label, Value: line})
 	}
 	if d.SyncedAt != nil {
 		fields = append(fields, registry.Field{Label: "Synced at", Value: agoPtr(d.SyncedAt)})

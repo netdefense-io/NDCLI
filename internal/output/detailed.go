@@ -93,6 +93,10 @@ func (f *DetailedFormatter) formatDeviceRich(d *models.Device) {
 	}
 	fmt.Fprintf(f.Writer, "%-12s %s\n", "Auto-Sync", autoSyncStr)
 	fmt.Fprintf(f.Writer, "  %-12s %s %s\n", "Online", OnlineIndicator(d.Online), OnlineLabel(d.Online))
+	if d.HasKeyMismatch() {
+		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Key", keyMismatchText(d))
+		writeKeyMismatchDetail(f.Writer, d, "  "+strings.Repeat(" ", 13))
+	}
 
 	// Details
 	fmt.Fprintf(f.Writer, "  %-12s %s\n", "Organization", d.Organization)

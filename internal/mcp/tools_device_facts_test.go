@@ -70,3 +70,32 @@ func TestDeviceMapsOmitAbsentFacts(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceMapsCarryKeyState(t *testing.T) {
+	var d models.Device
+	raw := `{"name":"bt007","key_state":"mismatch","key_state_detail":{"bound_kid":"aa","presented_kid":"bb","source":"auth","since":"2026-10-27T10:00:00Z"}}`
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		t.Fatal(err)
+	}
+	for name, m := range map[string]map[string]interface{}{"deviceSummary": deviceSummary(&d), "deviceFull": deviceFull(&d)} {
+		if m["key_state"] != "mismatch" || m["rebind_hint"] == nil || m["key_state_detail"] == nil || m["rebind_command"] != nil {
+			t.Fatalf("%s missing key state fields: %v", name, m)
+		}
+	}
+	clean := models.Device{Name: "ok"}
+	for name, m := range map[string]map[string]interface{}{"deviceSummary": deviceSummary(&clean), "deviceFull": deviceFull(&clean)} {
+		for _, k := range []string{"key_state", "key_state_detail", "rebind_hint", "rebind_command"} {
+			if _, ok := m[k]; ok {
+				t.Fatalf("%s grew %s for an unflagged device", name, k)
+			}
+		}
+	}
+}
+
+func TestDeviceKeyStateOmitsNilDetail(t *testing.T) {
+	d := models.Device{Name: "bt007", KeyState: models.KeyStateMismatch}
+	m := deviceFull(&d)
+	if _, ok := m["key_state_detail"]; ok {
+		t.Fatalf("nil detail must be omitted: %v", m)
+	}
+}

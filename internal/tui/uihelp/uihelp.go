@@ -224,3 +224,33 @@ func Plural(n int) string {
 	}
 	return "s"
 }
+
+// KeyMismatchPrefix prefixes a device name in a list row when the control plane
+// flags its key; a device without the flag comes back unchanged.
+func KeyMismatchPrefix(d *models.Device) string {
+	if d == nil {
+		return ""
+	}
+	if !d.HasKeyMismatch() {
+		return d.Name
+	}
+	return "[KEY] " + d.Name
+}
+
+// KeyMismatchLines is the warning, the exact rebind command and the evidence
+// for a device in key mismatch; nil for any other device.
+func KeyMismatchLines(d *models.Device) []string {
+	if d == nil || !d.HasKeyMismatch() {
+		return nil
+	}
+	lines := []string{"KEY MISMATCH - rebind required: " + d.RebindCommand()}
+	if k := d.KeyStateDetail; k != nil {
+		if k.BoundKID != "" || k.PresentedKID != "" {
+			lines = append(lines, "bound kid "+k.BoundKID+", presented kid "+k.PresentedKID)
+		}
+		if k.Since != "" {
+			lines = append(lines, "detected via "+k.Source+" since "+k.Since)
+		}
+	}
+	return lines
+}

@@ -30,6 +30,7 @@ type deviceAssoc struct {
 	templates []string
 	variables []models.Variable
 	vpn       []vpnMembership
+	device    *models.Device
 }
 
 // healthScreen is the per-device page: a summary header, the device's health
@@ -82,6 +83,7 @@ func (s *healthScreen) loadAssoc() tea.Cmd {
 
 		if dev, err := ctx.Svc.DeviceGet(c, ctx.Org, device); err == nil {
 			assoc.ous = dev.OrganizationalUnits
+			assoc.device = dev
 			seen := map[string]bool{}
 			for _, ou := range dev.OrganizationalUnits {
 				res, e := ctx.Svc.OUTemplateList(c, ctx.Org, ou)
@@ -252,7 +254,13 @@ func (s *healthScreen) summary() string {
 	if d.Sync.AgeSec != nil {
 		l2 += mutedStyle.Render(" · " + uihelp.HumanDuration(*d.Sync.AgeSec) + " ago")
 	}
-	return l1 + "\n" + l2
+	out := l1 + "\n" + l2
+	if s.assoc != nil {
+		for _, line := range uihelp.KeyMismatchLines(s.assoc.device) {
+			out += "\n" + errStyle.Render(line)
+		}
+	}
+	return out
 }
 
 func resourcesBody(sn *models.TelemetrySnapshot) []string {

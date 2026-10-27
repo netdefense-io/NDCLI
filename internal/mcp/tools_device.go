@@ -13,6 +13,10 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
+// deviceKeyStateDescription is the wording for the key mismatch fields on
+// both device tools.
+const deviceKeyStateDescription = "A device whose agent presents a key other than the one bound to it carries `key_state: \"mismatch\"`, `key_state_detail` (bound_kid, presented_kid, source, since) and `rebind_hint`: its tasks fail until it is rebound. `ndcli.device.rebind_token` only issues the token: a human must paste it into the device's OPNsense \"Re-bind Token\" field (Show Advanced) and the device is then re-approved (`ndcli.device.approve`); no MCP tool performs the paste. Those fields are absent when no mismatch is known."
+
 // deviceFactsDescription is the single wording for the agent-reported
 // facts on both device tools, so the two catalogs generated from the live
 // registry cannot describe the same object differently.
@@ -24,7 +28,7 @@ func (s *Server) registerDeviceTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.device.list",
 		Description: "List managed firewall devices in an organization with optional filtering. " +
-			deviceFactsDescription,
+			deviceFactsDescription + " " + deviceKeyStateDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -50,7 +54,7 @@ func (s *Server) registerDeviceTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.device.describe",
 		Description: "Get detailed information about a specific device. " +
-			deviceFactsDescription,
+			deviceFactsDescription + " " + deviceKeyStateDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -586,7 +590,21 @@ func deviceSummary(d *models.Device) map[string]interface{} {
 		"created_at":           d.CreatedAt,
 	}
 	addDeviceFacts(m, d)
+	addDeviceKeyState(m, d)
 	return m
+}
+
+// addDeviceKeyState attaches the key mismatch flag, only for a device the
+// control plane flags: absent fields mean nothing is known to be wrong.
+func addDeviceKeyState(m map[string]interface{}, d *models.Device) {
+	if !d.HasKeyMismatch() {
+		return
+	}
+	m["key_state"] = d.KeyState
+	if d.KeyStateDetail != nil {
+		m["key_state_detail"] = d.KeyStateDetail
+	}
+	m["rebind_hint"] = "Issue a rebind token with ndcli.device.rebind_token for device '" + d.Name + "', then a human must paste it into the device's OPNsense 'Re-bind Token' field (Show Advanced) and re-approve the device (ndcli.device.approve). No MCP tool performs the paste."
 }
 
 // addDeviceFacts attaches the agent-reported facts, and only when the device
@@ -615,5 +633,6 @@ func deviceFull(d *models.Device) map[string]interface{} {
 		"created_at":           d.CreatedAt,
 	}
 	addDeviceFacts(m, d)
+	addDeviceKeyState(m, d)
 	return m
 }

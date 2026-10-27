@@ -172,8 +172,12 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 			syncedAt = RelativeTimeShort(d.SyncedAt.Time)
 		}
 
+		name := d.Name
+		if d.HasKeyMismatch() {
+			name += " " + keyMismatchBadge()
+		}
 		table.Append([]string{
-			d.Name,
+			name,
 			StatusWithIcon(d.Status),
 			OnlineIndicator(d.Online) + " " + OnlineLabel(d.Online),
 			ou,
@@ -185,6 +189,11 @@ func (f *TableFormatter) FormatDevices(devices []models.Device, total int, quota
 	}
 
 	table.Render()
+	for _, d := range devices {
+		if d.HasKeyMismatch() {
+			fmt.Fprintf(os.Stdout, "\n%s: %s\n", d.Name, keyMismatchText(&d))
+		}
+	}
 	if quota != nil {
 		fmt.Fprintf(os.Stdout, "\n%s\n", formatQuotaFooter("enabled devices", quota))
 	}
@@ -198,6 +207,10 @@ func (f *TableFormatter) FormatDevice(device *models.Device) error {
 	fmt.Printf("Status:       %s\n", ColoredStatus(device.Status))
 	fmt.Printf("Online:       %s %s\n", OnlineIndicator(device.Online), OnlineLabel(device.Online))
 	fmt.Printf("Organization: %s\n", device.Organization)
+	if device.HasKeyMismatch() {
+		fmt.Printf("Key:          %s\n", keyMismatchText(device))
+		writeKeyMismatchDetail(os.Stdout, device, "              ")
+	}
 
 	// OUs
 	if len(device.OrganizationalUnits) > 0 {
