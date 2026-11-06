@@ -56,7 +56,7 @@ Pre-built archives for macOS (amd64/arm64), Linux (amd64/arm64), and Windows (am
 
 ### From source
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ```bash
 git clone https://github.com/netdefense-io/NDCLI.git
@@ -89,11 +89,11 @@ Every command dispatched to a device is **Ed25519-signed**, covering the operati
 
 The limit that *is* enforced against a caller who already holds write access is set on the device, not here: NDAgent's remote-access policy caps every session at `full`, `readonly` (web UI only — no shell, no SSH, no exec stream) or `disabled`, and the control plane cannot raise it.
 
-Full writeup, threat model, and what you can verify yourself against this source: **https://netdefense.io/security**
+Full writeup and threat model: **https://netdefense.io/security**
 
 ## What's open source
 
-NDAgent and NDCLI (this repo) — the daemon that runs on your firewall, and the CLI/MCP server you run from your workstation — are open source under **Apache-2.0**. Read them, build them yourself, audit the signing, the agent's operation set and the MCP tool definitions directly; none of the security model above asks you to take our word for it, including the parts that describe its limits.
+NDAgent and NDCLI (this repo) — the daemon that runs on your firewall, and the CLI/MCP server you run from your workstation — are open source under **Apache-2.0**. The source is public, so your team can also review the code that runs on your firewall and your workstation: build it from source, and read how the agent verifies signed commands, the agent's operation set and the MCP tool definitions directly.
 
 The control plane that coordinates a fleet — the API, the web app, scheduling, and the device relay — is closed-source SaaS, with a free tier for personal use. See [netdefense.io/pricing](https://netdefense.io/pricing) for details.
 

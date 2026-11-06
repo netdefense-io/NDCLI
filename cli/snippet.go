@@ -37,11 +37,12 @@ var snippetCreateCmd = &cobra.Command{
 	RunE:  runSnippetCreate,
 }
 
-// snippetCreateLong documents AUTH_SERVER, AUTH_ORDER, TRUST_CA and
-// TRUST_CERT inline, since their content is free-form JSON with no
+// snippetCreateLong documents AUTH_SERVER, AUTH_ORDER, TRUST_CA, TRUST_CERT
+// and CROWDSEC_SETTINGS inline, since their content is free-form JSON with no
 // dedicated flags of its own. models.SnippetUUIDGuidance,
 // models.SnippetFieldContract, models.AuthOrderConsistencyRule,
-// models.AuthPrerequisites and models.TrustPrerequisites are the sentences
+// models.AuthPrerequisites, models.TrustPrerequisites and
+// models.CrowdsecPrerequisites are the sentences
 // other surfaces (MCP tools, docs) must state identically, so they are
 // shared constants rather than literals here.
 const snippetCreateLong = `Create a new snippet.
@@ -159,7 +160,26 @@ TRUST_CA or TRUST_CERT snippet needs org:su from an interactive login
 (ndcli auth login). A token is not enough: personal access tokens are
 capped at org:rw.
 
-Prerequisites: ` + models.TrustPrerequisites + `.`
+Prerequisites: ` + models.TrustPrerequisites + `.
+
+CROWDSEC_SETTINGS content:
+
+CROWDSEC_SETTINGS sets the os-crowdsec plugin's general settings on a device.
+Content is one JSON object of at least one key; a key left out keeps the
+device's value. Leave uuid out.
+
+  {"agent_enabled": true, "lapi_enabled": true, "firewall_bouncer_enabled": true,
+   "rules_enabled": true, "rules_log": false, "rules_tag": "", "crowdsec_firewall_verbose": false,
+   "enroll_key": "${CROWDSEC_ENROLL_KEY}"}
+
+- The six switches are JSON booleans. rules_tag and enroll_key are 1 to 63
+  letters and digits, or "", and may be exactly ${VAR_NAME}.
+- Keep the enrollment key in a secret variable, entered without echo:
+  'ndcli variable org create CROWDSEC_ENROLL_KEY --secret --value-stdin'.
+- Singleton: ` + models.SingletonPriorityRule + `
+- Removing the snippet leaves the device as it is.
+
+Prerequisites: ` + models.CrowdsecPrerequisites + `.`
 
 var snippetDescribeCmd = &cobra.Command{
 	Use:               "describe [name]",
@@ -197,6 +217,7 @@ var snippetRenameCmd = &cobra.Command{
 var snippetSetPriorityCmd = &cobra.Command{
 	Use:               "set-priority [name] [priority]",
 	Short:             "Set snippet priority",
+	Long:              "Set a snippet's priority (1-60000). " + models.SingletonPriorityRule,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSnippets,
 	RunE:              runSnippetSetPriority,
@@ -241,6 +262,9 @@ Matching behavior:
 - For ZABBIX_SETTINGS: Singleton — there is nothing to match on the device, so
   the match key only feeds the derived snippet name (--name sets it exactly);
   the agent returns the full Zabbix Agent settings tree
+- For CROWDSEC_SETTINGS: Singleton, like ZABBIX_SETTINGS — the match key only
+  feeds the derived snippet name; the agent returns the plugin's general
+  settings (enroll_key included, in clear: replace it with a ${VAR} reference)
 - For ZABBIX_USERPARAMETER: Exact UserParameter key (e.g., nd-cpu-temp)
 - For ZABBIX_ALIAS: Exact item-alias key (e.g., nd-uname)
 

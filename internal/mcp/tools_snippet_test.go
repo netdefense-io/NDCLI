@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 // TestSnippetCreateEnum_IncludesAUTHTypes guards ndcli.snippet.create's
@@ -214,5 +216,44 @@ func TestHandleSnippetCreate_SendsTRUSTCertContentUnmodified(t *testing.T) {
 	}
 	if gotContent != content {
 		t.Errorf("request content changed in transit:\ngot:  %q\nwant: %q", gotContent, content)
+	}
+}
+
+func TestSnippetCrowdsecSettings_InEnumsAndCreateDescription(t *testing.T) {
+	for tool, prop := range map[string]string{
+		"ndcli.snippet.create": "type",
+		"ndcli.snippet.pull":   "config_type",
+	} {
+		got := schemaPropertyEnum(t, registeredToolSchema(t, tool), prop)
+		if !slices.Contains(got, "CROWDSEC_SETTINGS") {
+			t.Errorf("%s %s enum = %v, missing CROWDSEC_SETTINGS", tool, prop, got)
+		}
+	}
+
+	cs := connectTestClient(t)
+	for tool, err := range cs.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatalf("tools/list: %v", err)
+		}
+		if tool.Name != "ndcli.snippet.create" {
+			continue
+		}
+		for _, want := range []string{models.CrowdsecPrerequisites, models.SingletonPriorityRule} {
+			if !strings.Contains(tool.Description, want) {
+				t.Errorf("ndcli.snippet.create description lacks %q: %s", want, tool.Description)
+			}
+		}
+	}
+}
+
+func TestSnippetSetPriorityDescription_StatesSingletonRule(t *testing.T) {
+	cs := connectTestClient(t)
+	for tool, err := range cs.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatalf("tools/list: %v", err)
+		}
+		if tool.Name == "ndcli.snippet.set_priority" && !strings.Contains(tool.Description, models.SingletonPriorityRule) {
+			t.Errorf("set_priority description lacks the singleton rule: %s", tool.Description)
+		}
 	}
 }

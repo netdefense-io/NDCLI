@@ -117,8 +117,9 @@ func (s *Server) registerSnippetTools() {
 	}, s.handleSnippetDescribe)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.snippet.create",
-		Description: "Create a new snippet. Content must be supplied inline. " + models.SnippetUUIDGuidance + " " + models.SnippetFieldContract + suOnlyTypesNote,
+		Name: "ndcli.snippet.create",
+		Description: "Create a new snippet. Content must be supplied inline. " + models.SnippetUUIDGuidance + " " + models.SnippetFieldContract +
+			" CROWDSEC_SETTINGS prerequisites: " + models.CrowdsecPrerequisites + ". " + models.SingletonPriorityRule + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -164,7 +165,7 @@ func (s *Server) registerSnippetTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.snippet.set_priority",
-		Description: "Update a snippet's priority (1-60000). Requires confirm=true." + suOnlyTypesNote,
+		Description: "Update a snippet's priority (1-60000). " + models.SingletonPriorityRule + " Requires confirm=true." + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

@@ -21,9 +21,10 @@ import (
 // Secret value input, at every scope (org/ou/template/device).
 //
 // A variable's value can be an AUTH_SERVER's ldap_bindpw secret reference
-// target, or an override of one — a value nobody should have to type as a
-// literal command-line argument, where it sits in shell history and in
-// `ps` output for the life of the process. `--value-stdin` and, absent
+// target, a CROWDSEC_SETTINGS enroll_key, or an override of either — a
+// value nobody should have to type as a literal command-line argument,
+// where it sits in shell history and in `ps` output for the life of the
+// process. `--value-stdin` and, absent
 // that, an interactive no-echo prompt are the two ways in that never do
 // that.
 

@@ -123,3 +123,11 @@ func TestSnippetTypeListsHaveNoDuplicates(t *testing.T) {
 		}
 	}
 }
+
+func TestSnippetTypes_CrowdsecSettingsCreatableAndPullable(t *testing.T) {
+	for name, list := range map[string][]string{"creatable": SnippetCreatableTypes, "pullable": SnippetPullableTypes} {
+		if !slices.Contains(list, "CROWDSEC_SETTINGS") {
+			t.Errorf("CROWDSEC_SETTINGS missing from the %s list: %v", name, list)
+		}
+	}
+}

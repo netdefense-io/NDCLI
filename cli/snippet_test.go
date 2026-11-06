@@ -262,3 +262,34 @@ func TestSnippetCreateLong_TRUSTContentShapesMatchTheirKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestSnippetTypeFlags_CrowdsecSettingsCreatableAndPullable(t *testing.T) {
+	for name, help := range map[string]string{
+		"create": snippetCreateCmd.Flags().Lookup("type").Usage,
+		"list":   snippetListCmd.Flags().Lookup("type").Usage,
+		"pull":   snippetPullCmd.Flags().Lookup("type").Usage,
+	} {
+		if !strings.Contains(help, "CROWDSEC_SETTINGS") {
+			t.Errorf("%s --type help does not mention CROWDSEC_SETTINGS, got: %s", name, help)
+		}
+	}
+}
+
+func TestSnippetCreateLong_StatesCrowdsecPrerequisitesAndSingletonRule(t *testing.T) {
+	flat := strings.Join(strings.Fields(snippetCreateCmd.Long), " ")
+	if !strings.Contains(flat, "Prerequisites: "+models.CrowdsecPrerequisites) {
+		t.Errorf("create --help must state the CrowdSec prerequisites verbatim, got: %s", snippetCreateCmd.Long)
+	}
+	if !strings.Contains(flat, models.SingletonPriorityRule) {
+		t.Errorf("create --help must state the singleton priority rule, got: %s", snippetCreateCmd.Long)
+	}
+}
+
+func TestSnippetPullLong_DocumentsCrowdsecSingleton(t *testing.T) {
+	if !strings.Contains(snippetPullCmd.Long, "- For CROWDSEC_SETTINGS: Singleton") {
+		t.Errorf("pull --help must document CROWDSEC_SETTINGS as a singleton, got: %s", snippetPullCmd.Long)
+	}
+	if !strings.Contains(snippetSetPriorityCmd.Long, models.SingletonPriorityRule) {
+		t.Errorf("set-priority --help must state the singleton priority rule, got: %s", snippetSetPriorityCmd.Long)
+	}
+}

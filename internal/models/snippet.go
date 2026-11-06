@@ -33,6 +33,7 @@ var SnippetCreatableTypes = []string{
 	"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
 	"AUTH_SERVER", "AUTH_ORDER",
 	"TRUST_CA", "TRUST_CERT",
+	"CROWDSEC_SETTINGS",
 }
 
 // SnippetPullableTypes are the snippet types offered by `snippet pull
@@ -59,6 +60,7 @@ var SnippetPullableTypes = []string{
 	"USER", "GROUP", "ALIAS", "RULE",
 	"UNBOUND_HOST_OVERRIDE", "UNBOUND_DOMAIN_FORWARD", "UNBOUND_HOST_ALIAS", "UNBOUND_ACL",
 	"ZABBIX_SETTINGS", "ZABBIX_USERPARAMETER", "ZABBIX_ALIAS",
+	"CROWDSEC_SETTINGS",
 }
 
 // SnippetTypesHelp renders a type list for flag help and error text: a
@@ -114,6 +116,16 @@ const AuthPrerequisites = "ndagent 1.19.2 or later, OPNsense 26.1.6 or later, re
 // fails its build with TRUST_AGENT_TOO_OLD; one below the OPNsense floor
 // has trust changes refused with TRUST_OPNSENSE_TOO_OLD.
 const TrustPrerequisites = "ndagent 1.21.0 or later, OPNsense 26.1.11 or later, an unencrypted private key (TRUST_CERT), reject_dangerous_snippets off"
+
+// CrowdsecPrerequisites is the exact minimum-version/plugin line every
+// CROWDSEC_SETTINGS-facing surface states. On a device without the plugin
+// the snippet is skipped; an older agent fails its build with
+// SNIPPET_AGENT_TOO_OLD.
+const CrowdsecPrerequisites = "ndagent 1.29.0 or later, the os-crowdsec plugin installed on the device"
+
+// SingletonPriorityRule is the one-line rule for snippet types of which a
+// device uses only one (ZABBIX_SETTINGS, CROWDSEC_SETTINGS).
+const SingletonPriorityRule = "For a singleton type (ZABBIX_SETTINGS, CROWDSEC_SETTINGS) the snippet with the lowest priority number is the one applied; a tie for it fails the device's sync with SNIPPET_SINGLETON_CONFLICT."
 
 // SnippetListResponse represents a paginated list of snippets
 type SnippetListResponse struct {

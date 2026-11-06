@@ -49,6 +49,12 @@ func TestSyncApplyFormatters_ShowTheDeviceErrorCode(t *testing.T) {
 				"or later, or edit what is listed: allow-https (RULE: fields it ignores: log)",
 			Code: "SNIPPET_AGENT_TOO_OLD",
 		},
+		{
+			DeviceName: "e2e-a",
+			Error: "More than one CROWDSEC_SETTINGS snippet on this device has the winning priority 1000 " +
+				"(snippets: crowdsec-a, crowdsec-b). Give one of them a lower priority number",
+			Code: "SNIPPET_SINGLETON_CONFLICT",
+		},
 	} {
 		t.Run(devErr.Code, func(t *testing.T) {
 			resp := makeSyncResponse(devErr)
