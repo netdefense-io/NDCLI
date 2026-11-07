@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // RelayClient is a WebSocket client that connects to the Pathfinder relay server
@@ -48,9 +52,106 @@ type RelayClient struct {
 	streamManager   *StreamManager
 	streamManagerMu sync.RWMutex
 
+	// endReason records why the session ended (first writer wins); done is
+	// closed at the same time.
+	endMu     sync.Mutex
+	endReason string
+	done      chan struct{}
+	doneOnce  sync.Once
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// RateLimitedError is returned when the relay refuses the WebSocket upgrade
+// with HTTP 429.
+type RateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitedError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("relay is rate limiting new sessions (HTTP 429); retry in %s", e.RetryAfter.Round(time.Second))
+	}
+	return "relay is rate limiting new sessions (HTTP 429); retry in a few seconds"
+}
+
+// parseRetryAfter reads a Retry-After header given either as seconds or as an
+// HTTP date. It returns 0 when absent or unparseable.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+const maxReasonRunes = 200
+
+// cleanReason makes relay-supplied text safe to print on a terminal: control
+// characters (escape sequences included) are removed and it is cut to one
+// line of bounded length.
+func cleanReason(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, sanitize.String(s))
+	if r := []rune(s); len(r) > maxReasonRunes {
+		s = string(r[:maxReasonRunes])
+	}
+	return strings.TrimSpace(s)
+}
+
+// closeReasonText turns a relay close frame into a user-facing reason.
+func closeReasonText(code int, text string) string {
+	if text = cleanReason(text); text != "" {
+		return text
+	}
+	switch code {
+	case websocket.CloseNormalClosure:
+		return "session closed by the relay"
+	case websocket.CloseGoingAway:
+		return "relay is restarting"
+	}
+	return fmt.Sprintf("relay closed the connection (code %d)", code)
+}
+
+// Done is closed when the relay session has ended for any reason.
+func (c *RelayClient) Done() <-chan struct{} { return c.done }
+
+// EndReason returns why the session ended, or "" while it is still running.
+func (c *RelayClient) EndReason() string {
+	c.endMu.Lock()
+	defer c.endMu.Unlock()
+	return c.endReason
+}
+
+func (c *RelayClient) recordEnd(reason string) {
+	c.endMu.Lock()
+	if c.endReason == "" {
+		c.endReason = reason
+	}
+	c.endMu.Unlock()
+}
+
+// markEnded records the reason (first one wins) and signals Done.
+func (c *RelayClient) markEnded(reason string) {
+	c.recordEnd(reason)
+	c.doneOnce.Do(func() { close(c.done) })
 }
 
 // NewRelayClient creates a new relay client
@@ -64,6 +165,7 @@ func NewRelayClient(serverURL, sessionKey string, sslVerify bool) *RelayClient {
 		sendChan:   make(chan []byte, 1024),
 		binaryChan: make(chan []byte, 4096),
 		handlers:   make(map[MessageType][]func(*Message)),
+		done:       make(chan struct{}),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -82,8 +184,11 @@ func (c *RelayClient) Connect() error {
 	}
 
 	headers := http.Header{}
-	conn, _, err := dialer.Dial(c.serverURL, headers)
+	conn, resp, err := dialer.DialContext(c.ctx, c.serverURL, headers)
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+			return &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+		}
 		return fmt.Errorf("websocket dial failed: %w", err)
 	}
 
@@ -239,6 +344,12 @@ func (c *RelayClient) Close() error {
 	c.setRegistered(false)
 	c.setPaired(false)
 
+	// Don't wait the full 60 s read deadline for a peer that never answers
+	// our close frame.
+	if c.conn != nil {
+		c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	}
+
 	c.wg.Wait() // Wait for pumps to finish (writePump sends close frame)
 
 	if c.conn != nil {
@@ -320,8 +431,14 @@ func (c *RelayClient) writePump() {
 
 func (c *RelayClient) readPump() {
 	defer c.wg.Done()
-	defer c.setConnected(false)
-	defer c.closeAllStreams() // Close all streams when connection dies
+	defer func() {
+		// The end reason must be recorded before the streams close, so a
+		// reader woken by the close already sees it.
+		c.recordEnd("connection to the relay was lost")
+		c.setConnected(false)
+		c.closeAllStreams()
+		c.markEnded("connection to the relay was lost")
+	}()
 
 	c.conn.SetReadLimit(maxFrameDataLen) // matches DecodeFrame's cap on a single frame payload
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -343,6 +460,7 @@ func (c *RelayClient) readPump() {
 	// Handle close frames from server
 	c.conn.SetCloseHandler(func(code int, text string) error {
 		debugLog("Received close frame: code=%d, text=%s", code, text)
+		c.recordEnd(closeReasonText(code, text))
 		return nil
 	})
 
@@ -413,8 +531,15 @@ func (c *RelayClient) dispatchMessage(msg *Message) {
 
 	// Handle peer offline notification
 	if msg.Type == MsgTypePeerOffline {
+		wasPaired := c.IsPaired()
 		c.setPeerOnline(false)
 		c.setPaired(false)
+		if wasPaired {
+			c.recordEnd("device went offline")
+			c.setConnected(false)
+			c.closeAllStreams()
+			c.markEnded("device went offline")
+		}
 	}
 
 	c.handlersMu.RLock()

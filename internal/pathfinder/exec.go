@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -91,6 +92,46 @@ type ExecHandle struct {
 	// the handle has been torn down.
 	closedCh  chan struct{}
 	closeOnce sync.Once
+
+	// deadCh is closed when the reader goroutine exits, whether the handle
+	// was closed locally or the session ended remotely.
+	deadCh chan struct{}
+
+	// abandoned holds the IDs of requests whose Exec returned before the
+	// result frame (timeout, cancellation, output cap). Their late frames are
+	// skipped by the next Exec instead of being taken for a stream desync.
+	abandoned      map[string]struct{}
+	abandonedOrder []string
+	abandonedMu    sync.Mutex
+}
+
+// maxAbandonedRequests bounds the late-frame bookkeeping of a long-lived
+// session whose commands keep timing out.
+const maxAbandonedRequests = 64
+
+// Done is closed once the exec stream is no longer readable.
+func (h *ExecHandle) Done() <-chan struct{} { return h.deadCh }
+
+// EndReason says why the session ended, as reported by the relay. It is ""
+// while the session is alive.
+func (h *ExecHandle) EndReason() string {
+	if h.relay == nil {
+		return ""
+	}
+	return h.relay.EndReason()
+}
+
+// SessionEndedError reports that the console session ended while a command
+// was running or about to run.
+type SessionEndedError struct{ Reason string }
+
+func (e *SessionEndedError) Error() string { return "console session ended: " + e.Reason }
+
+func (h *ExecHandle) endedError() error {
+	if reason := h.EndReason(); reason != "" {
+		return &SessionEndedError{Reason: reason}
+	}
+	return &SessionEndedError{Reason: "exec stream closed by the device"}
 }
 
 // ConnectExec establishes a Pathfinder relay connection, waits for pairing,
@@ -98,14 +139,21 @@ type ExecHandle struct {
 // interactive loop. The persistent reader goroutine is started here and
 // stopped only when Close() is called. The caller must call Close() when done.
 func (c *Client) ConnectExec() (*ExecHandle, error) {
+	return c.ConnectExecContext(context.Background())
+}
+
+// ConnectExecContext is ConnectExec that gives up, and closes the relay
+// connection, as soon as ctx is done.
+func (c *Client) ConnectExecContext(ctx context.Context) (*ExecHandle, error) {
 	wsURL := c.buildWebSocketURL()
 
 	c.progress("Connecting to relay server...")
 
-	relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
-	if err := relay.Connect(); err != nil {
-		return nil, &PathfinderError{Message: "failed to connect to relay: " + err.Error()}
+	relay, stopWatch, err := c.dialRelay(ctx, wsURL)
+	if err != nil {
+		return nil, err
 	}
+	defer stopWatch()
 
 	if err := relay.WaitForRegistration(10 * time.Second); err != nil {
 		relay.Close()
@@ -136,6 +184,7 @@ func (c *Client) ConnectExec() (*ExecHandle, error) {
 		relay:      relay,
 		frameCh:    make(chan frameMsg, 256),
 		closedCh:   make(chan struct{}),
+		deadCh:     make(chan struct{}),
 	}
 
 	// Start the single persistent reader goroutine. It exits when the exec
@@ -169,17 +218,21 @@ func (h *ExecHandle) readerLoop() {
 	// Capture the stream once at startup. Close() may nilify the handle fields
 	// later, but this goroutine holds its own reference and is unaffected.
 	s := h.activeStream()
+	if h.deadCh != nil {
+		defer close(h.deadCh)
+	}
 	buf := make([]byte, 64*1024)
 	for {
 		n, readErr := s.Read(buf)
 		if readErr != nil {
 			// Stream closed (EOF from Close() or relay drop). Deliver the
 			// error to any waiting Exec() call, then exit.
-			if readErr != io.EOF {
-				select {
-				case h.frameCh <- frameMsg{err: readErr}:
-				case <-h.closedCh:
-				}
+			if readErr == io.EOF {
+				readErr = h.endedError()
+			}
+			select {
+			case h.frameCh <- frameMsg{err: readErr}:
+			case <-h.closedCh:
 			}
 			return
 		}
@@ -222,17 +275,36 @@ func (h *ExecHandle) readerLoop() {
 // Exec must be called serially (never concurrently for the same session). The
 // MCP layer enforces this with consoleSession.mu.
 func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Duration) (stdout, stderr string, exitCode int, truncated bool, err error) {
+	var reqID string
+	defer func() {
+		if err != nil && reqID != "" && !errors.As(err, new(*SessionEndedError)) {
+			h.abandonedMu.Lock()
+			if h.abandoned == nil {
+				h.abandoned = make(map[string]struct{})
+			}
+			if len(h.abandonedOrder) >= maxAbandonedRequests {
+				delete(h.abandoned, h.abandonedOrder[0])
+				h.abandonedOrder = h.abandonedOrder[1:]
+			}
+			h.abandoned[reqID] = struct{}{}
+			h.abandonedOrder = append(h.abandonedOrder, reqID)
+			h.abandonedMu.Unlock()
+		}
+	}()
 	// Reject calls on a closed handle immediately.
 	select {
 	case <-h.closedCh:
 		return "", "", -1, false, fmt.Errorf("exec handle is closed")
+	case <-h.deadCh:
+		return "", "", -1, false, h.endedError()
 	default:
 	}
 
-	reqID, err := newUUID()
+	id, err := newUUID()
 	if err != nil {
 		return "", "", -1, false, fmt.Errorf("generate request id: %w", err)
 	}
+	reqID = id
 
 	timeoutSecs := int(timeout.Seconds())
 	if timeoutSecs <= 0 {
@@ -250,6 +322,9 @@ func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Dura
 
 	// Send the request as a single FrameTypeData payload on the exec stream.
 	if _, writeErr := h.activeStream().Write(reqBytes); writeErr != nil {
+		if h.relay != nil && h.relay.EndReason() != "" {
+			return "", "", -1, false, h.endedError()
+		}
 		return "", "", -1, false, fmt.Errorf("write exec request: %w", writeErr)
 	}
 
@@ -266,6 +341,10 @@ func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Dura
 
 		case fm := <-h.frameCh:
 			if fm.err != nil {
+				var ended *SessionEndedError
+				if errors.As(fm.err, &ended) {
+					return "", "", -1, false, fm.err
+				}
 				return "", "", -1, false, fmt.Errorf("exec stream error: %w", fm.err)
 			}
 			resp := fm.resp
@@ -276,6 +355,22 @@ func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Dura
 				stderrBuf = append(stderrBuf, decodedStderr...)
 				return "", string(stderrBuf), resp.ExitCode, resp.Truncated,
 					fmt.Errorf("agent rejected request (exit_code=%d)", resp.ExitCode)
+			}
+
+			h.abandonedMu.Lock()
+			_, stale := h.abandoned[resp.ID]
+			if stale && resp.Type == "result" {
+				delete(h.abandoned, resp.ID)
+				for i, id := range h.abandonedOrder {
+					if id == resp.ID {
+						h.abandonedOrder = append(h.abandonedOrder[:i], h.abandonedOrder[i+1:]...)
+						break
+					}
+				}
+			}
+			h.abandonedMu.Unlock()
+			if stale {
+				continue
 			}
 
 			// ID mismatch guard — protects against stream desync.
@@ -329,6 +424,10 @@ func (h *ExecHandle) Close() {
 		if h.closedCh != nil {
 			close(h.closedCh)
 		}
+		h.abandonedMu.Lock()
+		h.abandoned = nil
+		h.abandonedOrder = nil
+		h.abandonedMu.Unlock()
 
 		// Close whichever stream is active (production or test override).
 		// This unblocks readerLoop's pending Read() call (returns io.EOF).

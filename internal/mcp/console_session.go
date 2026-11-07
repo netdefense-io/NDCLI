@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -39,6 +40,31 @@ type consoleSession struct {
 	lastActivity time.Time
 }
 
+// lock takes mu, or returns ctx's error if ctx ends first. The caller unlocks
+// mu on a nil return.
+func (s *consoleSession) lock(ctx context.Context) error {
+	acquired := make(chan struct{})
+	go func() {
+		s.mu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-acquired:
+			return nil
+		default:
+		}
+		go func() {
+			<-acquired
+			s.mu.Unlock()
+		}()
+		return ctx.Err()
+	}
+}
+
 // updateActivity records the current time as the session's last-activity
 // timestamp. Safe to call concurrently with reapIdle / getLastActivity —
 // guarded by actMu, independent of the Exec-serialising mu.
@@ -63,13 +89,21 @@ type ConsoleSessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*consoleSession
 	done     chan struct{}
+
+	// closed remembers why recently ended sessions went away, so a later
+	// call gets the reason instead of a bare "not found".
+	closed      map[string]string
+	closedOrder []string
 }
+
+const maxClosedSessionsRemembered = 100
 
 // newConsoleSessionManager creates and starts the manager, including the
 // background idle reaper goroutine.
 func newConsoleSessionManager() *ConsoleSessionManager {
 	m := &ConsoleSessionManager{
 		sessions: make(map[string]*consoleSession),
+		closed:   make(map[string]string),
 		done:     make(chan struct{}),
 	}
 	go m.reaperLoop()
@@ -82,13 +116,62 @@ func (m *ConsoleSessionManager) Add(sess *consoleSession) {
 	m.mu.Lock()
 	m.sessions[sess.sessionID] = sess
 	m.mu.Unlock()
+	go m.watch(sess)
+}
+
+// watch removes the session when the relay or the device ends it, keeping the
+// reason for later calls.
+func (m *ConsoleSessionManager) watch(sess *consoleSession) {
+	select {
+	case <-sess.handle.Done():
+	case <-m.done:
+		return
+	}
+	reason := sess.handle.EndReason()
+	if reason == "" {
+		reason = "exec stream closed by the device"
+	}
+	m.removeWithReason(sess.sessionID, reason)
+}
+
+func (m *ConsoleSessionManager) rememberClosed(id, reason string) {
+	m.closed[id] = reason
+	m.closedOrder = append(m.closedOrder, id)
+	if len(m.closedOrder) > maxClosedSessionsRemembered {
+		delete(m.closed, m.closedOrder[0])
+		m.closedOrder = m.closedOrder[1:]
+	}
+}
+
+// removeWithReason is Remove for a session that ended on its own: it records
+// the reason so Get can report it.
+func (m *ConsoleSessionManager) removeWithReason(sessionID, reason string) bool {
+	m.mu.Lock()
+	sess := m.sessions[sessionID]
+	if sess != nil {
+		delete(m.sessions, sessionID)
+		m.rememberClosed(sessionID, reason)
+	}
+	m.mu.Unlock()
+	if sess == nil {
+		return false
+	}
+	sess.handle.Close()
+	return true
 }
 
 // Get retrieves a session by ID. Returns (nil, error) if not found.
 func (m *ConsoleSessionManager) Get(sessionID string) (*consoleSession, error) {
 	m.mu.RLock()
 	sess := m.sessions[sessionID]
+	reason, wasClosed := m.closed[sessionID]
 	m.mu.RUnlock()
+	if sess == nil && wasClosed {
+		return nil, &ToolError{
+			Code:    "SESSION_CLOSED",
+			Message: fmt.Sprintf("console session %q ended: %s. Open a new session with console_open.", sessionID, reason),
+		}
+	}
 	if sess == nil {
 		return nil, &ToolError{
 			Code:    "SESSION_NOT_FOUND",
@@ -172,6 +255,6 @@ func (m *ConsoleSessionManager) reapIdle() {
 	m.mu.RUnlock()
 
 	for _, id := range idle {
-		m.Remove(id)
+		m.removeWithReason(id, "closed after 30 minutes without activity")
 	}
 }

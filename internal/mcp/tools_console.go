@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -185,13 +186,14 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 		})
 	}
 
-	handle, pfErr := pfClient.ConnectExec()
+	handle, pfErr := pfClient.ConnectExecContext(ctx)
 	if pfErr != nil {
-		return s.errorResult(&service.Error{
-			Code:    service.CodeAPIError,
-			Message: "relay connect failed: " + pfErr.Error(),
-			Err:     pfErr,
-		})
+		return s.relayConnectErrorResult(pfErr)
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		handle.Close()
+		return s.errorResult(&service.Error{Code: service.CodeAPIError, Message: "console_open cancelled before the session was handed back: " + ctxErr.Error(), Err: ctxErr})
 	}
 
 	sessionID, genErr := newConsoleSessionID()
@@ -248,8 +250,16 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 		return s.errorResult(lookupErr)
 	}
 
-	// Serialise commands within the session — one in-flight at a time.
-	sess.mu.Lock()
+	// Serialise commands within the session — one in-flight at a time. A
+	// caller queued behind a long command stops waiting when its own request
+	// is cancelled.
+	if lockErr := sess.lock(ctx); lockErr != nil {
+		code := "CANCELLED"
+		if errors.Is(lockErr, context.DeadlineExceeded) {
+			code = "TIMEOUT"
+		}
+		return s.errorResult(&ToolError{Code: code, Message: "gave up waiting for the previous command on this session: " + lockErr.Error()})
+	}
 	defer sess.mu.Unlock()
 
 	execResult, execErr := s.svc.ExecOnHandle(ctx, sess.handle, service.ConsoleExecOpts{
@@ -257,7 +267,7 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 		TimeoutSeconds: input.TimeoutSeconds,
 	})
 	if execErr != nil {
-		return s.errorResult(execErr)
+		return s.consoleExecErrorResult(input.SessionID, execErr)
 	}
 
 	sess.updateActivity()
@@ -277,6 +287,32 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 		"exit_code": execResult.ExitCode,
 		"truncated": execResult.Truncated,
 	}, "")
+}
+
+// relayConnectErrorResult reports a failed relay dial. A relay 429 gets its own
+// code and a retry_after_seconds field (0 when the relay gave no Retry-After).
+func (s *Server) relayConnectErrorResult(err error) (*mcp.CallToolResult, error) {
+	var rl *pathfinder.RateLimitedError
+	if errors.As(err, &rl) {
+		return s.errorResultWithData(
+			&ToolError{Code: "RATE_LIMITED", Message: err.Error()},
+			map[string]interface{}{"retry_after_seconds": int(rl.RetryAfter.Round(time.Second) / time.Second)},
+		)
+	}
+	return s.errorResult(&service.Error{Code: service.CodeAPIError, Message: err.Error(), Err: err})
+}
+
+// consoleExecErrorResult reports a failed exec. A session that ended while the
+// command ran gets the same SESSION_CLOSED code as one found already gone.
+func (s *Server) consoleExecErrorResult(sessionID string, err error) (*mcp.CallToolResult, error) {
+	var ended *pathfinder.SessionEndedError
+	if errors.As(err, &ended) {
+		return s.errorResult(&ToolError{
+			Code:    "SESSION_CLOSED",
+			Message: fmt.Sprintf("console session %q ended: %s. Open a new session with console_open.", sessionID, ended.Reason),
+		})
+	}
+	return s.errorResult(err)
 }
 
 func (s *Server) handleConsoleClose(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

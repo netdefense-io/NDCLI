@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -235,4 +237,49 @@ func TestConsoleSession_ConcurrentActivityAccess(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+// TestConsoleSessionManager_RemoveWithReasonReportsReason verifies that a
+// session that ended on its own is gone from the manager and that Get says
+// why, instead of reporting a bare "not found".
+func TestConsoleSessionManager_RemoveWithReasonReportsReason(t *testing.T) {
+	m := newConsoleSessionManager()
+	defer m.CloseAll()
+
+	m.Add(makeStubSession("sess-ended", "acme", "fw-01"))
+	if !m.removeWithReason("sess-ended", "device went offline") {
+		t.Fatal("removeWithReason returned false")
+	}
+	if len(m.List()) != 0 {
+		t.Error("session still listed after it ended")
+	}
+
+	_, err := m.Get("sess-ended")
+	te, ok := err.(*ToolError)
+	if !ok || te.Code != "SESSION_CLOSED" || !strings.Contains(te.Message, "device went offline") {
+		t.Fatalf("Get error = %#v", err)
+	}
+
+	m.Add(makeStubSession("sess-user", "acme", "fw-01"))
+	m.Remove("sess-user")
+	if _, err := m.Get("sess-user"); err.(*ToolError).Code != "SESSION_NOT_FOUND" {
+		t.Errorf("user-closed session should stay SESSION_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestConsoleSessionLockHonoursContext(t *testing.T) {
+	sess := makeStubSession("s", "acme", "fw")
+	sess.mu.Lock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := sess.lock(ctx); err == nil {
+		t.Fatal("lock should fail when ctx ends first")
+	}
+
+	sess.mu.Unlock()
+	if err := sess.lock(context.Background()); err != nil {
+		t.Fatalf("lock after release: %v", err)
+	}
+	sess.mu.Unlock()
 }

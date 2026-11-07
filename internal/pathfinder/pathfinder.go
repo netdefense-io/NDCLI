@@ -1,6 +1,8 @@
 package pathfinder
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +40,7 @@ type Client struct {
 	webAdminOnly    bool
 	onProgress      ProgressCallback
 	isTTY           bool
+	endReported     bool
 }
 
 // ShellOutcome reports how an interactive shell session ended.
@@ -93,10 +96,49 @@ var ErrPathfinderNotConfigured = &PathfinderError{Message: "connection relay hos
 // PathfinderError represents a pathfinder-specific error
 type PathfinderError struct {
 	Message string
+	Err     error
 }
+
+func (e *PathfinderError) Unwrap() error { return e.Err }
 
 func (e *PathfinderError) Error() string {
 	return e.Message
+}
+
+// maxRelayRetryWait is the longest Retry-After the client waits out before its
+// single retry of a relay dial refused with 429.
+const maxRelayRetryWait = 10 * time.Second
+
+// dialRelay connects a new RelayClient. A 429 whose Retry-After is at most
+// maxRelayRetryWait is waited out and dialed once more; a second refusal, a
+// longer Retry-After, or a context deadline sooner than the wait is returned
+// as is. The returned stop func releases the ctx watcher.
+func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, func(), error) {
+	for attempt := 0; ; attempt++ {
+		relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
+		stop := context.AfterFunc(ctx, relay.cancel)
+		err := relay.Connect()
+		if err == nil {
+			return relay, func() { stop() }, nil
+		}
+		stop()
+
+		var rl *RateLimitedError
+		if attempt == 0 && errors.As(err, &rl) && rl.RetryAfter > 0 && rl.RetryAfter <= maxRelayRetryWait {
+			if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= rl.RetryAfter {
+				c.progress(fmt.Sprintf("Relay is rate limiting; retrying in %s...", rl.RetryAfter.Round(time.Second)))
+				timer := time.NewTimer(rl.RetryAfter)
+				select {
+				case <-timer.C:
+					continue
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, nil, &PathfinderError{Message: "failed to connect to relay: " + ctx.Err().Error(), Err: ctx.Err()}
+				}
+			}
+		}
+		return nil, nil, &PathfinderError{Message: "failed to connect to relay: " + err.Error(), Err: err}
+	}
 }
 
 // progress sends a progress update if a callback is configured
@@ -123,13 +165,14 @@ func (c *Client) Connect() error {
 
 	c.progress("Connecting to relay server...")
 
-	// Create relay client
-	relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
-
 	// Connect to the relay server
-	if err := relay.Connect(); err != nil {
-		return &PathfinderError{Message: "failed to connect to relay: " + err.Error()}
+	relay, stopWatch, err := c.dialRelay(context.Background(), wsURL)
+	if err != nil {
+		return err
 	}
+	defer stopWatch()
+	// Defers run last-in first-out: reportEnd (deferred below) must run
+	// before this Close, or a user quit would be reported as a relay end.
 	defer relay.Close()
 
 	// Wait for registration confirmation
@@ -143,6 +186,7 @@ func (c *Client) Connect() error {
 	if err := relay.WaitForPairing(120 * time.Second); err != nil {
 		return &PathfinderError{Message: "pairing failed: " + err.Error()}
 	}
+	defer c.reportEnd(relay) // keep above relay.Close in run order; see the Close defer
 
 	// Create stream manager and wire it to the relay so the relay can close
 	// all streams when the connection dies
@@ -247,11 +291,28 @@ func (c *Client) waitForQuit(relay *RelayClient, webAdminURL string) {
 		case <-ticker.C:
 			if !relay.IsConnected() {
 				if c.isTTY {
-					fmt.Println("\nConnection to relay lost. Closing.")
+					fmt.Printf("\nSession ended: %s. Closing.\n", endReasonOrDefault(relay))
+					c.endReported = true
 				}
 				return
 			}
 		}
+	}
+}
+
+func endReasonOrDefault(relay *RelayClient) string {
+	if r := relay.EndReason(); r != "" {
+		return r
+	}
+	return "connection to the relay was lost"
+}
+
+// reportEnd tells the user why a session the relay ended is over. It prints
+// nothing when the user ended the session.
+func (c *Client) reportEnd(relay *RelayClient) {
+	if reason := relay.EndReason(); reason != "" && !c.endReported {
+		c.endReported = true
+		fmt.Fprintf(os.Stderr, "\nSession ended: %s\n", reason)
 	}
 }
 
