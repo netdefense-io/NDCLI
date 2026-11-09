@@ -257,3 +257,100 @@ func TestSnippetSetPriorityDescription_StatesSingletonRule(t *testing.T) {
 		}
 	}
 }
+
+func TestSnippetExampleToolRegistered(t *testing.T) {
+	schema := registeredToolSchema(t, "ndcli.snippet.example")
+	props, _ := schema["properties"].(map[string]any)
+	if _, ok := props["type"]; !ok {
+		t.Errorf("no type property: %v", schema)
+	}
+	if _, ok := props["id"]; !ok {
+		t.Errorf("no id property: %v", schema)
+	}
+	if req, _ := schema["required"].([]any); len(req) != 1 || req[0] != "type" {
+		t.Errorf("required = %v, want [type]", req)
+	}
+
+	cs := connectTestClient(t)
+	for tool, err := range cs.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tool.Name == "ndcli.snippet.create" && !strings.Contains(tool.Description, "ndcli.snippet.example") {
+			t.Errorf("create description must point at ndcli.snippet.example: %s", tool.Description)
+		}
+	}
+}
+
+const snippetRegistryJSON = `{"schema":1,"types":[{"type":"TRUST_CERT","docs":"/d#trust-cert","examples":[
+ {"id":"cert-a","name":"Cert A","subtype":null,"content":{"key":"${K}"},"requires":{"variables":["K"]}},
+ {"id":"cert-b","name":"Cert B","subtype":"x","content":{"name":"b"}}]}]}`
+
+func callSnippetExample(t *testing.T, args string) ToolResponse {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/snippet-types" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(snippetRegistryJSON))
+	}))
+	defer srv.Close()
+	s := newStaticAuthTestServerWithAPI(t, srv, "acme")
+	result, err := s.handleSnippetExample(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(args)},
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	var resp ToolResponse
+	decodeToolResult(t, result, &resp)
+	return resp
+}
+
+func TestHandleSnippetExample_List(t *testing.T) {
+	resp := callSnippetExample(t, `{"type":"TRUST_CERT"}`)
+	if !resp.Success {
+		t.Fatalf("error: %v", resp.Error)
+	}
+	data := resp.Data.(map[string]any)
+	if data["docs"] != "/d#trust-cert" {
+		t.Errorf("docs = %v", data["docs"])
+	}
+	items := data["examples"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items = %v", items)
+	}
+	first := items[0].(map[string]any)
+	if first["id"] != "cert-a" || first["requires"] == nil {
+		t.Errorf("first = %v, want id and requires", first)
+	}
+	if _, ok := first["content"]; ok {
+		t.Errorf("list entries must not carry content: %v", first)
+	}
+	if _, ok := items[1].(map[string]any)["requires"]; ok {
+		t.Errorf("an example without requires must not carry the key")
+	}
+}
+
+func TestHandleSnippetExample_Single(t *testing.T) {
+	resp := callSnippetExample(t, `{"type":"trust_cert","id":"cert-a"}`)
+	if !resp.Success {
+		t.Fatalf("error: %v", resp.Error)
+	}
+	ex := resp.Data.(map[string]any)["example"].(map[string]any)
+	if ex["id"] != "cert-a" || ex["content"].(map[string]any)["key"] != "${K}" || ex["requires"] == nil {
+		t.Errorf("example = %v", ex)
+	}
+}
+
+func TestHandleSnippetExample_UnknownSurfacesError(t *testing.T) {
+	resp := callSnippetExample(t, `{"type":"NOPE"}`)
+	if resp.Success || resp.Error == nil || !strings.Contains(resp.Error.Message, "TRUST_CERT") {
+		t.Errorf("unknown type: %+v", resp)
+	}
+	resp = callSnippetExample(t, `{"type":"TRUST_CERT","id":"zz"}`)
+	if resp.Success || resp.Error == nil || !strings.Contains(resp.Error.Message, "cert-a, cert-b") {
+		t.Errorf("unknown id: %+v", resp)
+	}
+}

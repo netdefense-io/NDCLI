@@ -23,6 +23,15 @@ var snippetCmd = &cobra.Command{
 	Short: "Snippet management commands",
 }
 
+var snippetExampleCmd = &cobra.Command{
+	Use:   "example <type> [id]",
+	Short: "List or print example snippet content for a type",
+	Long: `List a snippet type's examples, or print one example's content as JSON
+(ready for --file). Docs: /docs/getting-started/snippet-format/`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runSnippetExample,
+}
+
 var snippetListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List snippets",
@@ -285,6 +294,7 @@ func init() {
 	snippetCmd.AddCommand(snippetSetPriorityCmd)
 	snippetCmd.AddCommand(snippetDeleteCmd)
 	snippetCmd.AddCommand(snippetPullCmd)
+	snippetCmd.AddCommand(snippetExampleCmd)
 
 	// List flags
 	snippetListCmd.Flags().String("type", "", "Filter by type: "+models.SnippetTypesHelp(models.SnippetCreatableTypes))
@@ -302,6 +312,10 @@ func init() {
 	snippetCreateCmd.Flags().String("content", "", "Snippet content (required)")
 	snippetCreateCmd.Flags().String("file", "", "Read content from file instead of --content")
 	snippetCreateCmd.Flags().Int("priority", 1000, "Snippet priority 1-60000 (default 1000)")
+	snippetCreateCmd.Flags().String("example", "", "Start from this example id (see 'snippet example <type>')")
+	snippetCreateCmd.Flags().Bool("edit", false, "Open the content in $EDITOR before creating (with --example)")
+	snippetCreateCmd.MarkFlagsMutuallyExclusive("example", "content")
+	snippetCreateCmd.MarkFlagsMutuallyExclusive("example", "file")
 
 	// Pull flags
 	snippetPullCmd.Flags().String("name", "", "Name for the created snippet (letters, digits, dot, underscore, hyphen; derived from the match key when omitted)")
@@ -376,7 +390,31 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 	if err := requireSnippetType(snippetType); err != nil {
 		return err
 	}
-	if file != "" {
+	example, _ := cmd.Flags().GetString("example")
+	edit, _ := cmd.Flags().GetBool("edit")
+	var needs string
+	if edit && example == "" {
+		return fmt.Errorf("--edit needs --example")
+	}
+	if example != "" {
+		res, err := svc.SnippetExample(context.Background(), snippetType, example)
+		if err != nil {
+			return err
+		}
+		snippetType = res.Type
+		content, err = service.SnippetExampleContent(res.Selected)
+		if err != nil {
+			return err
+		}
+		needs = service.SnippetExampleNeeds(res.Selected)
+		if edit {
+			edited, err := internalHelpers.EditContent(content, ".json")
+			if err != nil {
+				return fmt.Errorf("failed to edit content: %w", err)
+			}
+			content = internalHelpers.MinifyJSON(edited)
+		}
+	} else if file != "" {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
@@ -384,7 +422,7 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 		content = string(data)
 	}
 	if content == "" {
-		return fmt.Errorf("--content or --file is required")
+		return fmt.Errorf("--content, --file or --example is required")
 	}
 
 	if _, err := svc.SnippetCreate(context.Background(), org, service.SnippetCreateOpts{
@@ -396,7 +434,33 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	color.Green("✓ Snippet created: %s", name)
+	if needs != "" {
+		fmt.Fprintln(os.Stderr, needs)
+	}
 	return nil
+}
+
+func runSnippetExample(cmd *cobra.Command, args []string) error {
+	requireAuth()
+
+	id := ""
+	if len(args) == 2 {
+		id = args[1]
+	}
+	res, err := svc.SnippetExample(context.Background(), args[0], id)
+	if err != nil {
+		return err
+	}
+	if res.Selected == nil {
+		return formatter.FormatSnippetExamples(res.Type, res.Docs, res.Examples)
+	}
+	if needs := service.SnippetExampleNeeds(res.Selected); needs != "" {
+		fmt.Fprintln(os.Stderr, needs)
+	}
+	if outputFormat() != "json" && res.Docs != "" {
+		fmt.Fprintln(os.Stderr, "Docs: "+res.Docs)
+	}
+	return formatter.FormatSnippetExample(res.Type, res.Docs, res.Selected)
 }
 
 func runSnippetDescribe(cmd *cobra.Command, args []string) error {

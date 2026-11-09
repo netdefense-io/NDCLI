@@ -1,6 +1,13 @@
 package models
 
-import "strings"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
+)
 
 // Snippet represents a configuration snippet
 type Snippet struct {
@@ -147,4 +154,50 @@ type SnippetPull struct {
 	Snippet string `json:"snippet,omitempty"`
 	// Content is the pulled content as the completed task reported it.
 	Content string `json:"content,omitempty"`
+}
+
+// SnippetExampleRequires lists what an example needs besides itself.
+type SnippetExampleRequires struct {
+	Examples  []string `json:"examples,omitempty"`
+	Variables []string `json:"variables,omitempty"`
+}
+
+// SnippetExample is one ready-made snippet content from the server's
+// snippet-type registry.
+type SnippetExample struct {
+	ID       string                  `json:"id"`
+	Name     string                  `json:"name"`
+	Subtype  *string                 `json:"subtype"`
+	Content  json.RawMessage         `json:"content,omitempty"`
+	Requires *SnippetExampleRequires `json:"requires,omitempty"`
+}
+
+// SnippetTypeInfo is one entry of GET /api/v1/snippet-types.
+type SnippetTypeInfo struct {
+	Type     string           `json:"type"`
+	Label    string           `json:"label"`
+	Category string           `json:"category"`
+	Keywords []string         `json:"keywords"`
+	Docs     string           `json:"docs"`
+	Examples []SnippetExample `json:"examples"`
+}
+
+// SnippetTypesResponse is the body of GET /api/v1/snippet-types.
+type SnippetTypesResponse struct {
+	Schema int               `json:"schema"`
+	Types  []SnippetTypeInfo `json:"types"`
+}
+
+// ContentJSON is the example's content as indented JSON in the registry's
+// key order, ready for --file. Content that is not valid JSON is an error,
+// and control characters a terminal would act on are stripped.
+func (e *SnippetExample) ContentJSON() (string, error) {
+	if len(e.Content) == 0 || !json.Valid(e.Content) {
+		return "", fmt.Errorf("example %q has unusable content", e.ID)
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, e.Content, "", "  "); err != nil {
+		return "", fmt.Errorf("example %q has unusable content: %w", e.ID, err)
+	}
+	return sanitize.String(buf.String()), nil
 }

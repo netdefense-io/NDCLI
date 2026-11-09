@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // SnippetListOpts mirrors the filters accepted by the snippets list endpoint.
@@ -397,4 +399,108 @@ func (s *Service) SnippetPull(ctx context.Context, org, deviceName string, opts 
 		return nil, wrapAPI("%v", err)
 	}
 	return &result, nil
+}
+
+// SnippetExamples is the result of SnippetExample: the type's docs path and
+// either all its examples (no id asked) or the one asked for.
+type SnippetExamples struct {
+	Type     string
+	Docs     string
+	Examples []models.SnippetExample
+	Selected *models.SnippetExample
+}
+
+// SnippetExample reads the server's snippet-type registry and returns the
+// examples of one type, or the single example id when given. Examples are
+// not kept in the binary: a server without the endpoint has none.
+func (s *Service) SnippetExample(ctx context.Context, snippetType, id string) (*SnippetExamples, error) {
+	if snippetType == "" {
+		return nil, &Error{Code: CodeInvalidInput, Message: "snippet type is required"}
+	}
+	resp, err := s.api.Get(ctx, "/api/v1/snippet-types", nil)
+	if err != nil {
+		return nil, wrapAPI("%v", err)
+	}
+	var reg models.SnippetTypesResponse
+	if err := api.ParseResponse(resp, &reg); err != nil {
+		// A control plane that predates the route answers a bare 404 with no
+		// code; a coded 404 is the server's own answer and stays as it is.
+		if api.IsNotFoundError(err) && api.GetErrorCode(err) == "" {
+			return nil, &Error{Code: CodeServerTooOld, Message: "this server has no snippet examples", Err: err}
+		}
+		return nil, wrapAPI("%v", err)
+	}
+
+	// json.RawMessage is opaque to the response sanitizer, so scrub it here.
+	for i := range reg.Types {
+		for j := range reg.Types[i].Examples {
+			ex := &reg.Types[i].Examples[j]
+			ex.Content = json.RawMessage(sanitize.String(string(ex.Content)))
+		}
+	}
+
+	want := strings.ToUpper(snippetType)
+	var info *models.SnippetTypeInfo
+	names := make([]string, 0, len(reg.Types))
+	for i := range reg.Types {
+		names = append(names, reg.Types[i].Type)
+		if reg.Types[i].Type == want {
+			info = &reg.Types[i]
+		}
+	}
+	if info == nil {
+		return nil, &Error{
+			Code:    CodeInvalidInput,
+			Message: fmt.Sprintf("unknown snippet type %q (valid: %s)", snippetType, models.SnippetTypesHelp(names)),
+		}
+	}
+	out := &SnippetExamples{Type: info.Type, Docs: info.Docs, Examples: info.Examples}
+	if id == "" {
+		return out, nil
+	}
+	ids := make([]string, 0, len(info.Examples))
+	for i := range info.Examples {
+		ids = append(ids, info.Examples[i].ID)
+		if info.Examples[i].ID == id {
+			out.Selected = &info.Examples[i]
+		}
+	}
+	if out.Selected == nil {
+		return nil, &Error{
+			Code:    CodeInvalidInput,
+			Message: fmt.Sprintf("unknown %s example %q (valid: %s)", info.Type, id, models.SnippetTypesHelp(ids)),
+		}
+	}
+	if _, err := SnippetExampleContent(out.Selected); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SnippetExampleContent returns the example's content as indented JSON.
+func SnippetExampleContent(ex *models.SnippetExample) (string, error) {
+	content, err := ex.ContentJSON()
+	if err != nil {
+		return "", &Error{Code: CodeInvalidInput, Message: err.Error(), Err: err}
+	}
+	return content, nil
+}
+
+// SnippetExampleNeeds renders an example's requirements as one short line,
+// or "" when it has none.
+func SnippetExampleNeeds(ex *models.SnippetExample) string {
+	if ex.Requires == nil {
+		return ""
+	}
+	var parts []string
+	if len(ex.Requires.Variables) > 0 {
+		parts = append(parts, "variables "+strings.Join(ex.Requires.Variables, ", "))
+	}
+	if len(ex.Requires.Examples) > 0 {
+		parts = append(parts, "examples "+strings.Join(ex.Requires.Examples, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Needs: " + strings.Join(parts, "; ")
 }

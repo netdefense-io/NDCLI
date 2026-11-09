@@ -340,3 +340,159 @@ func TestAuthDeleteAbortLeavesStdoutEmpty(t *testing.T) {
 		}
 	}
 }
+
+func exampleServer(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/snippet-types" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"schema":1,"types":[{"type":"TRUST_CERT","docs":"/d","examples":[{"id":"cert-variable","name":"Cert","subtype":null,"content":{"key":"${FW_KEY}"},"requires":{"variables":["FW_KEY"]}}]}]}`)
+	}
+}
+
+func TestSnippetExampleContentStdoutNeedsStderr(t *testing.T) {
+	cmd := findCommand(t, "snippet", "example")
+	stdout, stderr := runStreams(t, exampleServer(t), "table", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT", "cert-variable"})
+	})
+	if strings.TrimSpace(stdout) != "{\n  \"key\": \"${FW_KEY}\"\n}" {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if strings.TrimSpace(stderr) != "Needs: variables FW_KEY\nDocs: /d" {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestSnippetExampleJSONIsWholeObject(t *testing.T) {
+	cmd := findCommand(t, "snippet", "example")
+	stdout, _ := runStreams(t, exampleServer(t), "json", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT", "cert-variable"})
+	})
+	var got models.SnippetExample
+	decodeOne(t, stdout, &got)
+	if got.ID != "cert-variable" || got.Requires == nil || !strings.Contains(string(got.Content), "${FW_KEY}") {
+		t.Errorf("decoded %+v", got)
+	}
+}
+
+func TestSnippetExampleDocsShown(t *testing.T) {
+	cmd := findCommand(t, "snippet", "example")
+	stdout, _ := runStreams(t, exampleServer(t), "table", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT"})
+	})
+	if !strings.Contains(stdout, "Docs: /d") {
+		t.Errorf("list stdout lacks the docs path: %q", stdout)
+	}
+
+	stdout, stderr := runStreams(t, exampleServer(t), "table", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT", "cert-variable"})
+	})
+	if strings.Contains(stdout, "Docs") || !strings.Contains(stderr, "Docs: /d") {
+		t.Errorf("content stdout must stay clean, docs on stderr: %q / %q", stdout, stderr)
+	}
+
+	stdout, _ = runStreams(t, exampleServer(t), "json", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT", "cert-variable"})
+	})
+	var one struct{ Docs, Type string }
+	decodeOne(t, stdout, &one)
+	if one.Docs != "/d" || one.Type != "TRUST_CERT" {
+		t.Errorf("json example lacks type/docs: %q", stdout)
+	}
+	stdout, _ = runStreams(t, exampleServer(t), "json", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT"})
+	})
+	var list struct{ Docs string }
+	decodeOne(t, stdout, &list)
+	if list.Docs != "/d" {
+		t.Errorf("json list lacks docs: %q", stdout)
+	}
+}
+
+func TestSnippetCreateEditNeedsExample(t *testing.T) {
+	cmd := findCommand(t, "snippet", "create")
+	for f, v := range map[string]string{"type": "RULE", "edit": "true"} {
+		if err := cmd.Flags().Set(f, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = cmd.Flags().Set("type", "")
+		_ = cmd.Flags().Set("edit", "false")
+	})
+	var err error
+	runStreams(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no request expected, got %s %s", r.Method, r.URL.Path)
+	}, "table", "", func() error {
+		err = runSnippetCreate(cmd, []string{"x"})
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "--edit needs --example") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestSnippetCreateExamplePrintsNeedsOnStderr(t *testing.T) {
+	cmd := findCommand(t, "snippet", "create")
+	for f, v := range map[string]string{"type": "trust_cert", "example": "cert-variable"} {
+		if err := cmd.Flags().Set(f, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, f := range []string{"type", "example"} {
+			_ = cmd.Flags().Set(f, "")
+			cmd.Flags().Lookup(f).Changed = false
+		}
+	})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["type"] != "TRUST_CERT" {
+				t.Errorf("created with type %v, want the registry's TRUST_CERT", body["type"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"name":"x","type":"TRUST_CERT","content":"{}"}`)
+			return
+		}
+		exampleServer(t)(w, r)
+	}
+	stdout, stderr := runStreams(t, handler, "table", "", func() error {
+		return runSnippetCreate(cmd, []string{"x"})
+	})
+	if !strings.Contains(stdout, "Snippet created") {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "Needs: variables FW_KEY") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestSnippetExampleListTable(t *testing.T) {
+	cmd := findCommand(t, "snippet", "example")
+	stdout, _ := runStreams(t, exampleServer(t), "table", "", func() error {
+		return runSnippetExample(cmd, []string{"TRUST_CERT"})
+	})
+	if !strings.Contains(stdout, "cert-variable") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+func TestSnippetCreateExampleConflicts(t *testing.T) {
+	cmd := findCommand(t, "snippet", "create")
+	cmd.SetArgs([]string{"x", "--type", "RULE", "--example", "a", "--content", "{}"})
+	if err := cmd.ParseFlags([]string{"--type", "RULE", "--example", "a", "--content", "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.ValidateFlagGroups(); err == nil {
+		t.Error("--example with --content must conflict")
+	}
+	t.Cleanup(func() {
+		for _, f := range []string{"type", "example", "content"} {
+			_ = cmd.Flags().Set(f, "")
+			cmd.Flags().Lookup(f).Changed = false
+		}
+	})
+}

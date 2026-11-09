@@ -32,6 +32,11 @@ type snippetIDInput struct {
 	Confirm      bool   `json:"confirm,omitempty"`
 }
 
+type snippetExampleInput struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+}
+
 type snippetCreateInput struct {
 	Organization string `json:"organization,omitempty"`
 	Name         string `json:"name"`
@@ -117,8 +122,21 @@ func (s *Server) registerSnippetTools() {
 	}, s.handleSnippetDescribe)
 
 	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.snippet.example",
+		Description: "Read-only. List a snippet type's examples (id, name, subtype), or with id return that example's content and what it requires. Use it before ndcli.snippet.create.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"type": stringProperty("Snippet type, e.g. RULE"),
+				"id":   stringProperty("Example id; omit to list the type's examples"),
+			},
+			"required": []string{"type"},
+		},
+	}, s.handleSnippetExample)
+
+	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.snippet.create",
-		Description: "Create a new snippet. Content must be supplied inline. " + models.SnippetUUIDGuidance + " " + models.SnippetFieldContract +
+		Description: "Create a new snippet. Call ndcli.snippet.example first for the JSON shape. Content must be supplied inline. " + models.SnippetUUIDGuidance + " " + models.SnippetFieldContract +
 			" CROWDSEC_SETTINGS prerequisites: " + models.CrowdsecPrerequisites + ". " + models.SingletonPriorityRule + suOnlyTypesNote,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -251,6 +269,47 @@ func (s *Server) handleSnippetList(ctx context.Context, req *mcp.CallToolRequest
 	return s.successResultWithPagination(map[string]interface{}{
 		"snippets": items,
 	}, result.Page, result.PerPage, result.Total)
+}
+
+func (s *Server) handleSnippetExample(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[snippetExampleInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	res, err := s.svc.SnippetExample(apiCtx, input.Type, input.ID)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if res.Selected == nil {
+		items := make([]map[string]interface{}, 0, len(res.Examples))
+		for _, e := range res.Examples {
+			item := map[string]interface{}{
+				"id": e.ID, "name": e.Name, "subtype": e.Subtype,
+			}
+			if e.Requires != nil {
+				item["requires"] = e.Requires
+			}
+			items = append(items, item)
+		}
+		return s.successResult(map[string]interface{}{
+			"type":     res.Type,
+			"docs":     res.Docs,
+			"examples": items,
+		}, "")
+	}
+	return s.successResult(map[string]interface{}{
+		"type":    res.Type,
+		"docs":    res.Docs,
+		"example": res.Selected,
+	}, "")
 }
 
 func (s *Server) handleSnippetDescribe(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

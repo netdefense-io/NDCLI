@@ -147,6 +147,8 @@ type Formatter interface {
 	FormatSnippets(snippets []models.Snippet, total int) error
 	FormatSnippet(snippet *models.Snippet) error
 	FormatSnippetPull(pull *models.SnippetPull) error
+	FormatSnippetExamples(snippetType, docs string, examples []models.SnippetExample) error
+	FormatSnippetExample(snippetType, docs string, example *models.SnippetExample) error
 
 	// Software policies
 	FormatSoftwarePolicies(policies []models.SoftwarePolicy, total int) error
