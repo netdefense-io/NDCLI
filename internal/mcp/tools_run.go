@@ -32,7 +32,7 @@ type runInput struct {
 	Schedule     string   `json:"schedule,omitempty"` // recurring spec registration
 	// PING
 	Host  string `json:"host,omitempty"`
-	Count int    `json:"count,omitempty"`
+	Count *int   `json:"count,omitempty"` // nil = the agent's default
 	// PLUGIN_INSTALL
 	Version string `json:"version,omitempty"`
 	// FIRMWARE_UPGRADE
@@ -253,23 +253,17 @@ func (s *Server) registerRunTools() {
 	// ndcli.run.ping
 	pingProps := mergeProps(targetingProps, map[string]interface{}{
 		"host":  stringProperty("Target IP or hostname to ping (required)"),
-		"count": intProperty("Number of ping packets (default 4)", 4),
+		"count": pingCountProperty(),
 	})
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.run.ping",
-		Description: "Ping a target IP or hostname from one or more devices. `host` is required. Requires confirm=true.",
+		Description: fmt.Sprintf("Ping a target IP or hostname from one or more devices. `host` is required; `count` is %d to %d. Requires confirm=true.", service.PingCountMin, service.PingCountMax),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": pingProps,
 			"required":   []string{"host"},
 		},
-	}, s.makeRunHandler("ping", models.TaskTypePing, func(in *runInput) map[string]interface{} {
-		p := map[string]interface{}{"target": in.Host}
-		if in.Count > 0 && in.Count != 4 {
-			p["count"] = in.Count
-		}
-		return p
-	}))
+	}, s.makeRunHandler("ping", models.TaskTypePing, pingPayload))
 
 	// ndcli.run.poweroff
 	s.mcpServer.AddTool(&mcp.Tool{
@@ -302,12 +296,12 @@ func (s *Server) registerRunTools() {
 			"type":       "object",
 			"properties": pluginInstallProps,
 		},
-	}, s.makeRunHandler("plugin-install", models.TaskTypePluginInstall, func(in *runInput) map[string]interface{} {
+	}, s.makeRunHandler("plugin-install", models.TaskTypePluginInstall, func(in *runInput) (map[string]interface{}, error) {
 		p := map[string]interface{}{}
 		if in.Version != "" {
 			p["target_version"] = in.Version
 		}
-		return p
+		return p, nil
 	}))
 
 	// ndcli.run.plugin-reload
@@ -461,12 +455,41 @@ func mergeProps(a, b map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+// runPayloadFunc builds a run tool's payload from its input, or refuses the
+// input before anything is previewed or sent.
+type runPayloadFunc func(*runInput) (map[string]interface{}, error)
+
+// pingCountProperty advertises the count range in the schema as well as in
+// the description; the handler still checks it, since the go-sdk does not
+// validate arguments against the schema.
+func pingCountProperty() map[string]interface{} {
+	p := intProperty(fmt.Sprintf("Number of ping packets, %d to %d (default %d)", service.PingCountMin, service.PingCountMax, service.PingCountDefault), service.PingCountDefault)
+	p["minimum"] = service.PingCountMin
+	p["maximum"] = service.PingCountMax
+	return p
+}
+
+// pingPayload leaves count out when it is absent or the agent's default.
+// An explicit count, 0 included, must be in range.
+func pingPayload(in *runInput) (map[string]interface{}, error) {
+	p := map[string]interface{}{"target": in.Host}
+	if in.Count != nil {
+		if err := service.CheckPingCount(*in.Count, "count"); err != nil {
+			return nil, err
+		}
+		if *in.Count != service.PingCountDefault {
+			p["count"] = *in.Count
+		}
+	}
+	return p, nil
+}
+
 // makeRunHandler builds the handler for one `ndcli.run.*` tool. `friendly`
 // is the user-facing name (used in preview messages), `taskType` is the
 // internal NDDataModels enum string sent to NDManager, and `payloadFn`
 // extracts command-specific payload from the input (nil for commands
 // that take no payload params).
-func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runInput) map[string]interface{}) func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) makeRunHandler(friendly, taskType string, payloadFn runPayloadFunc) func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if err := s.svc.RequireAuth(); err != nil {
 			return s.errorResult(err)
@@ -484,12 +507,18 @@ func (s *Server) makeRunHandler(friendly, taskType string, payloadFn func(*runIn
 // ndcli.run.* tool, split out from makeRunHandler so it can be exercised
 // directly in tests without a live authenticated Service (RequireAuth needs
 // a real *auth.Manager, which can't be faked from this package).
-func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payloadFn func(*runInput) map[string]interface{}, input *runInput) (*mcp.CallToolResult, error) {
+func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payloadFn runPayloadFunc, input *runInput) (*mcp.CallToolResult, error) {
 	// Resolve the scheduling instant before anything else touches the
 	// network, so an ambiguous `at` is refused without a round trip.
 	resolved, err := resolveRunScheduledAt(input.At, input.Timezone, input.Schedule)
 	if err != nil {
 		return s.errorResult(err)
+	}
+	var payload map[string]interface{}
+	if payloadFn != nil {
+		if payload, err = payloadFn(input); err != nil {
+			return s.errorResult(err)
+		}
 	}
 
 	org, err := s.svc.ResolveOrg(input.Organization)
@@ -502,12 +531,10 @@ func (s *Server) runCommand(ctx context.Context, friendly, taskType string, payl
 		OUs:        input.OUs,
 		AllDevices: input.allDevices(),
 		Schedule:   input.Schedule,
+		Payload:    payload,
 	}
 	if resolved != nil {
 		opts.ScheduledAt = resolved.RFC3339UTC()
-	}
-	if payloadFn != nil {
-		opts.Payload = payloadFn(input)
 	}
 
 	apiCtx, cancel := contextWithTimeout()

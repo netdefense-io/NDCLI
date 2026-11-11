@@ -1,6 +1,6 @@
 module github.com/netdefense-io/NDCLI
 
-go 1.25.0
+go 1.27.4
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
@@ -14,6 +14,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.0
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/spf13/cobra v1.8.1
+	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.19.0
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sys v0.44.0
@@ -57,7 +58,6 @@ require (
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
@@ -70,3 +70,8 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
+
+// Keep the pre-1.27 trust rule: on macOS and Windows, ignore SSL_CERT_FILE and
+// SSL_CERT_DIR and use the platform verifier. Dropping this changes which
+// certificates users trust: do it in its own PR, with a changelog note.
+godebug x509sslcertoverrideplatform=0

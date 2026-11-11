@@ -56,7 +56,7 @@ Pre-built archives for macOS (amd64/arm64), Linux (amd64/arm64), and Windows (am
 
 ### From source
 
-Requires Go 1.25+.
+Requires Go 1.27.4+.
 
 ```bash
 git clone https://github.com/netdefense-io/NDCLI.git

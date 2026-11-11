@@ -1030,9 +1030,9 @@ func TestFirmwareBootEnvironmentIsSentAndTheEchoIsChecked(t *testing.T) {
 		}{
 			"a validation error that is not about the track":               {422, `{"detail":[{"loc":["body","devices"],"msg":"List should have at most 500 items","type":"too_long"}]}`},
 			"a validation error about the track that is not a missing one": {422, `{"detail":[{"loc":["body","track"],"msg":"Input should be 'fast', 'regular' or 'stable'","type":"enum"}]}`},
-			"an invalid parameter":                                         {422, `{"error":"boot_environment is not valid here","code":"INVALID_PARAM"}`},
-			"an unknown device":                                            {404, `{"error":"Device 'fw-z' not found","code":"DEVICE_NOT_FOUND"}`},
-			"the plan":                                                     {403, `{"error":"Firmware tracks are not available on your current plan.","code":"FEATURE_NOT_AVAILABLE"}`},
+			"an invalid parameter": {422, `{"error":"boot_environment is not valid here","code":"INVALID_PARAM"}`},
+			"an unknown device":    {404, `{"error":"Device 'fw-z' not found","code":"DEVICE_NOT_FOUND"}`},
+			"the plan":             {403, `{"error":"Firmware tracks are not available on your current plan.","code":"FEATURE_NOT_AVAILABLE"}`},
 		} {
 			srv, _ := firmwareServer(t, tc.status, tc.body)
 			_, err := newTestService(t, srv).FirmwareDeviceAssign(context.Background(), "acme", devices, FirmwareDeviceAssignOpts{BootEnvironment: &on})

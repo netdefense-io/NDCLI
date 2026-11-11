@@ -923,7 +923,10 @@ func TestChunkedKeyringGiveUpErrorCarriesDiagnostics(t *testing.T) {
 		fmt.Sprintf("%d bytes", len(data)),
 		fmt.Sprintf("budget %d bytes", budget),
 		fmt.Sprintf("%d-character account name", len(testAccount)),
-		fmt.Sprintf("%d parts attempted", finalParts),
+		// The final attempt sized entries against the shrunk limit, not the
+		// computed budget, and the message must say so rather than quoting
+		// the larger number as if it were what was tried.
+		fmt.Sprintf("used %d parts of at most %d bytes", finalParts, minPartBytes),
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("give-up error is missing %q; got: %s", want, msg)
@@ -977,5 +980,50 @@ func TestDarwinMaxSecretBytesReportsNoBudgetForAnUnusableAccount(t *testing.T) {
 	unusable := strings.Repeat("a", darwinCommandLimit)
 	if got := darwinMaxSecretBytes(KeyringService, unusable); got != 0 {
 		t.Errorf("darwinMaxSecretBytes for a %d-character account = %d, want 0", len(unusable), got)
+	}
+}
+
+// TestChunkedKeyringGiveUpErrorReportsThePartBudgetNotThePrimary pins where the
+// reported per-entry budget comes from. Chunked writes size entries against the
+// part-account name, which is longer than the primary one and so yields a
+// smaller budget on platforms where the cap depends on it. Reporting the
+// primary account's budget would overstate what was actually attempted.
+func TestChunkedKeyringGiveUpErrorReportsThePartBudgetNotThePrimary(t *testing.T) {
+	const (
+		primaryBudget = 4096
+		partBudget    = 200 // deliberately below minPartBytes so the clamp cannot produce it
+	)
+	// A length-sensitive budget, as darwinMaxSecretBytes is: part-account
+	// names are longer than the primary, so they get less room.
+	limit := func(_, account string) int {
+		if len(account) > len(testAccount) {
+			return partBudget
+		}
+		return primaryBudget
+	}
+	ck := chunkedKeyring{ops: &alwaysTooBigKeyring{}, service: testService, limit: limit}
+
+	data := payload(3000)
+	err := ck.save(testAccount, data)
+	if err == nil {
+		t.Fatal("expected save to give up")
+	}
+	msg := err.Error()
+
+	wantParts := (len(data) + partBudget - 1) / partBudget
+	if want := fmt.Sprintf("used %d parts of at most %d bytes", wantParts, partBudget); !strings.Contains(msg, want) {
+		t.Errorf("give-up error should report the part-account budget %q; got: %s", want, msg)
+	}
+	// The computed budget for the primary account is still shown, separately,
+	// because a wrong model shows up there and nowhere else.
+	if want := fmt.Sprintf("budget %d bytes", primaryBudget); !strings.Contains(msg, want) {
+		t.Errorf("give-up error should still report the computed budget %q; got: %s", want, msg)
+	}
+	// The two must not be conflated.
+	if partBudget == primaryBudget {
+		t.Fatal("test is degenerate: the two budgets must differ")
+	}
+	if strings.Contains(msg, testAccount) {
+		t.Errorf("account name leaked into the give-up error: %s", msg)
 	}
 }

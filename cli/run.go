@@ -71,11 +71,11 @@ func init() {
 			if host == "" {
 				return &service.Error{Code: service.CodeInvalidInput, Message: "--host is required for ping"}
 			}
-			if count < 1 || count > 1000 {
-				return &service.Error{Code: service.CodeInvalidInput, Message: "--count must be between 1 and 1000"}
+			if err := service.CheckPingCount(count, "--count"); err != nil {
+				return err
 			}
 			payload := map[string]interface{}{"target": host}
-			if count != 4 {
+			if count != service.PingCountDefault {
 				payload["count"] = count
 			}
 			opts.Payload = payload
@@ -83,7 +83,7 @@ func init() {
 		},
 	)
 	pingCmd.Flags().String("host", "", "Target IP or hostname to ping (required)")
-	pingCmd.Flags().Int("count", 4, "Number of ping packets")
+	pingCmd.Flags().Int("count", service.PingCountDefault, fmt.Sprintf("Number of ping packets, %d to %d", service.PingCountMin, service.PingCountMax))
 	_ = pingCmd.MarkFlagRequired("host")
 
 	powerCmd := newRunSubcommand(

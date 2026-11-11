@@ -25,18 +25,19 @@ var orgCmd = &cobra.Command{
 var orgListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organizations",
+	Args:  cobra.NoArgs,
 	RunE:  runOrgList,
 }
 
 var orgCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new organization",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runOrgCreate,
 }
 
 var orgDeleteCmd = &cobra.Command{
-	Use:               "delete [name]",
+	Use:               "delete <name>",
 	Short:             "Delete an organization",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -44,7 +45,7 @@ var orgDeleteCmd = &cobra.Command{
 }
 
 var orgDescribeCmd = &cobra.Command{
-	Use:               "describe [name]",
+	Use:               "describe <name>",
 	Short:             "Show organization details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -52,7 +53,7 @@ var orgDescribeCmd = &cobra.Command{
 }
 
 var orgSetDefaultOUCmd = &cobra.Command{
-	Use:               "set-default-ou [ou-name]",
+	Use:               "set-default-ou <ou-name>",
 	Short:             "Set the default OU for an organization",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
@@ -65,7 +66,7 @@ var orgInviteCmd = &cobra.Command{
 }
 
 var orgInviteSendCmd = &cobra.Command{
-	Use:   "send [email]",
+	Use:   "send <email>",
 	Short: "Send an organization invitation",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runOrgInviteSend,
@@ -74,11 +75,12 @@ var orgInviteSendCmd = &cobra.Command{
 var orgInviteListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List pending invitations",
+	Args:  cobra.NoArgs,
 	RunE:  runOrgInviteList,
 }
 
 var orgInviteAcceptCmd = &cobra.Command{
-	Use:               "accept [org-name]",
+	Use:               "accept <org-name>",
 	Short:             "Accept an invitation to join an organization",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -86,7 +88,7 @@ var orgInviteAcceptCmd = &cobra.Command{
 }
 
 var orgInviteDeclineCmd = &cobra.Command{
-	Use:               "decline [org-name]",
+	Use:               "decline <org-name>",
 	Short:             "Decline an invitation to join an organization",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -94,14 +96,14 @@ var orgInviteDeclineCmd = &cobra.Command{
 }
 
 var orgInviteRevokeCmd = &cobra.Command{
-	Use:   "revoke [email]",
+	Use:   "revoke <email>",
 	Short: "Revoke a pending invitation (requires superuser)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runOrgInviteRevoke,
 }
 
 var orgQuotaCmd = &cobra.Command{
-	Use:               "quota [org]",
+	Use:               "quota <org>",
 	Short:             "Show organization quota and plan limits",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -116,11 +118,12 @@ var orgAccountCmd = &cobra.Command{
 var orgAccountListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organization accounts",
+	Args:  cobra.NoArgs,
 	RunE:  runOrgAccountList,
 }
 
 var orgAccountDisableCmd = &cobra.Command{
-	Use:               "disable [email]",
+	Use:               "disable <email>",
 	Short:             "Disable an account",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeAccountEmails,
@@ -128,7 +131,7 @@ var orgAccountDisableCmd = &cobra.Command{
 }
 
 var orgAccountEnableCmd = &cobra.Command{
-	Use:               "enable [email]",
+	Use:               "enable <email>",
 	Short:             "Enable an account",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeAccountEmails,
@@ -136,7 +139,7 @@ var orgAccountEnableCmd = &cobra.Command{
 }
 
 var orgAccountRoleCmd = &cobra.Command{
-	Use:   "role [email] [role]",
+	Use:   "role <email> <role>",
 	Short: "Set account role",
 	Long: `Set account role for a user in the organization.
 

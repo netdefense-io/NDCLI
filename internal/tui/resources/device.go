@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/service"
@@ -67,7 +68,7 @@ func (deviceResource) Actions() []registry.Action {
 			Prompt: "Power off device {id}? It will shut down."},
 		{Key: "p", Label: "ping", Form: []registry.FormField{
 			{Key: "host", Label: "Host/IP", Required: true, Placeholder: "1.1.1.1"},
-			{Key: "count", Label: "Count", Default: "4"},
+			{Key: "count", Label: fmt.Sprintf("Count (%d-%d)", service.PingCountMin, service.PingCountMax), Default: strconv.Itoa(service.PingCountDefault)},
 		}},
 		{Key: "f", Label: "firmware", Form: []registry.FormField{
 			{Key: "mode", Label: "Mode", Options: []string{"minor", "major"}},
@@ -156,12 +157,14 @@ func devicePing(ctx context.Context, svc *service.Service, org, id string, args 
 		return "", fmt.Errorf("host is required")
 	}
 	payload := map[string]interface{}{"target": host}
-	if c := args["count"]; c != "" && c != "4" {
+	if c := strings.TrimSpace(args["count"]); c != "" {
 		n, err := strconv.Atoi(c)
-		if err != nil || n < 1 || n > 1000 {
-			return "", fmt.Errorf("count must be a number between 1 and 1000")
+		if err != nil || service.CheckPingCount(n, "count") != nil {
+			return "", fmt.Errorf("count must be a number between %d and %d", service.PingCountMin, service.PingCountMax)
 		}
-		payload["count"] = n
+		if n != service.PingCountDefault {
+			payload["count"] = n
+		}
 	}
 	if _, err := svc.Run(ctx, org, service.RunOpts{Type: models.TaskTypePing, Devices: []string{id}, Payload: payload}); err != nil {
 		return "", err

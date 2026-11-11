@@ -355,6 +355,46 @@ type RunOpts struct {
 	Schedule            string // schedule name; when set, call RunRegisterSpec instead
 }
 
+// PingCountMin and PingCountMax bound a PING task's packet count. NDAgent
+// clamps the count to this range, so a value outside it is refused rather
+// than let the device quietly send a different number of packets.
+// PingCountDefault is the agent's own default; front-ends leave it out of
+// the payload.
+const (
+	PingCountMin     = 1
+	PingCountMax     = 100
+	PingCountDefault = 4
+)
+
+// CheckPingCount refuses a PING count outside PingCountMin..PingCountMax.
+// label names the input in the message: "--count" for the CLI flag, "count"
+// for the MCP parameter and the TUI field.
+func CheckPingCount(count int, label string) error {
+	if count < PingCountMin || count > PingCountMax {
+		return &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("%s must be between %d and %d", label, PingCountMin, PingCountMax)}
+	}
+	return nil
+}
+
+// checkRunPayload is the backstop for callers that skip their front-end's
+// own check. A PING count must be a Go int: every front-end builds the
+// payload in Go, so any other type is a caller bug and is refused rather
+// than converted.
+func checkRunPayload(taskType string, payload map[string]interface{}) error {
+	if taskType != models.TaskTypePing {
+		return nil
+	}
+	count, ok := payload["count"]
+	if !ok {
+		return nil
+	}
+	n, isInt := count.(int)
+	if !isInt {
+		return &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("count must be a whole number between %d and %d", PingCountMin, PingCountMax)}
+	}
+	return CheckPingCount(n, "count")
+}
+
 // scheduledAtSkew is the backward tolerance on a scheduling instant: clock
 // drift between the client and NDManager must not reject a legitimate "now",
 // but an obviously stale timestamp is a typo worth refusing.
@@ -466,6 +506,9 @@ func (s *Service) Run(ctx context.Context, org string, opts RunOpts) (*models.Ru
 			Message: fmt.Sprintf("invalid task type: %s", opts.Type),
 		}
 	}
+	if err := checkRunPayload(taskType, opts.Payload); err != nil {
+		return nil, err
+	}
 	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
 		return nil, &Error{Code: CodeInvalidInput, Message: "name at least one device or OU, or target every enabled device in the organization"}
 	}
@@ -532,6 +575,9 @@ func (s *Service) RunRegisterSpec(ctx context.Context, org string, opts RunOpts)
 			Code:    CodeInvalidInput,
 			Message: fmt.Sprintf("invalid task type: %s", opts.Type),
 		}
+	}
+	if err := checkRunPayload(taskType, opts.Payload); err != nil {
+		return nil, err
 	}
 	if !opts.AllDevices && len(opts.Devices) == 0 && len(opts.OUs) == 0 {
 		return nil, &Error{Code: CodeInvalidInput, Message: "name at least one device or OU, or target every enabled device in the organization"}

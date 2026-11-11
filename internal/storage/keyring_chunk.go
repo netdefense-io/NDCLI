@@ -126,7 +126,7 @@ func (c chunkedKeyring) save(account string, data []byte) error {
 	budget := c.limit(c.service, account)
 	limit := budget
 	for {
-		parts, err := c.write(account, data, limit)
+		attempt, err := c.write(account, data, limit)
 		if err == nil {
 			return nil
 		}
@@ -137,11 +137,14 @@ func (c chunkedKeyring) save(account string, data []byte) error {
 			// Out of room to shrink. There is no debug flag or log on the
 			// login path, so this string is the only diagnostic anyone gets:
 			// it carries the numbers needed to tell a wrong budget from a
-			// genuinely oversized session. The account name is reported as a
-			// length and never verbatim -- it is an email address and a host,
-			// and this text ends up pasted into bug reports.
-			return fmt.Errorf("keyring rejected the session even after splitting it: %d bytes, per-entry budget %d bytes for a %d-character account name, %d parts attempted: %w",
-				len(data), budget, len(account), parts, err)
+			// genuinely oversized session. Both budgets are reported: the one
+			// our model computed for this account, and the smaller one the
+			// final attempt actually sized entries against. Quoting only the
+			// former would overstate what was tried. The account name is
+			// reported as a length and never verbatim -- it is an email
+			// address and a host, and this text ends up in bug reports.
+			return fmt.Errorf("keyring rejected the session even after splitting it: %d bytes, computed per-entry budget %d bytes for a %d-character account name, final attempt used %d parts of at most %d bytes: %w",
+				len(data), budget, len(account), attempt.parts, attempt.partBytes, err)
 		}
 		if limit /= 2; limit < minPartBytes {
 			limit = minPartBytes
@@ -183,11 +186,24 @@ func (c chunkedKeyring) nextGeneration(account string) (int, error) {
 	return (live.Gen + 1) % generations, nil
 }
 
-// write stores data, returning the number of keyring entries it used, or
-// attempted to use when it fails. save reports that count on give-up.
-func (c chunkedKeyring) write(account string, data []byte, limit int) (int, error) {
+// writeAttempt records what a write actually tried. save reports it verbatim
+// on give-up rather than recomputing, so the numbers in the error cannot drift
+// from the numbers the write was measured against.
+type writeAttempt struct {
+	// parts is the number of keyring entries used, or attempted on failure.
+	parts int
+	// partBytes is the per-entry budget those entries were sized against. For
+	// a chunked write it comes from the part-account name and the current
+	// shrink level, both of which are smaller than the primary account's
+	// budget, so reporting the latter would flatter the attempt.
+	partBytes int
+}
+
+// write stores data, reporting what it tried so save can describe an eventual
+// failure accurately.
+func (c chunkedKeyring) write(account string, data []byte, limit int) (writeAttempt, error) {
 	if limit <= 0 {
-		return 0, fmt.Errorf("keyring account name %q is too long to store a secret (%d characters leaves a %d-byte budget)", account, len(account), limit)
+		return writeAttempt{}, fmt.Errorf("keyring account name %q is too long to store a secret (%d characters leaves a %d-byte budget)", account, len(account), limit)
 	}
 
 	if len(data) > limit {
@@ -197,7 +213,7 @@ func (c chunkedKeyring) write(account string, data []byte, limit int) (int, erro
 	// One Set, atomically replacing whatever was there. Nothing else has to
 	// land for this session to be complete.
 	if err := c.ops.Set(c.service, account, string(data)); err != nil {
-		return 1, err
+		return writeAttempt{parts: 1, partBytes: limit}, err
 	}
 	// The primary entry is no longer a manifest, so every part of every
 	// generation is now unreachable. Sweeping them costs two backend calls
@@ -208,10 +224,10 @@ func (c chunkedKeyring) write(account string, data []byte, limit int) (int, erro
 	// other sweep is logout, which may never come. Two calls against an
 	// operation already dominated by a network round trip is the right trade.
 	c.pruneAllParts(account)
-	return 1, nil
+	return writeAttempt{parts: 1, partBytes: limit}, nil
 }
 
-func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (int, error) {
+func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (writeAttempt, error) {
 	// Resolved here rather than in save: which generation is free only matters
 	// once a payload turns out not to fit in a single entry, and a current
 	// session is about 1.6 KB against a ~2900-byte budget, so it nearly always
@@ -220,7 +236,7 @@ func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (int,
 	// refresh, including in the long-lived netdefense-mcp server.
 	gen, err := c.nextGeneration(account)
 	if err != nil {
-		return 0, err
+		return writeAttempt{}, err
 	}
 
 	// Part account names are longer than the primary one, so on platforms
@@ -228,15 +244,16 @@ func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (int,
 	// budget. Size all parts against the longest name we might use.
 	partLimit := c.limit(c.service, partAccount(account, gen, maxParts))
 	if partLimit <= 0 {
-		return 0, fmt.Errorf("keyring account name %q is too long to store a secret (%d characters leaves a %d-byte budget)", account, len(account), partLimit)
+		return writeAttempt{}, fmt.Errorf("keyring account name %q is too long to store a secret (%d characters leaves a %d-byte budget)", account, len(account), partLimit)
 	}
 	if partLimit > limit {
 		partLimit = limit
 	}
 
 	parts := (len(data) + partLimit - 1) / partLimit
+	attempt := writeAttempt{parts: parts, partBytes: partLimit}
 	if parts > maxParts {
-		return parts, fmt.Errorf("credentials need %d keyring entries but only %d are supported", parts, maxParts)
+		return attempt, fmt.Errorf("credentials need %d keyring entries but only %d are supported", parts, maxParts)
 	}
 
 	// These writes are invisible: the live manifest still points at the other
@@ -244,7 +261,7 @@ func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (int,
 	for i := 1; i <= parts; i++ {
 		end := min(i*partLimit, len(data))
 		if err := c.ops.Set(c.service, partAccount(account, gen, i), string(data[(i-1)*partLimit:end])); err != nil {
-			return parts, err
+			return attempt, err
 		}
 	}
 
@@ -256,20 +273,20 @@ func (c chunkedKeyring) writeParts(account string, data []byte, limit int) (int,
 		Sum:     checksum(data),
 	})
 	if err != nil {
-		return parts, fmt.Errorf("failed to build keyring manifest: %w", err)
+		return attempt, fmt.Errorf("failed to build keyring manifest: %w", err)
 	}
 
 	// The commit point. Until this Set lands the old session is what loads;
 	// after it lands the new one is, with no state in between.
 	if err := c.ops.Set(c.service, account, string(manifest)); err != nil {
-		return parts, err
+		return attempt, err
 	}
 
 	// The previous generation is unreachable now, as is any tail left by an
 	// earlier write of this generation that needed more parts.
 	c.pruneParts(account, (gen+1)%generations, 1)
 	c.pruneParts(account, gen, parts+1)
-	return parts, nil
+	return attempt, nil
 }
 
 // load returns the payload stored for account, or nil when there is none.
