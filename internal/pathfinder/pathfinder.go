@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -62,6 +64,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, ErrPathfinderNotConfigured
 	}
 	warnIfPathfinderSSLVerifyDisabled(os.Stderr)
+	warnIfPathfinderPlaintext(os.Stderr, appCfg.Pathfinder.Host)
 	return &Client{
 		host:            appCfg.Pathfinder.Host,
 		sslVerify:       appCfg.Pathfinder.SSLVerify,
@@ -88,6 +91,16 @@ func warnIfPathfinderSSLVerifyDisabled(w io.Writer) {
 	color.New(color.FgYellow).Fprintln(w, "Warning: TLS certificate verification is disabled for the connection relay "+
 		"(pathfinder.ssl_verify=false). An on-path attacker can intercept the relay connection, reading or injecting "+
 		"traffic and potentially reaching an interactive shell on the device.")
+}
+
+// warnIfPathfinderPlaintext prints a stderr line when a plaintext relay host
+// (ws:// or http://) is dialed over TLS instead.
+func warnIfPathfinderPlaintext(w io.Writer, host string) {
+	wsURL, upgraded := relayWebSocketURL(host)
+	if !upgraded {
+		return
+	}
+	color.New(color.FgYellow).Fprintf(w, "Warning: the connection relay host (pathfinder.host) %s is plaintext; connecting over TLS to %s instead. Set pathfinder.host to a wss:// URL to stop this warning.\n", host, wsURL)
 }
 
 // ErrPathfinderNotConfigured is returned when the pathfinder host is not set
@@ -334,30 +347,49 @@ func itoa(i int) string {
 
 // buildWebSocketURL constructs the WebSocket URL from the configured host
 func (c *Client) buildWebSocketURL() string {
-	host := c.host
+	wsURL, _ := relayWebSocketURL(c.host)
+	return wsURL
+}
 
-	// If already a WebSocket URL, use as-is
-	if strings.HasPrefix(host, "ws://") || strings.HasPrefix(host, "wss://") {
-		if !strings.HasSuffix(host, "/ws") {
-			host = strings.TrimSuffix(host, "/") + "/ws"
-		}
-		return host
-	}
-
-	// Convert HTTP(S) to WS(S)
-	if strings.HasPrefix(host, "https://") {
+// relayWebSocketURL turns the configured relay host into the URL to dial. The
+// relay stream carries the session key and the device's shell and WebAdmin
+// traffic, so a plaintext scheme (ws://, http://) is dialed as wss:// unless
+// the host is loopback; upgraded reports that rewrite. A host with no scheme
+// is wss://.
+func relayWebSocketURL(host string) (wsURL string, upgraded bool) {
+	switch {
+	case strings.HasPrefix(host, "wss://"):
+	case strings.HasPrefix(host, "https://"):
 		host = "wss://" + strings.TrimPrefix(host, "https://")
-	} else if strings.HasPrefix(host, "http://") {
-		host = "ws://" + strings.TrimPrefix(host, "http://")
-	} else {
-		// Assume secure WebSocket if no scheme
+	case strings.HasPrefix(host, "ws://"), strings.HasPrefix(host, "http://"):
+		rest := host[strings.Index(host, "://")+len("://"):]
+		if isLoopbackHost(rest) {
+			host = "ws://" + rest
+		} else {
+			host = "wss://" + rest
+			upgraded = true
+		}
+	default:
 		host = "wss://" + host
 	}
 
-	// Ensure /ws path
 	if !strings.HasSuffix(host, "/ws") {
 		host = strings.TrimSuffix(host, "/") + "/ws"
 	}
+	return host, upgraded
+}
 
-	return host
+// isLoopbackHost reports whether the authority at the start of rest
+// (host[:port][/path]) names localhost or a loopback address.
+func isLoopbackHost(rest string) bool {
+	u, err := url.Parse("ws://" + rest)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
