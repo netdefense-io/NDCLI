@@ -43,6 +43,8 @@ local-only/
 # release job re-renders and commits it every release, same as CHANGELOG.md.
 # Only the large build outputs below are gitignored.
 /mcpb-dist/
+# goreleaser output: keep ignored, or Go stamps the release binaries +dirty
+/dist/
 *.mcpb
 *.mcpb.sha256
 *.mcpb.smithery-payload.json

@@ -21,7 +21,7 @@ var networkPrefixCmd = &cobra.Command{
 }
 
 var networkPrefixListCmd = &cobra.Command{
-	Use:               "list [network] [device]",
+	Use:               "list <network> <device>",
 	Short:             "List published prefixes for a VPN member",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeVpnNetworkThenDevice,
@@ -29,7 +29,7 @@ var networkPrefixListCmd = &cobra.Command{
 }
 
 var networkPrefixAddCmd = &cobra.Command{
-	Use:               "add [network] [device] [variable]",
+	Use:               "add <network> <device> <variable>",
 	Short:             "Publish a prefix on a VPN member",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkDeviceVariable,
@@ -37,7 +37,7 @@ var networkPrefixAddCmd = &cobra.Command{
 }
 
 var networkPrefixUpdateCmd = &cobra.Command{
-	Use:               "update [network] [device] [variable]",
+	Use:               "update <network> <device> <variable>",
 	Short:             "Update a VPN member prefix",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkDeviceVariable,
@@ -45,7 +45,7 @@ var networkPrefixUpdateCmd = &cobra.Command{
 }
 
 var networkPrefixRemoveCmd = &cobra.Command{
-	Use:               "remove [network] [device] [variable]",
+	Use:               "remove <network> <device> <variable>",
 	Short:             "Remove a prefix from a VPN member",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkDeviceVariable,

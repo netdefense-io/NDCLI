@@ -371,7 +371,7 @@ const (
   "items": [
     {"completed_at": "2026-10-08T12:00:00Z", "track": "fast", "action": "advance", "outcome": "success",
      "reason": "applied", "kind": "minor", "target": "26.7.5", "from_version": "26.7.3", "to_version": "26.7.5", "applied": true,
-     "cleared_at": "2026-10-08T13:00:00Z", "cleared_by": "admin@acme.com"},
+     "revision": 2, "reported_revision": 3, "cleared_at": "2026-10-08T13:00:00Z", "cleared_by": "admin@acme.com"},
     {"completed_at": "2026-10-09T12:00:00Z", "track": "fast", "action": "advance", "outcome": "success",
      "reason": "applied", "kind": "major", "target": "26.7", "from_version": "26.1.11_10", "to_version": "26.7.1_1", "applied": true,
      "cleared_at": "2026-10-09T13:00:00Z", "cleared_by": "admin@acme.com"}

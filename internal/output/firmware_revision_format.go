@@ -15,6 +15,27 @@ func firmwareWithRevision(version string, revision *int) string {
 	return fmt.Sprintf("%s rev %d", version, *revision)
 }
 
+// firmwareHistoryTarget is a ledger step's target with the revision it was
+// sealed with, and the one the device reported when that differs: "26.1.11 rev
+// 2, device reported rev 3" is a held_revision_mismatch hold.
+func firmwareHistoryTarget(item *models.FirmwareHistoryItem) string {
+	target := firmwareWithRevision(item.Target, item.Revision)
+	if mismatch := firmwareReportedRevision(item); mismatch != "" {
+		return target + ", " + mismatch
+	}
+	return target
+}
+
+// firmwareReportedRevision is "device reported rev 3" when the step was sealed
+// with a revision and the device's answer named another, else "".
+func firmwareReportedRevision(item *models.FirmwareHistoryItem) string {
+	sealed, reported := item.Revision, item.ReportedRevision
+	if item.Target == "" || sealed == nil || reported == nil || *sealed == *reported {
+		return ""
+	}
+	return fmt.Sprintf("device reported rev %d", *reported)
+}
+
 // firmwarePendingText says how many package updates a device's last check found;
 // the hotfix label means installing them would not change the OPNsense version.
 func firmwarePendingText(p *models.FirmwarePending) string {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/config"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -25,7 +24,7 @@ var orgCmd = &cobra.Command{
 var orgListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organizations",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE:  runOrgList,
 }
 
@@ -75,7 +74,7 @@ var orgInviteSendCmd = &cobra.Command{
 var orgInviteListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List pending invitations",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE:  runOrgInviteList,
 }
 
@@ -118,7 +117,7 @@ var orgAccountCmd = &cobra.Command{
 var orgAccountListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organization accounts",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE:  runOrgAccountList,
 }
 
@@ -156,6 +155,7 @@ func init() {
 	orgCmd.AddCommand(orgListCmd)
 	orgCmd.AddCommand(orgCreateCmd)
 	orgCmd.AddCommand(orgDeleteCmd)
+	addYesFlag(orgDeleteCmd)
 	orgCmd.AddCommand(orgDescribeCmd)
 	orgCmd.AddCommand(orgSetDefaultOUCmd)
 	orgCmd.AddCommand(orgQuotaCmd)
@@ -173,6 +173,7 @@ func init() {
 	orgAccountCmd.AddCommand(orgAccountEnableCmd)
 	orgAccountCmd.AddCommand(orgAccountRoleCmd)
 
+	addYesFlag(orgAccountDisableCmd)
 	orgAccountDisableCmd.Flags().Bool("remove", false, "Permanently remove the account from the organization (cannot be re-enabled)")
 
 	orgListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction")
@@ -271,7 +272,7 @@ func runOrgDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 
 	name := args[0]
-	if !helpers.Confirm(fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
@@ -386,7 +387,7 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 	} else {
 		confirmMsg = fmt.Sprintf("Disable account '%s'?", email)
 	}
-	if !helpers.Confirm(confirmMsg) {
+	if !confirmUnlessYes(cmd, confirmMsg) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

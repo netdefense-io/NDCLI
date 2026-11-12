@@ -256,3 +256,33 @@ func TestParseTimeFilterIgnoresTheHostZone(t *testing.T) {
 		t.Errorf("ParseTimeFilter(30m) = %s, want between %s and %s", got, earliest.Format(time.RFC3339), latest.Format(time.RFC3339))
 	}
 }
+
+// A relative offset too large for time.Duration used to wrap around and land
+// at some arbitrary instant; every relative form now refuses it (#284), and
+// each keeps the range it accepted before.
+func TestRelativeOffsetsRefuseWhatWouldOverflow(t *testing.T) {
+	now := time.Date(2026, 11, 12, 3, 0, 0, 0, time.UTC)
+	for _, in := range []string{"99999999999999d", "9999999999999999999m", "15251w"} {
+		if _, err := ParseFutureTimeZoned(in, time.UTC); err == nil || !strings.Contains(err.Error(), "too far from now") {
+			t.Errorf("ParseFutureTimeZoned(%q) err = %v, want too far from now", in, err)
+		}
+		if _, err := parseTimeFilterAt(in, now); err == nil || !strings.Contains(err.Error(), "too far from now") {
+			t.Errorf("parseTimeFilterAt(%q) err = %v, want too far from now", in, err)
+		}
+		if _, err := ResolveTimeFilter(in, now); err == nil || !strings.Contains(err.Error(), "too far from now") {
+			t.Errorf("ResolveTimeFilter(%q) err = %v, want too far from now", in, err)
+		}
+	}
+	if got, err := parseTimeFilterAt("99999d", now); err != nil || got != now.Add(-99999*24*time.Hour).Format(time.RFC3339) {
+		t.Errorf("parseTimeFilterAt(99999d) = %q, %v; a 273-year offset fits time.Duration and must still work", got, err)
+	}
+	if _, err := ParseFutureTimeZoned("99999d", time.UTC); err != nil {
+		t.Errorf("ParseFutureTimeZoned(99999d) = %v; a 273-year offset fits time.Duration and must still work", err)
+	}
+	if _, err := ResolveTimeFilter("36500d", now); err != nil {
+		t.Errorf("ResolveTimeFilter(36500d) = %v; its 100-year bound is unchanged", err)
+	}
+	if _, err := ResolveTimeFilter("36501d", now); err == nil {
+		t.Error("ResolveTimeFilter(36501d) was accepted past its 100-year bound")
+	}
+}

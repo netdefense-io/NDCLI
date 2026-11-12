@@ -18,12 +18,14 @@ var configCmd = &cobra.Command{
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Display current configuration",
+	Args:  noArgs,
 	RunE:  runConfigShow,
 }
 
 var configResetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Reset configuration to defaults",
+	Args:  noArgs,
 	RunE:  runConfigReset,
 }
 
@@ -33,7 +35,7 @@ var configSetCmd = &cobra.Command{
 }
 
 var configSetOrgCmd = &cobra.Command{
-	Use:               "org [name]",
+	Use:               "org <name>",
 	Short:             "Set default organization",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOrganizations,
@@ -41,7 +43,7 @@ var configSetOrgCmd = &cobra.Command{
 }
 
 var configSetOutputCmd = &cobra.Command{
-	Use:   "output [format]",
+	Use:   "output <format>",
 	Short: "Set default output format (table, simple, detailed, json)",
 	Args:  cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -54,7 +56,7 @@ var configSetOutputCmd = &cobra.Command{
 }
 
 var configSetTimezoneCmd = &cobra.Command{
-	Use:   "timezone [timezone]",
+	Use:   "timezone <timezone>",
 	Short: "Set display timezone (e.g., UTC, America/New_York, Local)",
 	Args:  cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

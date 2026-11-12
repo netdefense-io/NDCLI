@@ -33,29 +33,35 @@ func completeOrganizations(cmd *cobra.Command, args []string, toComplete string)
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	return organizationNames(), cobra.ShellCompDirectiveNoFileComp
+}
 
-	// Try to initialize auth and API client silently
+// completeOrganizationFlag completes an -o/--org value. cobra hands a flag's
+// completion the positional arguments typed so far, so unlike a positional
+// completion it must not stop when there are some.
+func completeOrganizationFlag(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return organizationNames(), cobra.ShellCompDirectiveNoFileComp
+}
+
+// organizationNames lists the caller's organizations, or nothing when that
+// cannot be done silently. A test stands in for it.
+var organizationNames = func() []string {
 	if err := initForCompletion(); err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
+		return nil
 	}
-
-	ctx := context.Background()
-	resp, err := apiClient.Get(ctx, "/api/v1/organizations", nil)
+	resp, err := apiClient.Get(context.Background(), "/api/v1/organizations", nil)
 	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
+		return nil
 	}
-
 	var result models.OrganizationListResponse
 	if err := api.ParseResponse(resp, &result); err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
+		return nil
 	}
-
 	var names []string
 	for _, org := range result.GetItems() {
 		names = append(names, org.Name)
 	}
-
-	return names, cobra.ShellCompDirectiveNoFileComp
+	return names
 }
 
 // completeDevices returns device names for the current organization

@@ -312,6 +312,14 @@ func asAPIError(err error) (*APIError, bool) {
 	return apiErr, ok
 }
 
+// IsAPIError reports whether err is an answer from the control plane (an HTTP
+// error status), as opposed to a request that failed in transit or an answer
+// that did not decode.
+func IsAPIError(err error) bool {
+	_, ok := asAPIError(err)
+	return ok
+}
+
 // IsAuthError returns true if the error is an authentication error
 func IsAuthError(err error) bool {
 	apiErr, ok := asAPIError(err)

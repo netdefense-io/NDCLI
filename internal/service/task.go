@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -311,19 +313,40 @@ func (s *Service) TaskGet(ctx context.Context, taskID string) (*models.Task, err
 	return &task, nil
 }
 
-// TaskCancel cancels a pending or scheduled task.
-func (s *Service) TaskCancel(ctx context.Context, taskID string) error {
+// TaskCancel cancels a task and says what happened, in NDManager's outcome:
+// CANCELED for a PENDING or SCHEDULED task (or an IN_PROGRESS CONNECT),
+// SESSION_CLOSED for a COMPLETED CONNECT task whose relay session it closed
+// (that task stays COMPLETED). A control plane that predates outcome sends
+// only its message, and Outcome is then empty.
+func (s *Service) TaskCancel(ctx context.Context, taskID string) (*models.TaskCancelResult, error) {
 	if taskID == "" {
-		return &Error{Code: CodeInvalidInput, Message: "task id is required"}
+		return nil, &Error{Code: CodeInvalidInput, Message: "task id is required"}
 	}
 	resp, err := s.api.Put(ctx, fmt.Sprintf("/api/v1/tasks/%s/cancel", taskID), nil)
 	if err != nil {
-		return wrapAPI("%v", err)
+		return nil, wrapAPI("%v", err)
 	}
-	if err := api.ParseResponse(resp, nil); err != nil {
-		return wrapAPI("%v", err)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		return nil, wrapAPI("%v", api.ParseError(resp))
 	}
-	return nil
+	// The cancel has taken effect, so a 2xx body that is empty or not JSON
+	// only loses what it says; it must not turn the call into a failure. A
+	// body that fails to decode is not used at all: DecodeJSON sanitizes only
+	// a decode that succeeds, and a field of the wrong type still fills the
+	// others.
+	result := &models.TaskCancelResult{Task: taskID, Message: "Task cancelled"}
+	var body struct {
+		Message string `json:"message"`
+		Outcome string `json:"outcome"`
+	}
+	if raw, err := api.ReadBody(resp.Body); err == nil && len(raw) > 0 && api.DecodeJSON(bytes.NewReader(raw), &body) == nil {
+		result.Outcome = body.Outcome
+		if body.Message != "" {
+			result.Message = body.Message
+		}
+	}
+	return result, nil
 }
 
 // RunOpts is the typed input for Service.Run. The Type uses NDDataModels
@@ -376,13 +399,62 @@ func CheckPingCount(count int, label string) error {
 	return nil
 }
 
+// PingHostMaxLength is the longest PING target NDAgent runs, the RFC 1035
+// limit on a hostname.
+const PingHostMaxLength = 253
+
+// CheckPingHost is the PING target as it is sent: host with surrounding spaces
+// trimmed. It refuses what NDAgent's ping handler refuses, so a target never
+// reaches a device only to fail there: a missing or blank host, anything but
+// ASCII letters, digits, dots and hyphens (so a second host, an IPv6 address,
+// a control character or an invisible one pasted from a page), and more than
+// PingHostMaxLength characters. A leading hyphen is refused too: ping would
+// read it as an option. label names the input in the message: "--host" for the
+// CLI flag, "host" for the MCP parameter and the TUI field.
+func CheckPingHost(host, label string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", &Error{Code: CodeInvalidInput, Message: label + " is required for ping"}
+	}
+	if addr, err := netip.ParseAddr(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")); err == nil && addr.Is6() {
+		msg := label + " must be an IPv4 address or a hostname: devices do not ping IPv6 addresses yet"
+		if addr.Is4In6() {
+			msg += "; give " + addr.Unmap().String()
+		}
+		return "", &Error{Code: CodeInvalidInput, Message: msg}
+	}
+	if strings.IndexFunc(host, func(r rune) bool { return !isPingHostRune(r) }) >= 0 {
+		return "", &Error{Code: CodeInvalidInput, Message: label + " must be one IPv4 address or hostname, in letters, digits, dots and hyphens"}
+	}
+	if host[0] == '-' {
+		return "", &Error{Code: CodeInvalidInput, Message: label + " must not start with a hyphen"}
+	}
+	if len(host) > PingHostMaxLength {
+		return "", &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("%s must be at most %d characters", label, PingHostMaxLength)}
+	}
+	return host, nil
+}
+
+func isPingHostRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-'
+}
+
 // checkRunPayload is the backstop for callers that skip their front-end's
-// own check. A PING count must be a Go int: every front-end builds the
-// payload in Go, so any other type is a caller bug and is refused rather
-// than converted.
+// own check. A PING needs a target as CheckPingHost sends it, and its count
+// must be a Go int: every front-end builds the payload in Go, so any other
+// type is a caller bug and is refused rather than converted.
 func checkRunPayload(taskType string, payload map[string]interface{}) error {
 	if taskType != models.TaskTypePing {
 		return nil
+	}
+	target, isString := payload["target"].(string)
+	if _, present := payload["target"]; present && !isString {
+		return &Error{Code: CodeInvalidInput, Message: "target must be a string: one IPv4 address or hostname"}
+	}
+	if checked, err := CheckPingHost(target, "target"); err != nil {
+		return err
+	} else if checked != target {
+		return &Error{Code: CodeInvalidInput, Message: "target must not have surrounding spaces"}
 	}
 	count, ok := payload["count"]
 	if !ok {

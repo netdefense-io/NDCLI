@@ -38,7 +38,8 @@ var (
 func tooManyAfter(v string) answer { return answer{status: 429, retryAfter: v} }
 
 // scriptedConnect answers POST /connect and GET connect-status from the two
-// scripts in order, repeating the last answer when a script runs out.
+// scripts in order, repeating the last answer when a script runs out. The
+// cancel a connect sends when it gives up is answered and not counted.
 func scriptedConnect(t *testing.T, posts, gets []answer) (*httptest.Server, func() int, func() int) {
 	t.Helper()
 	var mu sync.Mutex
@@ -59,6 +60,8 @@ func scriptedConnect(t *testing.T, posts, gets []answer) (*httptest.Server, func
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/connect-status"):
 			a = next(gets, nGet)
 			nGet++
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/cancel"):
+			a = answer{status: http.StatusOK, raw: `{"message": "Task cancelled successfully"}`}
 		default:
 			mu.Unlock()
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -385,8 +388,12 @@ func TestConsoleConnectCancelDuringAPollIsNotRetried(t *testing.T) {
 	var gets atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPost:
 			_ = json.NewEncoder(w).Encode(connectOK.body)
+			return
+		case http.MethodPut:
+			_, _ = w.Write([]byte(`{"message": "Task cancelled successfully"}`))
 			return
 		}
 		gets.Add(1)

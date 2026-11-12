@@ -440,7 +440,9 @@ func (s *Server) registerFirmwareTools() {
 			"outcome, reason, target, the releases it moved between (from_version, to_version) and whether it applied "+
 			"anything. kind is minor (an ordinary update) or major (a major upgrade; target is then the series); it is absent "+
 			"from an NDManager that predates major upgrades. A failed step an operator cleared carries cleared_at and "+
-			"cleared_by. revision (when present) is the revision of the release the step's answer reported. "+firmwareOutcomeGuide+" The reason codes are the ones ndcli.firmware.status lists.",
+			"cleared_by. revision (when present) is the revision of the target release the step was sealed with (what the track "+
+			"approved); reported_revision (when present) is the one the device's answer reported, and differs from revision on a "+
+			"held_revision_mismatch hold or when the release was rewritten during the step. "+firmwareOutcomeGuide+" The reason codes are the ones ndcli.firmware.status lists.",
 		firmwareOrgProps(mergeProps(map[string]interface{}{
 			"device": stringProperty("Device name (required)"),
 		}, pageProps)), []string{"device"},

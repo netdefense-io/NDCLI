@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -77,6 +78,9 @@ func (e *RateLimitedError) Error() string {
 	return "relay is rate limiting new sessions (HTTP 429); retry in a few seconds"
 }
 
+// maxRelayRetryAfter bounds a relay Retry-After.
+const maxRelayRetryAfter = 24 * time.Hour
+
 // parseRetryAfter reads a Retry-After header given either as seconds or as an
 // HTTP date. It returns 0 when absent or unparseable.
 func parseRetryAfter(v string) time.Duration {
@@ -84,15 +88,22 @@ func parseRetryAfter(v string) time.Duration {
 	if v == "" {
 		return 0
 	}
-	if secs, err := strconv.Atoi(v); err == nil {
-		if secs < 0 {
+	// Both forms are capped at maxRelayRetryAfter, as the API client caps
+	// them: the seconds before multiplying, so an absurd value cannot wrap to
+	// a short wait, and a far-off date so it cannot reach the saturated
+	// duration that RetryAfterSeconds would overflow on.
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		if secs < 0 || strings.HasPrefix(v, "-") {
 			return 0
+		}
+		if err != nil || secs > int64(maxRelayRetryAfter/time.Second) {
+			return maxRelayRetryAfter
 		}
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		if d := time.Until(t); d > 0 {
-			return d
+			return min(d, maxRelayRetryAfter)
 		}
 	}
 	return 0

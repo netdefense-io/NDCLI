@@ -29,7 +29,9 @@ type ClientConfig struct {
 	WebAdminPort    int              // 0 = auto-assign, >0 = specific port
 	WebAdminOnly    bool             // Skip the interactive shell; serve webadmin until quit
 	OnProgress      ProgressCallback // Optional progress callback
-	IsTTY           bool             // Whether output is a TTY (for WebAdmin box)
+	OnPaired        func()           // Optional; called once the device has paired
+	IsTTY           bool             // Whether stdout is a terminal (WebAdmin box, messages)
+	StdinIsTTY      bool             // Whether stdin is a terminal; the shell needs both
 }
 
 // Client represents a Pathfinder WebSocket client
@@ -41,8 +43,10 @@ type Client struct {
 	webAdminPort    int
 	webAdminOnly    bool
 	onProgress      ProgressCallback
+	onPaired        func()
 	relayRetryAfter time.Duration
 	isTTY           bool
+	stdinIsTTY      bool
 	endReported     bool
 }
 
@@ -74,7 +78,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		webAdminPort:    cfg.WebAdminPort,
 		webAdminOnly:    cfg.WebAdminOnly,
 		onProgress:      cfg.OnProgress,
+		onPaired:        cfg.OnPaired,
 		isTTY:           cfg.IsTTY,
+		stdinIsTTY:      cfg.StdinIsTTY,
 	}, nil
 }
 
@@ -147,15 +153,16 @@ func (c *Client) RelayRetryAfter() time.Duration {
 // dialRelay connects a new RelayClient. A 429 whose Retry-After is at most
 // maxRelayRetryWait is waited out and dialed once more; a second refusal, a
 // longer Retry-After, or a context deadline sooner than the wait is returned
-// as is. The returned stop func releases the ctx watcher.
-func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, func(), error) {
+// as is. The returned stop func releases the ctx watcher; it reports false
+// when the watcher had already fired, so ctx has ended the connection.
+func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, func() bool, error) {
 	c.relayRetryAfter = 0
 	for attempt := 0; ; attempt++ {
 		relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
 		stop := context.AfterFunc(ctx, relay.cancel)
 		err := relay.Connect()
 		if err == nil {
-			return relay, func() { stop() }, nil
+			return relay, stop, nil
 		}
 		stop()
 
@@ -194,16 +201,24 @@ func (c *Client) progress(msg string) {
 //   - With a terminal: the interactive shell runs in the foreground. When it
 //     ends (the user types exit, or the agent refuses it on a read-only
 //     session), the webadmin tunnel keeps serving until the user quits.
-//   - Webadmin-only (--webadmin-only, a non-TTY, or a refused shell): no
-//     terminal is started; the tunnel serves until the user quits.
+//   - Webadmin-only (--webadmin-only, no terminal on stdin or stdout, or a
+//     refused shell): no terminal is started; the tunnel serves until the
+//     user quits.
 func (c *Client) Connect() error {
+	return c.ConnectContext(context.Background())
+}
+
+// ConnectContext is Connect that gives up, and closes the relay connection,
+// when ctx ends before the device pairs. Once it has paired the session no
+// longer follows ctx: the user ends it, as Connect describes.
+func (c *Client) ConnectContext(ctx context.Context) error {
 	// Build WebSocket URL
 	wsURL := c.buildWebSocketURL()
 
 	c.progress("Connecting to relay server...")
 
 	// Connect to the relay server
-	relay, stopWatch, err := c.dialRelay(context.Background(), wsURL)
+	relay, stopWatch, err := c.dialRelay(ctx, wsURL)
 	if err != nil {
 		return err
 	}
@@ -223,6 +238,14 @@ func (c *Client) Connect() error {
 	if err := relay.WaitForPairing(120 * time.Second); err != nil {
 		return &PathfinderError{Message: "pairing failed: " + err.Error()}
 	}
+	// ctx may have ended just as the device paired; the relay is closing
+	// then, so the connect is given up like any other before pairing.
+	if !stopWatch() {
+		return &PathfinderError{Message: "pairing failed: " + context.Cause(ctx).Error(), Err: ctx.Err()}
+	}
+	if c.onPaired != nil {
+		c.onPaired()
+	}
 	defer c.reportEnd(relay) // keep above relay.Close in run order; see the Close defer
 
 	// Create stream manager and wire it to the relay so the relay can close
@@ -230,31 +253,28 @@ func (c *Client) Connect() error {
 	streamMgr := NewStreamManager(relay)
 	relay.SetStreamManager(streamMgr)
 
-	// Start webadmin tunnel if enabled
 	var tunnel *Tunnel
 	var webAdminURL string
 	if c.webAdminEnabled {
-		tunnel = NewTunnel(c.webAdminPort, "webadmin", streamMgr)
-		if err := tunnel.Start(); err != nil {
-			// Non-fatal: just skip the tunnel
-		} else {
+		var err error
+		tunnel, err = c.startTunnel(streamMgr, os.Stderr)
+		if err != nil {
+			return err
+		}
+		if tunnel != nil {
+			defer func() { _ = tunnel.Stop() }()
 			webAdminURL = "http://localhost:" + itoa(tunnel.Port())
 		}
-	}
-	if tunnel != nil {
-		defer tunnel.Stop()
 	}
 
 	// Show the WebAdmin link up front — while the terminal (if any) is still
 	// active — so the user knows where to connect before interacting with the
 	// shell. The keep-alive wait below repeats only a short reminder.
-	if c.isTTY && webAdminURL != "" {
-		output.WebAdminBox(webAdminURL)
+	if webAdminURL != "" {
+		c.announceWebAdmin(os.Stderr, webAdminURL)
 	}
 
-	// Whether we can/should run an interactive shell. A non-TTY (piped) stdin
-	// has no terminal, and --webadmin-only opts out explicitly.
-	tryShell := c.isTTY && !c.webAdminOnly
+	tryShell := c.shellWanted()
 
 	if tryShell {
 		c.progress("Starting shell...")
@@ -271,6 +291,9 @@ func (c *Client) Connect() error {
 		} else if outcome.Refused {
 			// Read-only session: the agent refused the shell. Keep serving
 			// webadmin (the whole point of an RO connect) until the user quits.
+			if err := c.refusedShellError(tunnel != nil); err != nil {
+				return err
+			}
 			if c.isTTY {
 				fmt.Println("Read-only session — terminal disabled by the device.")
 			}
@@ -294,6 +317,52 @@ func (c *Client) Connect() error {
 	stage("Connect: entering waitForQuit")
 	c.waitForQuit(relay, webAdminURL)
 	return nil
+}
+
+// startTunnel opens the local webadmin tunnel. When it cannot listen (a busy
+// --webadmin-port, say) and a shell will run, the session goes on without it
+// and says so on stderr; with no shell there is nothing left to serve, so the
+// failure is the command's.
+func (c *Client) startTunnel(streamMgr *StreamManager, stderr io.Writer) (*Tunnel, error) {
+	tunnel := NewTunnel(c.webAdminPort, "webadmin", streamMgr)
+	if err := tunnel.Start(); err != nil {
+		if !c.shellWanted() {
+			return nil, &PathfinderError{Message: "webadmin tunnel did not start: " + err.Error(), Err: err}
+		}
+		_, _ = fmt.Fprintf(stderr, "WebAdmin tunnel did not start: %v\n", err)
+		return nil, nil
+	}
+	return tunnel, nil
+}
+
+// refusedShellError is the session's failure when the device refused the
+// shell and no tunnel is up to serve instead; nil while one is.
+func (c *Client) refusedShellError(tunnelUp bool) error {
+	if tunnelUp {
+		return nil
+	}
+	if c.webAdminEnabled {
+		return &PathfinderError{Message: "the device refused the terminal (read-only session) and the webadmin tunnel did not start"}
+	}
+	return &PathfinderError{Message: "the device refused the terminal (read-only session), and --no-webadmin left nothing to serve"}
+}
+
+// shellWanted says whether to open the interactive shell. It needs a terminal
+// on stdin (raw mode, keystrokes) and on stdout (the remote screen), and
+// --webadmin-only opts out.
+func (c *Client) shellWanted() bool {
+	return c.isTTY && c.stdinIsTTY && !c.webAdminOnly
+}
+
+// announceWebAdmin shows where the tunnel listens: the box on a terminal, and
+// otherwise a plain line on stderr, so a script or a nohup run can find a port
+// that was assigned automatically.
+func (c *Client) announceWebAdmin(stderr io.Writer, url string) {
+	if c.isTTY {
+		output.WebAdminBox(url)
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, "WebAdmin tunnel: %s\n", url)
 }
 
 // waitForQuit blocks until the user quits (Ctrl-C / SIGTERM) or the relay

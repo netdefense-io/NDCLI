@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
@@ -27,15 +26,8 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 	// Build URL with version parameter
 	url := fmt.Sprintf("%s/api/v1/cli/config?version=%s", cfg.Controlplane.Host, config.Version)
 
-	// Create HTTP client (respects SSL verify setting)
-	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !cfg.Controlplane.SSLVerify,
-			},
-		},
-	}
+	httpClient := newCLIConfigClient(cfg.Controlplane.SSLVerify)
+	defer httpClient.CloseIdleConnections()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -75,4 +67,11 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 	}
 
 	return &cliConfig, nil
+}
+
+func newCLIConfigClient(sslVerify bool) *http.Client {
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: newTransport(sslVerify),
+	}
 }

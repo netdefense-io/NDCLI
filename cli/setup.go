@@ -20,6 +20,7 @@ The wizard guides you through:
 
 This wizard runs automatically when NDCLI is first used without a config file.
 You can also run it manually at any time with 'ndcli setup'.`,
+	Args: noArgs,
 	RunE: runSetup,
 	// Override PersistentPreRunE to skip normal config loading
 	// The wizard handles its own config initialization

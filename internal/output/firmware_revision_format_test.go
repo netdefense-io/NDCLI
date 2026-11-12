@@ -116,3 +116,44 @@ func TestFirmwareLatestNote(t *testing.T) {
 		}
 	}
 }
+
+// A step sealed with one revision whose device reported another (a
+// held_revision_mismatch hold) shows both in every human format, and json
+// carries reported_revision (#313). A matching or missing one adds nothing.
+func TestFirmwareHistoryShowsAReportedRevisionThatDiffers(t *testing.T) {
+	history := &models.FirmwareHistory{DeviceName: "fw-a", Total: 2, Page: 1, PerPage: 50, Pages: 1, Items: []models.FirmwareHistoryItem{
+		{CompletedAt: "2026-10-24T12:00:00Z", Track: "fast", Action: "advance", Outcome: "held", Reason: "held_revision_mismatch",
+			Target: "26.1.11", Revision: intRef(2), ReportedRevision: intRef(3), FromVersion: "26.1.10", ToVersion: "26.1.10"},
+		{CompletedAt: "2026-10-23T12:00:00Z", Track: "fast", Action: "advance", Outcome: "success", Reason: "applied",
+			Target: "26.1.10", Revision: intRef(1), ReportedRevision: intRef(1), FromVersion: "26.1.9", ToVersion: "26.1.10", Applied: true},
+	}}
+	fs, bufs := plainFormatters(t)
+	for _, name := range []string{"table", "simple", "detailed"} {
+		if err := fs[name].FormatFirmwareHistory(history); err != nil {
+			t.Fatal(err)
+		}
+		out := bufs[name].String()
+		if !strings.Contains(out, "26.1.11 rev 2") || !strings.Contains(out, "device reported rev 3") {
+			t.Errorf("%s output does not show the sealed and the reported revision:\n%s", name, out)
+		}
+		if strings.Count(out, "device reported") != 1 {
+			t.Errorf("%s output names a reported revision for the step where it matches:\n%s", name, out)
+		}
+	}
+	if err := fs["json"].FormatFirmwareHistory(history); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bufs["json"].String(), `"reported_revision": 3`) {
+		t.Errorf("json lacks reported_revision:\n%s", bufs["json"].String())
+	}
+
+	for _, item := range []models.FirmwareHistoryItem{
+		{Target: "26.1.11", Revision: intRef(2), ReportedRevision: intRef(2)},
+		{Target: "26.1.11", ReportedRevision: intRef(3)},
+		{Target: "26.1.11", Revision: intRef(2)},
+	} {
+		if got := firmwareReportedRevision(&item); got != "" {
+			t.Errorf("firmwareReportedRevision(%+v) = %q, want none", item, got)
+		}
+	}
+}

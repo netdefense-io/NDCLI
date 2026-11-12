@@ -1127,7 +1127,7 @@ func firmwareHistoryFields(item *models.FirmwareHistoryItem) []firmwareField {
 	fields = append(fields,
 		firmwareField{"Outcome", firmwareOutcomeDisplay(item.Outcome)},
 		firmwareField{"Reason", firmwareReasonFull(item.Reason)},
-		firmwareField{"Target", firmwareDashIfEmpty(firmwareWithRevision(item.Target, item.Revision))},
+		firmwareField{"Target", firmwareDashIfEmpty(firmwareHistoryTarget(item))},
 		firmwareField{"Versions", firmwareVersionMove(item.FromVersion, item.ToVersion)},
 		firmwareField{"Applied", firmwareYesNo(item.Applied)},
 	)
@@ -1160,7 +1160,7 @@ func (f *TableFormatter) FormatFirmwareHistory(h *models.FirmwareHistory) error 
 		table.Append(append(row,
 			firmwareOutcomeDisplay(item.Outcome),
 			firmwareReasonCell(item.Reason),
-			firmwareDashIfEmpty(firmwareWithRevision(item.Target, item.Revision)),
+			firmwareDashIfEmpty(firmwareHistoryTarget(item)),
 			firmwareVersionMove(item.FromVersion, item.ToVersion),
 			firmwareYesNo(item.Applied),
 			firmwareHistoryNote(item),
@@ -1192,6 +1192,9 @@ func (f *SimpleFormatter) FormatFirmwareHistory(h *models.FirmwareHistory) error
 		}
 		if item.Reason != "" {
 			fmt.Fprintf(f.Writer, " — %s", firmwareReasonCell(item.Reason))
+		}
+		if mismatch := firmwareReportedRevision(item); mismatch != "" {
+			fmt.Fprintf(f.Writer, " (target %s, %s)", firmwareWithRevision(item.Target, item.Revision), mismatch)
 		}
 		if note := firmwareHistoryNote(item); note != "" {
 			fmt.Fprintf(f.Writer, " [%s]", note)

@@ -97,7 +97,7 @@ var firmwareConfigCmd = &cobra.Command{
 var firmwareConfigShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the firmware configuration and its three tracks",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE:  runFirmwareConfigShow,
 }
 
@@ -123,7 +123,7 @@ and reboots the device. --no-reboot makes the steps apply the userland packages
 only, leaving base and kernel for a later update.
 
 Requires a plan that includes firmware tracks.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareConfigCreate,
 }
 
@@ -144,7 +144,7 @@ var firmwareConfigSetCmd = &cobra.Command{
 	Long: `Change whether the update steps reboot the device. With --reboot a step applies
 the full update, base and kernel included, and reboots; with --no-reboot it
 applies the userland packages only.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareConfigSet,
 }
 
@@ -168,7 +168,7 @@ var firmwareConfigEnableCmd = &cobra.Command{
 	Short: "Enable firmware tracks",
 	Long: `Enable the firmware configuration. Enabling does not bring any device back into
 a track; add them again with 'ndcli firmware device set'.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareConfigEnable,
 }
 
@@ -191,7 +191,7 @@ the device becomes unmanaged. Enabling again does not bring them back.
 
 Still works on a plan without firmware tracks while the organization has a
 firmware configuration, so the configuration can be wound down.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareConfigDisable,
 }
 
@@ -228,7 +228,7 @@ Still works on a plan without firmware tracks while the organization has a
 firmware configuration, so the configuration can be wound down. Both ways of
 releasing its devices, disabling firmware and moving devices to unmanaged, work
 there too.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareConfigDelete,
 }
 
@@ -485,7 +485,7 @@ it when not), its boot-environment setting with what the last major upgrade did
 about it, and the third-party repository or package that upgrade found. A device
 the control plane released by itself (its release folder vanished, or it was out
 of contact for 30 days) is unmanaged and says so until it is added again.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareStatus,
 }
 
@@ -553,7 +553,7 @@ eligible, already on the series, or upgraded by a track, what blocks it, and the
 failures that block a series in the later tracks. Last, the control plane's check
 of NetDefense's own package repository for the FreeBSD versions an upgrade
 crosses.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runFirmwareRollout,
 }
 
@@ -743,7 +743,7 @@ By default only the halts of releases are listed. --kind major lists those of
 major upgrades instead, each with its series, and --kind all lists both, told
 apart by their kind.`,
 	Example: `  ndcli firmware version halts --kind all`,
-	Args:    cobra.NoArgs,
+	Args:    noArgs,
 	RunE:    runFirmwareVersionHalts,
 }
 

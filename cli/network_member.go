@@ -21,7 +21,7 @@ var networkMemberCmd = &cobra.Command{
 }
 
 var networkMemberListCmd = &cobra.Command{
-	Use:               "list [network]",
+	Use:               "list <network>",
 	Short:             "List VPN network members",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeVpnNetworks,
@@ -29,7 +29,7 @@ var networkMemberListCmd = &cobra.Command{
 }
 
 var networkMemberAddCmd = &cobra.Command{
-	Use:               "add [network] [device]",
+	Use:               "add <network> <device>",
 	Short:             "Add a device as VPN member",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeVpnNetworkThenDevice,
@@ -37,7 +37,7 @@ var networkMemberAddCmd = &cobra.Command{
 }
 
 var networkMemberDescribeCmd = &cobra.Command{
-	Use:               "describe [network] [device]",
+	Use:               "describe <network> <device>",
 	Short:             "Show VPN member details",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeVpnNetworkThenDevice,
@@ -45,7 +45,7 @@ var networkMemberDescribeCmd = &cobra.Command{
 }
 
 var networkMemberUpdateCmd = &cobra.Command{
-	Use:               "update [network] [device]",
+	Use:               "update <network> <device>",
 	Short:             "Update a VPN member",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeVpnNetworkThenDevice,
@@ -53,7 +53,7 @@ var networkMemberUpdateCmd = &cobra.Command{
 }
 
 var networkMemberRemoveCmd = &cobra.Command{
-	Use:               "remove [network] [device]",
+	Use:               "remove <network> <device>",
 	Short:             "Remove a VPN member",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeVpnNetworkThenDevice,

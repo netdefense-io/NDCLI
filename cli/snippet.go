@@ -35,11 +35,12 @@ var snippetExampleCmd = &cobra.Command{
 var snippetListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List snippets",
+	Args:  noArgs,
 	RunE:  runSnippetList,
 }
 
 var snippetCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new snippet",
 	Long:  snippetCreateLong,
 	Args:  cobra.ExactArgs(1),
@@ -191,7 +192,7 @@ device's value. Leave uuid out.
 Prerequisites: ` + models.CrowdsecPrerequisites + `.`
 
 var snippetDescribeCmd = &cobra.Command{
-	Use:               "describe [name]",
+	Use:               "describe <name>",
 	Short:             "Show snippet details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSnippets,
@@ -199,7 +200,7 @@ var snippetDescribeCmd = &cobra.Command{
 }
 
 var snippetEditCmd = &cobra.Command{
-	Use:               "edit [name]",
+	Use:               "edit <name>",
 	Short:             "Edit snippet content in external editor",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSnippets,
@@ -207,7 +208,7 @@ var snippetEditCmd = &cobra.Command{
 }
 
 var snippetUpdateContentCmd = &cobra.Command{
-	Use:               "update-content [name] [file]",
+	Use:               "update-content <name> <file>",
 	Short:             "Update snippet content from file",
 	Long:              "Replace a snippet's content with the contents of a file.\n\n" + models.SnippetUUIDGuidance + "\n\n" + models.SnippetFieldContract,
 	Args:              cobra.ExactArgs(2),
@@ -216,7 +217,7 @@ var snippetUpdateContentCmd = &cobra.Command{
 }
 
 var snippetRenameCmd = &cobra.Command{
-	Use:               "rename [name] [new-name]",
+	Use:               "rename <name> <new-name>",
 	Short:             "Rename a snippet",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSnippets,
@@ -224,7 +225,7 @@ var snippetRenameCmd = &cobra.Command{
 }
 
 var snippetSetPriorityCmd = &cobra.Command{
-	Use:               "set-priority [name] [priority]",
+	Use:               "set-priority <name> <priority>",
 	Short:             "Set snippet priority",
 	Long:              "Set a snippet's priority (1-60000). " + models.SingletonPriorityRule,
 	Args:              cobra.ExactArgs(2),
@@ -233,7 +234,7 @@ var snippetSetPriorityCmd = &cobra.Command{
 }
 
 var snippetDeleteCmd = &cobra.Command{
-	Use:               "delete [name]",
+	Use:               "delete <name>",
 	Short:             "Delete a snippet",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSnippets,
@@ -241,7 +242,7 @@ var snippetDeleteCmd = &cobra.Command{
 }
 
 var snippetPullCmd = &cobra.Command{
-	Use:   "pull [device] [match-key]",
+	Use:   "pull <device> <match-key>",
 	Short: "Pull snippet content from a device",
 	Long: `Pull snippet content from a device's configuration.
 
@@ -293,6 +294,7 @@ func init() {
 	snippetCmd.AddCommand(snippetRenameCmd)
 	snippetCmd.AddCommand(snippetSetPriorityCmd)
 	snippetCmd.AddCommand(snippetDeleteCmd)
+	addYesFlag(snippetDeleteCmd)
 	snippetCmd.AddCommand(snippetPullCmd)
 	snippetCmd.AddCommand(snippetExampleCmd)
 
@@ -561,7 +563,7 @@ func runSnippetDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !internalHelpers.Confirm(fmt.Sprintf("Delete snippet '%s'?", name)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete snippet '%s'?", name)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

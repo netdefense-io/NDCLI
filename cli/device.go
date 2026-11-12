@@ -3,12 +3,16 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
@@ -26,11 +30,12 @@ var deviceCmd = &cobra.Command{
 var deviceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List devices",
+	Args:  noArgs,
 	RunE:  runDeviceList,
 }
 
 var deviceApproveCmd = &cobra.Command{
-	Use:               "approve [device]",
+	Use:               "approve <device>",
 	Short:             "Approve a pending device",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completePendingDevices,
@@ -38,7 +43,7 @@ var deviceApproveCmd = &cobra.Command{
 }
 
 var deviceRenameCmd = &cobra.Command{
-	Use:               "rename [device] [new-name]",
+	Use:               "rename <device> <new-name>",
 	Short:             "Rename a device",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeDevices,
@@ -46,7 +51,7 @@ var deviceRenameCmd = &cobra.Command{
 }
 
 var deviceRemoveCmd = &cobra.Command{
-	Use:   "remove [device]",
+	Use:   "remove <device>",
 	Short: "Remove a device",
 	Long: `Remove a device.
 
@@ -59,7 +64,7 @@ Removal is permanent and triggers self-decommission on the device.
 }
 
 var deviceDescribeCmd = &cobra.Command{
-	Use:               "describe [device]",
+	Use:               "describe <device>",
 	Short:             "Show device details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -69,11 +74,12 @@ var deviceDescribeCmd = &cobra.Command{
 var deviceApproveAllCmd = &cobra.Command{
 	Use:   "approve-all",
 	Short: "Approve all pending devices",
+	Args:  noArgsHint(staticHint("to approve one device, use ndcli device approve <device>")),
 	RunE:  runDeviceApproveAll,
 }
 
 var deviceConnectCmd = &cobra.Command{
-	Use:   "connect [device]",
+	Use:   "connect <device>",
 	Short: "Connect to a device through the connection relay",
 	Long: `Connect to a device through the NetDefense connection relay.
 
@@ -90,14 +96,16 @@ In-session key bindings:
 
 The WebAdmin tunnel remains active after the shell exits until you press
 Ctrl-C at the keep-alive prompt (or run with --webadmin-only to skip the
-shell entirely).`,
+shell entirely). If stdin or stdout is not a terminal, as in a script or
+under nohup, the shell is skipped; if stdout is not one, the tunnel's URL is
+printed on stderr.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
 	RunE:              runDeviceConnect,
 }
 
 var deviceRebindTokenCmd = &cobra.Command{
-	Use:   "rebind-token [device]",
+	Use:   "rebind-token <device>",
 	Short: "Issue a one-time re-bind token for the device's signing key",
 	Long: `Issue a one-time Re-bind Token authorising a fresh signing-key binding for a device.
 
@@ -127,7 +135,7 @@ Operator workflow:
 // dashboard endpoint's drill-down sibling. Returns the full agent
 // snapshot: resources, disks, services, pending updates, cert expiries.
 var deviceHealthCmd = &cobra.Command{
-	Use:   "health [device]",
+	Use:   "health <device>",
 	Short: "Show the device's instantaneous health snapshot",
 	Long: `Show the instantaneous health snapshot for a device.
 
@@ -149,6 +157,7 @@ func init() {
 	deviceCmd.AddCommand(deviceApproveCmd)
 	deviceCmd.AddCommand(deviceRenameCmd)
 	deviceCmd.AddCommand(deviceRemoveCmd)
+	addYesFlag(deviceRemoveCmd)
 	deviceCmd.AddCommand(deviceDescribeCmd)
 	deviceCmd.AddCommand(deviceHealthCmd)
 	deviceCmd.AddCommand(deviceApproveAllCmd)
@@ -159,7 +168,7 @@ func init() {
 	deviceConnectCmd.Flags().Duration("timeout", 5*time.Minute, "Connection timeout")
 	deviceConnectCmd.Flags().Int("webadmin-port", 0, "Local port for webadmin tunnel (default: auto-assign)")
 	deviceConnectCmd.Flags().Bool("no-webadmin", false, "Disable webadmin tunnel")
-	deviceConnectCmd.Flags().Bool("webadmin-only", false, "Skip the interactive terminal and keep the webadmin tunnel open until you quit (Ctrl-C). Auto-enabled when the device refuses a terminal, e.g. read-only sessions.")
+	deviceConnectCmd.Flags().Bool("webadmin-only", false, "Skip the interactive terminal and keep the webadmin tunnel open until you quit (Ctrl-C). Auto-enabled when the device refuses a terminal (e.g. read-only sessions) or when stdin or stdout is not a terminal.")
 
 	// Rebind-token flags
 	deviceRebindTokenCmd.Flags().Duration("ttl", 24*time.Hour, "Token validity window (max 7d)")
@@ -254,9 +263,9 @@ func runDeviceRemove(cmd *cobra.Command, args []string) error {
 
 	deviceName := args[0]
 	for _, line := range deviceRemoveWarningLines(deviceName) {
-		color.New(color.FgRed).Println(line)
+		_, _ = color.New(color.FgRed).Fprintln(os.Stderr, line)
 	}
-	if !helpers.Confirm(fmt.Sprintf("Remove device '%s'?", deviceName)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Remove device '%s'?", deviceName)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}
@@ -327,6 +336,49 @@ func runDeviceApproveAll(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// connectTerminals reports whether stdout and stdin are terminals. It is a
+// variable so a test can stand in for them.
+var connectTerminals = func() (stdout, stdin bool) {
+	return term.IsTerminal(int(os.Stdout.Fd())), term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// connectRefusal refuses, before a CONNECT task is created, a connect that
+// would open neither a shell nor a webadmin tunnel.
+func connectRefusal(noWebadmin, webadminOnly, stdoutTTY, stdinTTY bool) error {
+	if !noWebadmin {
+		return nil
+	}
+	if webadminOnly {
+		return &service.Error{Code: service.CodeInvalidInput, Message: "--webadmin-only and --no-webadmin leave nothing to connect"}
+	}
+	if !stdoutTTY || !stdinTTY {
+		return &service.Error{Code: service.CodeInvalidInput, Message: "--no-webadmin leaves only the shell, and a shell needs a terminal on stdin and stdout"}
+	}
+	return nil
+}
+
+// connectClientConfig is the relay client's configuration. The terminal
+// reads are the ones connectRefusal judged, so the refusal and the shell
+// decision follow one rule.
+func connectClientConfig(sessionID string, webadminPort int, noWebadmin, webadminOnly bool, onProgress pathfinder.ProgressCallback, stdoutTTY, stdinTTY bool) pathfinder.ClientConfig {
+	return pathfinder.ClientConfig{
+		SessionID:       sessionID,
+		WebAdminEnabled: !noWebadmin,
+		WebAdminPort:    webadminPort,
+		WebAdminOnly:    webadminOnly,
+		OnProgress:      onProgress,
+		IsTTY:           stdoutTTY,
+		StdinIsTTY:      stdinTTY,
+	}
+}
+
+// connectSignalContext ends when the user interrupts (Ctrl-C) or the process
+// is told to stop, until stop is called. A variable so a test can stand in for
+// the signal.
+var connectSignalContext = func() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
 func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
@@ -336,8 +388,16 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	webadminPort, _ := cmd.Flags().GetInt("webadmin-port")
 	noWebadmin, _ := cmd.Flags().GetBool("no-webadmin")
 	webadminOnly, _ := cmd.Flags().GetBool("webadmin-only")
+	stdoutTTY, stdinTTY := connectTerminals()
+	if err := connectRefusal(noWebadmin, webadminOnly, stdoutTTY, stdinTTY); err != nil {
+		return err
+	}
 
-	ctx := context.Background()
+	// Until the device pairs, an interrupt gives the connect up, so the CONNECT
+	// task is cancelled below rather than left for the device to join. Once
+	// paired, the session's own handling of Ctrl-C and signals takes over.
+	ctx, stopSignals := connectSignalContext()
+	defer stopSignals()
 
 	// Create spinner for connection progress
 	spinner := output.NewConnectSpinner(deviceName)
@@ -347,7 +407,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/connect", org, deviceName), nil)
 	if err != nil {
 		spinner.Stop()
-		return err
+		return connectError(ctx, err)
 	}
 
 	var initResp models.ConnectInitResponse
@@ -355,6 +415,22 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 		spinner.Stop()
 		return err
 	}
+
+	// Whatever ends the connect before the user has a session (a timeout, an
+	// interrupt, a failed poll, a relay that refused or never paired) leaves the
+	// task to a device that would join a session nobody uses, or the device's
+	// leg waiting on the relay. Cancelling it closes both; a task that already
+	// ended on its own (FAILED, CANCELED, EXPIRED) or a session the user ended
+	// needs nothing.
+	settled := false
+	defer func() {
+		if !settled {
+			// Hand the signals back first: a second Ctrl-C while the cancel
+			// waits on a slow control plane must still end the process.
+			stopSignals()
+			_ = svc.CloseConnectSession(initResp.Task)
+		}
+	}()
 
 	// Step 2: Poll for session readiness
 	spinner.UpdateMessage("Waiting for device...")
@@ -371,7 +447,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 		resp, err := apiClient.Get(ctx, fmt.Sprintf("/api/v1/tasks/%s/connect-status", initResp.Task), nil)
 		if err != nil {
 			spinner.Stop()
-			return err
+			return connectError(ctx, err)
 		}
 
 		var statusResp models.ConnectStatusResponse
@@ -400,14 +476,15 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 
 			// Step 3: Connect via Pathfinder
 			// Pass spinner callback to pathfinder
-			client, err := pathfinder.NewClient(pathfinder.ClientConfig{
-				SessionID:       payload.PathfinderSession,
-				WebAdminEnabled: !noWebadmin,
-				WebAdminPort:    webadminPort,
-				WebAdminOnly:    webadminOnly,
-				OnProgress:      spinner.UpdateMessage,
-				IsTTY:           spinner.IsTTY(),
-			})
+			cfg := connectClientConfig(payload.PathfinderSession, webadminPort, noWebadmin, webadminOnly, spinner.UpdateMessage, stdoutTTY, stdinTTY)
+			// Stopping the signal context also cancels ctx, so from here an
+			// error is the session's own, not an interrupt.
+			paired := false
+			cfg.OnPaired = func() {
+				paired = true
+				stopSignals()
+			}
+			client, err := pathfinder.NewClient(cfg)
 			if err != nil {
 				spinner.Stop()
 				return err
@@ -415,9 +492,17 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 
 			// Stop spinner before shell starts (pathfinder will show WebAdmin box)
 			spinner.Stop()
-			return client.Connect()
+			if err := client.ConnectContext(ctx); err != nil {
+				if paired {
+					return err
+				}
+				return connectError(ctx, err)
+			}
+			settled = true
+			return nil
 
 		case models.TaskStatusFailed:
+			settled = true
 			spinner.Stop()
 			msg := statusResp.Message
 			if msg == "" {
@@ -426,16 +511,32 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("connection failed: %s", msg)
 
 		case models.TaskStatusCanceled:
+			settled = true
 			spinner.Stop()
 			return fmt.Errorf("connection was cancelled")
 
 		case models.TaskStatusExpired:
+			settled = true
 			spinner.Stop()
 			return fmt.Errorf("connection task expired")
 		}
 
-		time.Sleep(pollInterval)
+		select {
+		case <-ctx.Done():
+			spinner.Stop()
+			return connectError(ctx, ctx.Err())
+		case <-time.After(pollInterval):
+		}
 	}
+}
+
+// connectError is err, or "connect interrupted" once the user's interrupt is
+// what ended it.
+func connectError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return errors.New("connect interrupted")
+	}
+	return err
 }
 
 func runDeviceRebindToken(cmd *cobra.Command, args []string) error {

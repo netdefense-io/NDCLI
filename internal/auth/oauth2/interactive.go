@@ -54,8 +54,8 @@ func NewInteractiveAuth(authResp *models.DeviceAuthResponse, pollFunc func() (*m
 	return &InteractiveAuth{
 		URL:       authResp.VerificationURIComplete,
 		UserCode:  authResp.UserCode,
-		ExpiresIn: time.Duration(authResp.ExpiresIn) * time.Second,
-		Interval:  time.Duration(authResp.Interval) * time.Second,
+		ExpiresIn: providerDuration(authResp.ExpiresIn, defaultDeviceCodeLifetimeUnits, maxDeviceCodeLifetimeUnits),
+		Interval:  providerDuration(authResp.Interval, defaultPollIntervalUnits, maxPollIntervalUnits),
 		PollFunc:  pollFunc,
 	}
 }
@@ -96,8 +96,9 @@ func (ia *InteractiveAuth) Wait(ctx context.Context) (*models.TokenResponse, Aut
 
 	// Setup deadline and intervals
 	deadline := time.Now().Add(ia.ExpiresIn)
+	// A zero or negative interval would make NewTicker panic.
 	pollInterval := ia.Interval
-	if pollInterval == 0 {
+	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
 	}
 

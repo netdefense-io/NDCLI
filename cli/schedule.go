@@ -32,7 +32,7 @@ task specs are addressed by their server-generated code (8-char base62).`,
 var scheduleListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List cadence schedules",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE:  runScheduleList,
 }
 
@@ -79,7 +79,7 @@ var scheduleCreateCmd = &cobra.Command{
 
 Use ndcli run --schedule <name> or ndcli sync apply --schedule <name> to
 register task specs against this schedule.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runScheduleCreate,
 }
 
@@ -210,7 +210,7 @@ With --schedule <name>, only specs belonging to that schedule are returned
 A spec of kind FIRMWARE is the update window of a firmware track and is listed
 with the track's name (for example "fast track window"); -f json carries it as
 firmware_track, null for every other kind.`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: runScheduleTasksList,
 }
 

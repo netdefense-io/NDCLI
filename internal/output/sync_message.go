@@ -226,6 +226,13 @@ func symbolForResult(r syncResultEntry) string {
 	if r.Status == "warning" {
 		return "⚠"
 	}
+	// A "skipped" item is neither done nor failed: NDAgent left it alone on
+	// purpose (os-crowdsec absent for a CROWDSEC item, for one), and the task
+	// still completes. A skip that needs attention comes as "warning", and a
+	// skip caused by a failure carries a failure status.
+	if r.Status == "skipped" {
+		return "·"
+	}
 	if r.Status != "" && r.Status != "success" && r.Status != "ok" {
 		return "✗"
 	}

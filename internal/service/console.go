@@ -15,6 +15,9 @@ import (
 
 // ConsoleConnectResult is the resolved pathfinder session ready to dial.
 type ConsoleConnectResult struct {
+	// Task is the CONNECT task's code. A caller that gives the session up
+	// before handing it on passes it to CloseConnectSession.
+	Task string
 	// PathfinderSession is the session key for the relay, extracted from the
 	// completed CONNECT task payload.
 	PathfinderSession string
@@ -50,7 +53,9 @@ var consoleWait = func(ctx context.Context, d time.Duration) error {
 
 // consoleRetryWait says how long to wait before trying again after err, the
 // attempt-th failure in a row, or ok=false when err is not retried. A 429 is
-// always retried. A 500/502/503/504 or a transport error is retried only for a
+// always retried, which is safe for POST /connect only while NDManager's 429s
+// come before its handler (see the comment in ConsoleConnect's step 1). A
+// 500/502/503/504 or a transport error is retried only for a
 // request that can be repeated safely: a POST /connect that got one may have
 // created the CONNECT task already. A context error, which a per-request
 // client timeout also is, is never retried.
@@ -81,13 +86,6 @@ func consoleRetryWait(err error, attempt int, repeatable bool) (wait time.Durati
 		return apiErr.RetryAfter, apiErr.RetryAfter <= maxConsoleRetryWait
 	}
 	return time.Second << attempt, true
-}
-
-// isAPIError reports whether err is a control-plane answer (an HTTP error
-// status) rather than a transport or decode failure.
-func isAPIError(err error) bool {
-	var apiErr *api.APIError
-	return errors.As(err, &apiErr)
 }
 
 // ConsoleConnect runs the control-plane connect flow for a device:
@@ -140,10 +138,15 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 			if err == nil {
 				break
 			}
-			if !isAPIError(err) {
+			if !api.IsAPIError(err) {
 				return nil, wrapAPI("parse connect init response: %v", err)
 			}
 		}
+		// Retrying POST /connect on a 429 is safe only because every 429
+		// NDManager sends comes before the handler runs (its rate-limit
+		// middleware and route dependency), so no CONNECT task exists yet. A
+		// quota checked inside the handler would need its own error code,
+		// excluded here, or a 429 would start a second session.
 		wait, ok := consoleRetryWait(err, attempt, false)
 		if !ok || time.Now().Add(wait).After(retryBy) {
 			return nil, wrapAPI("initiate connect: %v", err)
@@ -156,6 +159,17 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 	if initResp.Task == "" {
 		return nil, &Error{Code: CodeAPIError, Message: "connect response missing task ID"}
 	}
+
+	// A connect given up before it completes (a timeout, ctx done, a failed
+	// poll) cancels the task, or a device that picks it up later would wait on
+	// the relay for a session nobody joins. A task that ended on its own, or a
+	// session handed to the caller, needs nothing here.
+	settled := false
+	defer func() {
+		if !settled {
+			_ = s.CloseConnectSession(initResp.Task)
+		}
+	}()
 
 	// Step 2: poll for completion
 	pollInterval := 3 * time.Second
@@ -179,7 +193,7 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 		statusResp, pollErr := s.api.Get(ctx, fmt.Sprintf("/api/v1/tasks/%s/connect-status", initResp.Task), nil)
 		if pollErr == nil {
 			pollErr = api.ParseResponse(statusResp, &status)
-			if pollErr != nil && !isAPIError(pollErr) {
+			if pollErr != nil && !api.IsAPIError(pollErr) {
 				return nil, wrapAPI("parse connect status: %v", pollErr)
 			}
 		}
@@ -213,7 +227,9 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 			if payload.PathfinderSession == "" {
 				return nil, &Error{Code: CodeAPIError, Message: "connect payload has no relay session (pathfinder_session)"}
 			}
+			settled = true
 			return &ConsoleConnectResult{
+				Task:              initResp.Task,
 				PathfinderSession: payload.PathfinderSession,
 				DeviceName:        deviceName,
 				// Authoritative read-only flag from NDManager (nil on older
@@ -222,6 +238,7 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 			}, nil
 
 		case models.TaskStatusFailed:
+			settled = true
 			msg := status.Message
 			if msg == "" {
 				msg = "unknown error"
@@ -229,14 +246,61 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 			return nil, &Error{Code: CodeAPIError, Message: "connect task failed: " + msg}
 
 		case models.TaskStatusCanceled:
+			settled = true
 			return nil, &Error{Code: CodeAPIError, Message: "connect task was cancelled"}
 
 		case models.TaskStatusExpired:
+			settled = true
 			return nil, &Error{Code: CodeAPIError, Message: "connect task expired"}
 		}
 		// PENDING / IN_PROGRESS: continue polling
 		progress(fmt.Sprintf("Waiting for %s to pick up the connect task (%s, %ds left)", deviceName, status.Status, int(time.Until(deadline).Seconds())))
 	}
+}
+
+// connectCloseTimeout bounds CloseConnectSession, retry included.
+const connectCloseTimeout = 10 * time.Second
+
+// CloseConnectSession cancels a CONNECT task the caller gives up before
+// handing its session on. A task not yet completed (a timeout, an interrupt, a
+// failed poll) is cancelled, so the device never joins a session nobody uses.
+// For a completed one (a refused or failed relay connection, a read-only
+// console, a relay client that could not be built) NDManager deletes the
+// relay session, which closes the device's leg at once instead of leaving it
+// to wait out the session's TTL (NDPathFinder #30). A session that is already
+// gone counts as closed. It is best effort, so the caller reports
+// its own failure, not this one, and it runs on its own deadline because the
+// caller's context may be what ended the connect. A relay that could not close
+// the session (502 REMOTE_SESSION_UNAVAILABLE) gets one more try.
+func (s *Service) CloseConnectSession(task string) error {
+	if task == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectCloseTimeout)
+	defer cancel()
+	_, err := s.TaskCancel(ctx, task)
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadGateway && apiErr.Code == "REMOTE_SESSION_UNAVAILABLE" {
+		if waitErr := consoleWait(ctx, time.Second); waitErr != nil {
+			return err
+		}
+		_, err = s.TaskCancel(ctx, task)
+	}
+	return err
+}
+
+// MaxConsoleExecTimeoutSeconds is the longest a single console command may run;
+// a longer timeout is clamped to it.
+const MaxConsoleExecTimeoutSeconds = 3600
+
+// consoleExecTimeout is a command's timeout: 60 s unless set, and clamped to
+// MaxConsoleExecTimeoutSeconds before multiplying, so a huge timeout_seconds
+// cannot overflow the duration and wrap to an arbitrary or negative timeout.
+func consoleExecTimeout(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(min(seconds, MaxConsoleExecTimeoutSeconds)) * time.Second
 }
 
 // ConsoleExecOpts controls a single command execution over an open console session.
@@ -261,12 +325,7 @@ func (s *Service) ExecOnHandle(ctx context.Context, handle *pathfinder.ExecHandl
 		return nil, &Error{Code: CodeInvalidInput, Message: "command is required"}
 	}
 
-	timeout := time.Duration(opts.TimeoutSeconds) * time.Second
-	if opts.TimeoutSeconds <= 0 {
-		timeout = 60 * time.Second
-	}
-
-	stdout, stderr, exitCode, truncated, err := handle.Exec(ctx, opts.Command, timeout)
+	stdout, stderr, exitCode, truncated, err := handle.Exec(ctx, opts.Command, consoleExecTimeout(opts.TimeoutSeconds))
 	if err != nil {
 		return nil, &Error{
 			Code:    CodeAPIError,

@@ -170,7 +170,13 @@ func (c *Client) ConnectExecContext(ctx context.Context) (*ExecHandle, error) {
 
 	c.progress("Waiting for device...")
 
-	stopBeat := c.heartbeat(pairingHeartbeat, execPairingTimeout)
+	// The wait ends at the earlier of the pairing timeout and ctx's deadline,
+	// so the countdown in the heartbeat does too.
+	pairingLeft := execPairingTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		pairingLeft = min(pairingLeft, time.Until(dl))
+	}
+	stopBeat := c.heartbeat(pairingHeartbeat, pairingLeft)
 	err = relay.WaitForPairing(execPairingTimeout)
 	stopBeat()
 	if err != nil {

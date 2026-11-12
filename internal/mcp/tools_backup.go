@@ -40,6 +40,7 @@ type backupConfigUpdateInput struct {
 type backupConfigSetScheduleInput struct {
 	Organization string  `json:"organization,omitempty"`
 	ScheduleName *string `json:"schedule_name"` // null/absent = detach
+	Confirm      bool    `json:"confirm,omitempty"`
 }
 
 type backupStatusListInput struct {
@@ -88,12 +89,13 @@ func (s *Server) registerBackupTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.backup.config_set_schedule",
-		Description: "Attach the org's backup to a named Schedule (creates a BACKUP spec), or detach it. Provide schedule_name to attach; omit or set to null to detach. The named Schedule must already exist in the org (404 otherwise).",
+		Description: "Attach the org's backup to a named Schedule (creates a BACKUP spec), or detach it. Provide schedule_name to attach; omit or set to null to detach. The named Schedule must already exist in the org (404 otherwise). Detaching stops scheduled backups, so it requires confirm=true (without it, returns a preview); attaching does not.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization":  organizationProperty(),
 				"schedule_name": stringProperty("Name of the Schedule to attach to. Omit or set to null to detach."),
+				"confirm":       confirmProperty(),
 			},
 		},
 	}, s.handleBackupConfigSetSchedule)
@@ -488,6 +490,10 @@ func (s *Server) handleBackupConfigSetSchedule(ctx context.Context, req *mcp.Cal
 	targetName := ""
 	if input.ScheduleName != nil {
 		targetName = *input.ScheduleName
+	}
+	if targetName == "" && !input.Confirm {
+		return s.previewResultWithNote("detach from its schedule the backup of", org,
+			"Scheduled backups stop until the backup is attached to a schedule again.", nil)
 	}
 
 	apiCtx, cancel := contextWithTimeout()

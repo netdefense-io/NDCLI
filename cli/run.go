@@ -64,12 +64,13 @@ backup enabled, starts now, and cannot be deferred or scheduled.`,
 func init() {
 	pingCmd := newRunSubcommand(
 		"ping",
-		"Ping a target IP or hostname from the device(s)",
+		"Ping an IPv4 address or hostname from the device(s)",
 		func(cmd *cobra.Command, opts *service.RunOpts) error {
 			host, _ := cmd.Flags().GetString("host")
 			count, _ := cmd.Flags().GetInt("count")
-			if host == "" {
-				return &service.Error{Code: service.CodeInvalidInput, Message: "--host is required for ping"}
+			host, err := service.CheckPingHost(host, "--host")
+			if err != nil {
+				return err
 			}
 			if err := service.CheckPingCount(count, "--count"); err != nil {
 				return err
@@ -82,7 +83,7 @@ func init() {
 			return nil
 		},
 	)
-	pingCmd.Flags().String("host", "", "Target IP or hostname to ping (required)")
+	pingCmd.Flags().String("host", "", "IPv4 address or hostname to ping (required; IPv6 is not supported yet)")
 	pingCmd.Flags().Int("count", service.PingCountDefault, fmt.Sprintf("Number of ping packets, %d to %d", service.PingCountMin, service.PingCountMax))
 	_ = pingCmd.MarkFlagRequired("host")
 
@@ -185,6 +186,16 @@ and installs nothing. Read the result with "ndcli task describe <task-id>".`
 	runCmd.AddCommand(pingCmd, powerCmd, restartCmd, pluginInstallCmd, pluginReloadCmd, firmwareUpgradeCmd)
 }
 
+// runTargetsHint answers a word given to the run command name, which takes
+// its targets from flags only. A word given to ping is most likely the host.
+func runTargetsHint(name string) func(string) string {
+	hint := "choose devices with --device <name>, --ou <name> or --all"
+	if name == "ping" {
+		hint = "the host to ping is --host; " + hint
+	}
+	return staticHint(hint)
+}
+
 // newRunSubcommand builds a `ndcli run <name>` subcommand wired with the
 // shared target + scheduling flags. `extra` populates command-specific
 // payload from flags; pass nil for commands that take no payload params.
@@ -192,7 +203,7 @@ func newRunSubcommand(name, short string, extra func(*cobra.Command, *service.Ru
 	cmd := &cobra.Command{
 		Use:   name,
 		Short: short,
-		Args:  cobra.NoArgs,
+		Args:  noArgsHint(runTargetsHint(name)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			requireAuth()
 			org := requireOrganization()
@@ -297,6 +308,7 @@ func addAllDevicesFlags(cmd *cobra.Command, usage string) {
 	cmd.Flags().Bool("org", false, usage)
 	_ = cmd.Flags().MarkDeprecated("org", orgFlagDeprecation)
 	cmd.Flags().StringVarP(&orgName, "organization", "o", "", "organization name (overrides config)")
+	_ = cmd.RegisterFlagCompletionFunc("organization", completeOrganizationFlag)
 }
 
 // allDevicesFlag reports --all, or the deprecated boolean --org.

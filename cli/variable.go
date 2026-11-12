@@ -124,6 +124,7 @@ var varDeviceCmd = &cobra.Command{Use: "device", Short: "Manage device-level var
 var varOverviewCmd = &cobra.Command{
 	Use:   "overview",
 	Short: "Show all variables with their definitions across scopes",
+	Args:  noArgs,
 	RunE:  runVarOverview,
 }
 
@@ -182,13 +183,13 @@ func makeVarListCommand(meta variableScopeMeta) *cobra.Command {
 
 func varListUseShortArgs(meta variableScopeMeta) (string, string, cobra.PositionalArgs) {
 	if meta.requiresEntity {
-		return fmt.Sprintf("list [%s]", meta.entityName),
+		return fmt.Sprintf("list <%s>", meta.entityName),
 			fmt.Sprintf("List variables for a %s", meta.displayName),
 			cobra.ExactArgs(1)
 	}
 	return "list",
 		fmt.Sprintf("List %s-level variables", meta.displayName),
-		cobra.NoArgs
+		noArgs
 }
 
 func makeVarListHandler(meta variableScopeMeta) func(*cobra.Command, []string) error {
@@ -221,11 +222,11 @@ func makeVarDescribeCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
 	if meta.requiresEntity {
-		use = fmt.Sprintf("describe [%s] [variable]", meta.entityName)
+		use = fmt.Sprintf("describe <%s> <variable>", meta.entityName)
 		short = fmt.Sprintf("Show details of a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
-		use = "describe [variable]"
+		use = "describe <variable>"
 		short = fmt.Sprintf("Show details of an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}
@@ -261,11 +262,11 @@ func makeVarCreateCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var minArgs, maxArgs int
 	if meta.requiresEntity {
-		use = fmt.Sprintf("create [%s] [name] [value]", meta.entityName)
+		use = fmt.Sprintf("create <%s> <name> [value]", meta.entityName)
 		short = fmt.Sprintf("Create a %s variable", meta.displayName)
 		minArgs, maxArgs = 2, 3
 	} else {
-		use = "create [name] [value]"
+		use = "create <name> [value]"
 		short = fmt.Sprintf("Create an %s-level variable", meta.displayName)
 		minArgs, maxArgs = 1, 2
 	}
@@ -342,11 +343,11 @@ func makeVarSetCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
 	if meta.requiresEntity {
-		use = fmt.Sprintf("set [%s] [variable]", meta.entityName)
+		use = fmt.Sprintf("set <%s> <variable>", meta.entityName)
 		short = fmt.Sprintf("Update a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
-		use = "set [variable]"
+		use = "set <variable>"
 		short = fmt.Sprintf("Update an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}
@@ -433,11 +434,11 @@ func makeVarDeleteCommand(meta variableScopeMeta) *cobra.Command {
 	var use, short string
 	var args cobra.PositionalArgs
 	if meta.requiresEntity {
-		use = fmt.Sprintf("delete [%s] [variable]", meta.entityName)
+		use = fmt.Sprintf("delete <%s> <variable>", meta.entityName)
 		short = fmt.Sprintf("Delete a %s variable", meta.displayName)
 		args = cobra.ExactArgs(2)
 	} else {
-		use = "delete [variable]"
+		use = "delete <variable>"
 		short = fmt.Sprintf("Delete an %s-level variable", meta.displayName)
 		args = cobra.ExactArgs(1)
 	}

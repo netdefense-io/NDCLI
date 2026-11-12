@@ -63,7 +63,7 @@ control plane. It is never sent from here.`,
   ndcli run backup --ou edge-routers
   ndcli run backup --all
   ndcli run backup --all -o branch-office`,
-	Args: cobra.NoArgs,
+	Args: noArgsHint(runTargetsHint("backup")),
 	RunE: runRunBackup,
 }
 

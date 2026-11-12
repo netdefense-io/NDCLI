@@ -8,9 +8,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// The mcp and cli tests keep themselves off the production relay with
-// NDCLI_PATHFINDER_HOST (their TestMain). That only works if a bound variable
-// survives Load, which rebuilds the config and restores the defaults.
+// Tests keep themselves off the production relay with NDCLI_PATHFINDER_HOST
+// (relayguard.Run as TestMain in mcp, cli, tui and service). That only works
+// if a bound variable survives Load, which rebuilds the config and restores
+// the defaults.
 func TestAnEnvironmentHostSurvivesLoad(t *testing.T) {
 	const relay = "ws://127.0.0.1:1"
 	t.Setenv("NDCLI_PATHFINDER_HOST", relay)

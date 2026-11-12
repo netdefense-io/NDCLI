@@ -130,6 +130,7 @@ func prepareRootCommand() {
 	rootCmd.InitDefaultHelpCmd()
 	rootCmd.InitDefaultCompletionCmd()
 	enforceSubcommands(rootCmd)
+	completeNothingWithoutArgs(rootCmd)
 }
 
 func init() {
@@ -195,6 +196,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 		"config file path")
 	rootCmd.PersistentFlags().StringVarP(&orgName, "org", "o", "",
 		"organization name (overrides config)")
+	_ = rootCmd.RegisterFlagCompletionFunc("org", completeOrganizationFlag)
 	rootCmd.PersistentFlags().StringVarP(&outputFmt, "format", "f", "",
 		"output format: table, simple, detailed, json")
 
@@ -323,6 +325,7 @@ func isTokenMutationCommand(cmd *cobra.Command) bool {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
+	Args:  noArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("ndcli version %s\n", config.Version)
 		fmt.Printf("Build time: %s\n", config.BuildTime)

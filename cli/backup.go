@@ -29,18 +29,18 @@ var backupConfigCmd = &cobra.Command{
 	Short: "Organization backup configuration",
 }
 
-var backupConfigShowCmd = &cobra.Command{Use: "show", Short: "Show backup configuration", RunE: runBackupConfigShow}
-var backupConfigSetCmd = &cobra.Command{Use: "set", Short: "Create or update backup configuration", RunE: runBackupConfigSet}
-var backupConfigDeleteCmd = &cobra.Command{Use: "delete", Short: "Delete backup configuration", RunE: runBackupConfigDelete}
-var backupConfigEnableCmd = &cobra.Command{Use: "enable", Short: "Enable backup configuration", RunE: runBackupConfigEnable}
-var backupConfigDisableCmd = &cobra.Command{Use: "disable", Short: "Disable backup configuration", RunE: runBackupConfigDisable}
-var backupConfigTestCmd = &cobra.Command{Use: "test", Short: "Test S3 connection", RunE: runBackupConfigTest}
+var backupConfigShowCmd = &cobra.Command{Use: "show", Short: "Show backup configuration", Args: noArgs, RunE: runBackupConfigShow}
+var backupConfigSetCmd = &cobra.Command{Use: "set", Short: "Create or update backup configuration", Args: noArgs, RunE: runBackupConfigSet}
+var backupConfigDeleteCmd = &cobra.Command{Use: "delete", Short: "Delete backup configuration", Args: noArgs, RunE: runBackupConfigDelete}
+var backupConfigEnableCmd = &cobra.Command{Use: "enable", Short: "Enable backup configuration", Args: noArgs, RunE: runBackupConfigEnable}
+var backupConfigDisableCmd = &cobra.Command{Use: "disable", Short: "Disable backup configuration", Args: noArgs, RunE: runBackupConfigDisable}
+var backupConfigTestCmd = &cobra.Command{Use: "test", Short: "Test S3 connection", Args: noArgs, RunE: runBackupConfigTest}
 
 // Device backup commands
-var backupStatusCmd = &cobra.Command{Use: "status", Short: "List all device backup statuses", RunE: runBackupStatus}
+var backupStatusCmd = &cobra.Command{Use: "status", Short: "List all device backup statuses", Args: noArgs, RunE: runBackupStatus}
 
 var backupShowCmd = &cobra.Command{
-	Use:               "show [device]",
+	Use:               "show <device>",
 	Short:             "Show specific device backup status",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -48,7 +48,7 @@ var backupShowCmd = &cobra.Command{
 }
 
 var backupEnableCmd = &cobra.Command{
-	Use:               "enable [device]",
+	Use:               "enable <device>",
 	Short:             "Enable backup for a device",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -56,7 +56,7 @@ var backupEnableCmd = &cobra.Command{
 }
 
 var backupDisableCmd = &cobra.Command{
-	Use:               "disable [device]",
+	Use:               "disable <device>",
 	Short:             "Disable backup for a device",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -67,7 +67,7 @@ var backupDisableCmd = &cobra.Command{
 var backupEncryptionKeyCmd = &cobra.Command{Use: "encryption-key", Short: "Device backup encryption key management"}
 
 var backupEncryptionKeySetCmd = &cobra.Command{
-	Use:               "set [device]",
+	Use:               "set <device>",
 	Short:             "Set device-specific encryption key",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -75,7 +75,7 @@ var backupEncryptionKeySetCmd = &cobra.Command{
 }
 
 var backupEncryptionKeyRemoveCmd = &cobra.Command{
-	Use:               "remove [device]",
+	Use:               "remove <device>",
 	Short:             "Remove device encryption key override (use org default)",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
@@ -86,6 +86,7 @@ func init() {
 	backupConfigCmd.AddCommand(backupConfigShowCmd)
 	backupConfigCmd.AddCommand(backupConfigSetCmd)
 	backupConfigCmd.AddCommand(backupConfigDeleteCmd)
+	addYesFlag(backupConfigDeleteCmd)
 	backupConfigCmd.AddCommand(backupConfigEnableCmd)
 	backupConfigCmd.AddCommand(backupConfigDisableCmd)
 	backupConfigCmd.AddCommand(backupConfigTestCmd)
@@ -286,7 +287,7 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 func runBackupConfigDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-	if !helpers.Confirm("Delete backup configuration? This will also disable backup for all devices.") {
+	if !confirmUnlessYes(cmd, "Delete backup configuration? This will also disable backup for all devices.") {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

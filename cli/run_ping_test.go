@@ -61,3 +61,23 @@ func TestRunPingHelpStatesTheCountRange(t *testing.T) {
 		t.Errorf("--count help does not state the range:\n%s", usage)
 	}
 }
+
+// --host goes through service.CheckPingHost: surrounding spaces are trimmed
+// before it is sent, and a blank host, two hosts or an IPv6 address is
+// refused with no request.
+func TestRunPingChecksTheHost(t *testing.T) {
+	requests, _, stderr, code := runRecorded(t, http.StatusCreated, runPingResponse, "-f", "json", "run", "ping", "--device", "fw1", "--host", " 1.1.1.1 ")
+	if code != 0 || len(requests) != 1 || !reflect.DeepEqual(requests[0].body["payload"], map[string]any{"target": "1.1.1.1"}) {
+		t.Errorf("padded host: exit %d, requests %+v, stderr %s; want target 1.1.1.1", code, requests, stderr)
+	}
+	for host, msg := range map[string]string{
+		"   ":             "--host is required for ping",
+		"1.1.1.1 8.8.8.8": "--host must be one IPv4 address or hostname, in letters, digits, dots and hyphens",
+		"2001:db8::1":     "--host must be an IPv4 address or a hostname: devices do not ping IPv6 addresses yet",
+	} {
+		requests, _, stderr, code := runRecorded(t, http.StatusCreated, runPingResponse, "run", "ping", "--device", "fw1", "--host", host)
+		if code == 0 || len(requests) != 0 || !strings.Contains(stderr, msg) {
+			t.Errorf("host %q: exit %d, %d request(s), stderr %q; want %q and no request", host, code, len(requests), stderr, msg)
+		}
+	}
+}

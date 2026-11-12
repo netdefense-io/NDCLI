@@ -36,11 +36,12 @@ server returned rather than the one it had before.`,
 var ticketListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the organization's tickets",
+	Args:  noArgs,
 	RunE:  runTicketList,
 }
 
 var ticketShowCmd = &cobra.Command{
-	Use:   "show [code]",
+	Use:   "show <code>",
 	Short: "Show a ticket and its messages",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketShow,
@@ -49,39 +50,40 @@ var ticketShowCmd = &cobra.Command{
 var ticketCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Open a new ticket",
+	Args:  noArgs,
 	RunE:  runTicketCreate,
 }
 
 var ticketUpdateCmd = &cobra.Command{
-	Use:   "update [code]",
+	Use:   "update <code>",
 	Short: "Change a ticket's subject, priority, category or devices",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketUpdate,
 }
 
 var ticketCloseCmd = &cobra.Command{
-	Use:   "close [code]",
+	Use:   "close <code>",
 	Short: "Close a ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketClose,
 }
 
 var ticketReopenCmd = &cobra.Command{
-	Use:   "reopen [code]",
+	Use:   "reopen <code>",
 	Short: "Reopen a closed ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketReopen,
 }
 
 var ticketMessagesCmd = &cobra.Command{
-	Use:   "messages [code]",
+	Use:   "messages <code>",
 	Short: "List a ticket's messages",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketMessages,
 }
 
 var ticketReplyCmd = &cobra.Command{
-	Use:   "reply [code]",
+	Use:   "reply <code>",
 	Short: "Post a reply visible to support",
 	Long: `Post a reply on a ticket.
 
@@ -92,7 +94,7 @@ reopens it; the status printed is the one the server returned.`,
 }
 
 var ticketNoteCmd = &cobra.Command{
-	Use:   "note [code]",
+	Use:   "note <code>",
 	Short: "Post an internal note visible only to your organization",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketNote,
@@ -104,14 +106,14 @@ var ticketParticipantCmd = &cobra.Command{
 }
 
 var ticketParticipantAddCmd = &cobra.Command{
-	Use:   "add [code] [email]",
+	Use:   "add <code> <email>",
 	Short: "Add an organization member to a ticket",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runTicketParticipantAdd,
 }
 
 var ticketParticipantRemoveCmd = &cobra.Command{
-	Use:   "remove [code] [email]",
+	Use:   "remove <code> <email>",
 	Short: "Remove a participant from a ticket",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runTicketParticipantRemove,
@@ -123,7 +125,7 @@ var ticketAttachmentCmd = &cobra.Command{
 }
 
 var ticketAttachmentUploadCmd = &cobra.Command{
-	Use:   "upload [path]",
+	Use:   "upload <path>",
 	Short: "Upload a file and print its attachment uuid",
 	Long: `Upload a file and print its attachment uuid.
 
@@ -135,14 +137,14 @@ reply; unbound uploads are swept after 24 hours. Most of the time you want
 }
 
 var ticketAttachmentDeleteCmd = &cobra.Command{
-	Use:   "delete [uuid]",
+	Use:   "delete <uuid>",
 	Short: "Delete an attachment that is not yet bound to a ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTicketAttachmentDelete,
 }
 
 var ticketDownloadCmd = &cobra.Command{
-	Use:   "download [code] [attachment-uuid]",
+	Use:   "download <code> <attachment-uuid>",
 	Short: "Download a ticket attachment",
 	Long: `Download an attachment from a ticket.
 

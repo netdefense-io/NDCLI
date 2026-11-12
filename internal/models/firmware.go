@@ -646,8 +646,15 @@ type FirmwareHistoryItem struct {
 	FromVersion string `json:"from_version,omitempty"`
 	ToVersion   string `json:"to_version,omitempty"`
 	Applied     bool   `json:"applied"`
-	// Revision is the revision of the release the step's answer reported.
+	// Revision is the revision of the target release the step was sealed with
+	// (what the track approved); nil when the step sealed none.
 	Revision *int `json:"revision,omitempty"`
+	// ReportedRevision is the revision of the target release the device's
+	// answer reported it holds or saw; nil when it reported none, or when the
+	// control plane has not recorded that content as a revision yet. It
+	// differs from Revision on a held_revision_mismatch hold or when the
+	// release was rewritten during the step.
+	ReportedRevision *int `json:"reported_revision,omitempty"`
 	// ClearedAt and ClearedBy say when an operator cleared the failure.
 	ClearedAt string `json:"cleared_at,omitempty"`
 	ClearedBy string `json:"cleared_by,omitempty"`

@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -23,11 +22,12 @@ var ouCmd = &cobra.Command{
 var ouListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organizational units",
+	Args:  noArgs,
 	RunE:  runOUList,
 }
 
 var ouDescribeCmd = &cobra.Command{
-	Use:               "describe [name]",
+	Use:               "describe <name>",
 	Short:             "Show OU details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
@@ -35,14 +35,14 @@ var ouDescribeCmd = &cobra.Command{
 }
 
 var ouCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new OU",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runOUCreate,
 }
 
 var ouDeleteCmd = &cobra.Command{
-	Use:               "delete [name]",
+	Use:               "delete <name>",
 	Short:             "Delete an OU",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
@@ -50,7 +50,7 @@ var ouDeleteCmd = &cobra.Command{
 }
 
 var ouRenameCmd = &cobra.Command{
-	Use:               "rename [old-name] [new-name]",
+	Use:               "rename <old-name> <new-name>",
 	Short:             "Rename an OU",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeOUs,
@@ -58,7 +58,7 @@ var ouRenameCmd = &cobra.Command{
 }
 
 var ouDeviceListCmd = &cobra.Command{
-	Use:               "device-list [ou]",
+	Use:               "device-list <ou>",
 	Short:             "List devices in an OU",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
@@ -66,7 +66,7 @@ var ouDeviceListCmd = &cobra.Command{
 }
 
 var ouAddDeviceCmd = &cobra.Command{
-	Use:               "add-device [ou] [device]",
+	Use:               "add-device <ou> <device>",
 	Short:             "Add a device to an OU",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeOUThenDevice,
@@ -74,7 +74,7 @@ var ouAddDeviceCmd = &cobra.Command{
 }
 
 var ouRemoveDeviceCmd = &cobra.Command{
-	Use:               "remove-device [ou] [device]",
+	Use:               "remove-device <ou> <device>",
 	Short:             "Remove a device from an OU",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeOUThenDevice,
@@ -87,7 +87,7 @@ var ouTemplateCmd = &cobra.Command{
 }
 
 var ouTemplateAddCmd = &cobra.Command{
-	Use:               "add [ou] [template]",
+	Use:               "add <ou> <template>",
 	Short:             "Add a template to an OU",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeOUThenTemplate,
@@ -95,7 +95,7 @@ var ouTemplateAddCmd = &cobra.Command{
 }
 
 var ouTemplateRemoveCmd = &cobra.Command{
-	Use:               "remove [ou] [template]",
+	Use:               "remove <ou> <template>",
 	Short:             "Remove a template from an OU",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeOUThenTemplate,
@@ -103,7 +103,7 @@ var ouTemplateRemoveCmd = &cobra.Command{
 }
 
 var ouTemplateListCmd = &cobra.Command{
-	Use:               "list [ou]",
+	Use:               "list <ou>",
 	Short:             "List templates assigned to an OU",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
@@ -115,6 +115,7 @@ func init() {
 	ouCmd.AddCommand(ouDescribeCmd)
 	ouCmd.AddCommand(ouCreateCmd)
 	ouCmd.AddCommand(ouDeleteCmd)
+	addYesFlag(ouDeleteCmd)
 	ouCmd.AddCommand(ouRenameCmd)
 	ouCmd.AddCommand(ouDeviceListCmd)
 	ouCmd.AddCommand(ouAddDeviceCmd)
@@ -193,7 +194,7 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !helpers.Confirm(fmt.Sprintf("Delete OU '%s'?", name)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete OU '%s'?", name)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

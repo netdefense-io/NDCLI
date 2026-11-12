@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
@@ -53,11 +52,12 @@ SERVER_TOO_OLD rather than list tasks the filter did not select.`,
   ndcli task list --run R7x2Kp9Q
   ndcli task list --requested-by ana@acme.com --device-exact e2e-a
   ndcli task list --status SCHEDULED --scheduled-before +24h`,
+	Args: noArgs,
 	RunE: runTaskList,
 }
 
 var taskDescribeCmd = &cobra.Command{
-	Use:               "describe [task-id]",
+	Use:               "describe <task-id>",
 	Short:             "Show task details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTasks,
@@ -65,8 +65,11 @@ var taskDescribeCmd = &cobra.Command{
 }
 
 var taskCancelCmd = &cobra.Command{
-	Use:               "cancel [task-id]",
-	Short:             "Cancel a pending or scheduled task",
+	Use:   "cancel <task-id>",
+	Short: "Cancel a pending or scheduled task, or end a CONNECT task's session",
+	Long: "Cancel a pending or scheduled task, or a CONNECT task while it is in progress. For a completed\n" +
+		"CONNECT task, close its relay session instead; the task stays COMPLETED. The output says which\n" +
+		"happened, in the control plane's words.",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTasks,
 	RunE:              runTaskCancel,
@@ -158,9 +161,9 @@ func runTaskDescribe(cmd *cobra.Command, args []string) error {
 func runTaskCancel(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	taskID := args[0]
-	if err := svc.TaskCancel(context.Background(), taskID); err != nil {
+	result, err := svc.TaskCancel(context.Background(), taskID)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Task cancelled: %s", taskID)
-	return nil
+	return formatter.FormatTaskCancelled(result)
 }

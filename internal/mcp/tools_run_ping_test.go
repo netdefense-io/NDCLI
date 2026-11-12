@@ -134,3 +134,46 @@ func TestRunPingAdvertisesTheCountRange(t *testing.T) {
 	}
 	t.Fatal("ndcli.run.ping not registered")
 }
+
+// host is required, as in `ndcli run ping`: a call without it is refused
+// before the preview and before anything is sent, instead of sending the
+// agent an empty target (#338).
+func TestRunPingRefusesAMissingHost(t *testing.T) {
+	for _, host := range []string{``, `,"host":""`, `,"host":"   "`} {
+		for _, confirm := range []bool{false, true} {
+			args := fmt.Sprintf(`{"devices":["fw1"]%s,"confirm":%t}`, host, confirm)
+			t.Run(args, func(t *testing.T) {
+				resp, payloads := pingTool(t, args)
+				if resp.Success || resp.Error == nil {
+					t.Fatalf("ping without host accepted: %+v", resp)
+				}
+				if resp.Error.Code != "INVALID_INPUT" || !strings.Contains(resp.Error.Message, "host") {
+					t.Errorf("error = %+v, want INVALID_INPUT naming host", resp.Error)
+				}
+				if len(payloads) != 0 {
+					t.Errorf("%d task(s) created, want none", len(payloads))
+				}
+			})
+		}
+	}
+}
+
+// host goes through service.CheckPingHost: a padded one is sent trimmed, and
+// two hosts or an IPv6 address is refused before the preview and any task.
+func TestRunPingChecksTheHost(t *testing.T) {
+	resp, payloads := pingTool(t, `{"devices":["fw1"],"host":" 1.1.1.1 ","confirm":true}`)
+	if !resp.Success || len(payloads) != 1 || payloads[0]["target"] != "1.1.1.1" {
+		t.Errorf("padded host: %+v, payloads %v; want one task with target 1.1.1.1", resp, payloads)
+	}
+	for host, msg := range map[string]string{
+		"1.1.1.1 8.8.8.8": "host must be one IPv4 address or hostname, in letters, digits, dots and hyphens",
+		"2001:db8::1":     "host must be an IPv4 address or a hostname: devices do not ping IPv6 addresses yet",
+	} {
+		for _, confirm := range []string{"true", "false"} {
+			resp, payloads = pingTool(t, `{"devices":["fw1"],"host":"`+host+`","confirm":`+confirm+`}`)
+			if resp.Success || resp.Error == nil || resp.Error.Message != msg || len(payloads) != 0 {
+				t.Errorf("host %q, confirm %s: %+v, payloads %v; want INVALID_INPUT %q and no task", host, confirm, resp, payloads, msg)
+			}
+		}
+	}
+}

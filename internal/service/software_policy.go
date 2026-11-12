@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -135,7 +134,7 @@ func (s *Service) SoftwarePolicyUpdateContent(ctx context.Context, org, name, co
 	// reported to the operator as a failed update. A server that doesn't
 	// send `warnings` at all simply yields none.
 	if err := api.ParseResponse(resp, &out); err != nil {
-		if apiErr := (*api.APIError)(nil); errors.As(err, &apiErr) {
+		if api.IsAPIError(err) {
 			return nil, wrapAPI("%v", err)
 		}
 		return nil, nil

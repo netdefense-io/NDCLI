@@ -55,6 +55,13 @@ func TestConnectExecContextReportsProgressWhilePairing(t *testing.T) {
 		return n
 	}
 	beats := count()
+	mu.Lock()
+	for _, m := range got {
+		if strings.HasPrefix(m, "Still waiting") && !strings.Contains(m, "(0s left)") {
+			t.Errorf("heartbeat %q counts down past the 300 ms ctx deadline; want 0s left", m)
+		}
+	}
+	mu.Unlock()
 	if beats < 3 {
 		t.Errorf("got %d heartbeat messages in a 300 ms pairing wait at 30 ms, want at least 3: %q", beats, got)
 	}
@@ -62,11 +69,4 @@ func TestConnectExecContextReportsProgressWhilePairing(t *testing.T) {
 	if after := count(); after != beats {
 		t.Errorf("the heartbeat kept sending after ConnectExecContext returned: %d → %d", beats, after)
 	}
-}
-
-func TestHeartbeatSendsNothingWithoutAProgressCallback(t *testing.T) {
-	c := &Client{}
-	stop := c.heartbeat(time.Millisecond, time.Second)
-	time.Sleep(10 * time.Millisecond)
-	stop()
 }

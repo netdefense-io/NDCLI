@@ -25,10 +25,18 @@ func NewTokenManager(customPath string) *TokenManager {
 	return &TokenManager{storage: storage.GetStorage()}
 }
 
+// maxTokenLifetime bounds the expires_in an identity provider sends, so a huge
+// value cannot wrap the expiry into the past or far away.
+const maxTokenLifetime = 365 * 24 * time.Hour
+
+// tokenExpiry is when a token that expires in expiresIn seconds expires.
+func tokenExpiry(expiresIn int) time.Time {
+	return time.Now().Add(time.Duration(min(max(expiresIn, 0), int(maxTokenLifetime/time.Second))) * time.Second)
+}
+
 // SaveTokens saves tokens to storage
 func (tm *TokenManager) SaveTokens(tokens *models.TokenResponse, userInfo *models.UserInfo, oauth2Config *models.StoredOAuth2Config) error {
-	// Calculate expiration time
-	expiresAt := time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+	expiresAt := tokenExpiry(tokens.ExpiresIn)
 
 	stored := models.StoredTokens{
 		AccessToken:  tokens.AccessToken,
@@ -183,7 +191,7 @@ func (tm *TokenManager) UpdateAccessToken(tokens *models.TokenResponse) error {
 	}
 
 	// Update access token and expiration
-	expiresAt := time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+	expiresAt := tokenExpiry(tokens.ExpiresIn)
 	existing.AccessToken = tokens.AccessToken
 	existing.ExpiresAt = expiresAt
 

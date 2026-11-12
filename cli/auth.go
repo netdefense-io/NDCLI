@@ -30,6 +30,7 @@ var authLoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with NetDefense",
 	Long:  "Authenticate using the OAuth2 device authorization flow",
+	Args:  noArgs,
 	RunE:  runAuthLogin,
 }
 
@@ -38,6 +39,7 @@ var authLogoutCmd = &cobra.Command{
 	Short: "Log out and revoke tokens",
 	Long: `Log out: revoke the stored refresh token on the server (best effort) and remove the
 stored session. This works even when the access token has already expired.`,
+	Args: noArgs,
 	RunE: runAuthLogout,
 }
 
@@ -48,12 +50,14 @@ var authShowCmd = &cobra.Command{
 refresh token is available. It reads local state only: it never contacts the server or
 refreshes the token. An expired access token with a refresh token is a working session
 that renews itself on the next command.`,
+	Args: noArgs,
 	RunE: runAuthShow,
 }
 
 var authMeCmd = &cobra.Command{
 	Use:   "me",
 	Short: "Show information about the authenticated user",
+	Args:  noArgs,
 	RunE:  runAuthMe,
 }
 
@@ -61,12 +65,14 @@ var authRefreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Force refresh the access token",
 	Long:  "Refresh the access token with the stored refresh token. Works when the access token has already expired.",
+	Args:  noArgs,
 	RunE:  runAuthRefresh,
 }
 
 var authMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Migrate tokens from file storage to keyring",
+	Args:  noArgs,
 	RunE:  runAuthMigrate,
 }
 
@@ -74,6 +80,7 @@ var authDeleteCmd = &cobra.Command{
 	Use:   "delete",
 	Short: "Permanently delete your account",
 	Long:  "Permanently delete your NetDefense account. This action cannot be undone.",
+	Args:  noArgs,
 	RunE:  runAuthDelete,
 }
 

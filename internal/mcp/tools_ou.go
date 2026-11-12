@@ -137,7 +137,7 @@ func (s *Server) registerOUTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.ou.device_list",
-		Description: "List the devices currently assigned to an OU.",
+		Description: "List the devices currently assigned to an OU. " + deviceOnlineDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

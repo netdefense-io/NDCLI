@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -90,16 +91,11 @@ type Client struct {
 
 // NewClient creates a new API client
 func NewClient(baseURL string, sslVerify bool, authMgr AuthProvider) *Client {
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: !sslVerify,
-		},
-		// The MCP server polls with several consoles at once; the default of
-		// 2 idle connections per host made most polls open a new TLS
-		// connection.
-		MaxIdleConnsPerHost: 16,
-		IdleConnTimeout:     90 * time.Second,
-	}
+	transport := newTransport(sslVerify)
+	// The MCP server polls with several consoles at once; over HTTP/1.1, with
+	// Go's default of 2 idle connections per host, most polls would open a new
+	// TLS connection. Over HTTP/2 they share one connection.
+	transport.MaxIdleConnsPerHost = 16
 
 	return &Client{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
@@ -107,13 +103,14 @@ func NewClient(baseURL string, sslVerify bool, authMgr AuthProvider) *Client {
 			Timeout:   30 * time.Second,
 			Transport: transport,
 		},
-		// rawClient shares the transport but carries no global timeout:
-		// attachment uploads/downloads are bounded by a per-transfer
-		// context deadline (rawTransferTimeout) instead, because a
-		// 25 MiB transfer over a slow link legitimately outlives the
-		// 30 s budget that suits a JSON call.
+		// rawClient carries no global timeout: attachment uploads and
+		// downloads are bounded by a per-transfer context deadline
+		// (rawTransferTimeout) instead, because a 25 MiB transfer over a slow
+		// link legitimately outlives the 30 s budget that suits a JSON call.
+		// It has its own transport: over HTTP/2 a shared one would put a big
+		// transfer on the same connection as the JSON calls and MCP polls.
 		rawClient: &http.Client{
-			Transport: transport,
+			Transport: newTransport(sslVerify),
 		},
 		authMgr:   authMgr,
 		userAgent: CLIUserAgent(),
@@ -218,6 +215,40 @@ func (c *Client) handleNetworkError(err error) error {
 	}
 
 	return &networkError{msg: fmt.Sprintf("cannot connect to controlplane at %s\n\nPlease check:\n  - Your network connection\n  - The controlplane host setting\n  - If SSL verification is required", cfg.Controlplane.Host), err: err}
+}
+
+// h2PingTimeout bounds how long an HTTP/2 connection may stay silent before a
+// PING checks it, and how long the PING may go unanswered before the
+// connection is closed. Every JSON call and poll shares one HTTP/2 connection,
+// so a connection dropped without a FIN or RST would otherwise stall them all.
+const h2PingTimeout = 15 * time.Second
+
+// newTransport is the control plane's transport: Go's default one (dial and
+// TLS-handshake timeouts, idle limits, HTTP/2) with ndcli's TLS setting, HTTP/2
+// health checks, and no proxy, since ndcli connects directly (proxy support is
+// #371).
+func newTransport(sslVerify bool) *http.Transport {
+	t := defaultTransport(http.DefaultTransport)
+	t.Proxy = nil
+	t.TLSClientConfig = &tls.Config{InsecureSkipVerify: !sslVerify}
+	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: h2PingTimeout, PingTimeout: h2PingTimeout}
+	return t
+}
+
+// defaultTransport clones Go's default transport, or builds one with the same
+// settings if something has replaced it.
+func defaultTransport(d http.RoundTripper) *http.Transport {
+	if d, ok := d.(*http.Transport); ok {
+		return d.Clone()
+	}
+	return &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 }
 
 // networkError is the user-facing text for a failed request, keeping the

@@ -17,6 +17,11 @@ import (
 // both device tools.
 const deviceKeyStateDescription = "A device whose agent presents a key other than the one bound to it carries `key_state: \"mismatch\"`, `key_state_detail` (bound_kid, presented_kid, source, since) and `rebind_hint`: its tasks fail until it is rebound. `ndcli.device.rebind_token` only issues the token: a human must paste it into the device's OPNsense \"Re-bind Token\" field (Show Advanced) and the device is then re-approved (`ndcli.device.approve`); no MCP tool performs the paste. Those fields are absent when no mismatch is known."
 
+// deviceOnlineDescription is the single wording for `online` on every tool
+// that returns devices: NDManager answers it from its online-device registry, and null means
+// the registry could not be read, which says nothing about the device.
+const deviceOnlineDescription = "Each device carries `online`: true while a broker holds its connection, false when the control plane knows it is not connected, null when the control plane could not tell (never read null as offline)."
+
 // deviceFactsDescription is the single wording for the agent-reported
 // facts on both device tools, so the two catalogs generated from the live
 // registry cannot describe the same object differently.
@@ -28,7 +33,7 @@ func (s *Server) registerDeviceTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.device.list",
 		Description: "List managed firewall devices in an organization with optional filtering. " +
-			deviceFactsDescription + " " + deviceKeyStateDescription,
+			deviceOnlineDescription + " " + deviceFactsDescription + " " + deviceKeyStateDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -54,7 +59,7 @@ func (s *Server) registerDeviceTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.device.describe",
 		Description: "Get detailed information about a specific device. " +
-			deviceFactsDescription + " " + deviceKeyStateDescription,
+			deviceOnlineDescription + " " + deviceFactsDescription + " " + deviceKeyStateDescription,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -444,10 +449,16 @@ func (s *Server) handleDeviceRebindToken(ctx context.Context, req *mcp.CallToolR
 	if err != nil {
 		return s.errorResult(err)
 	}
+	// Checked before multiplying, and before the preview: a huge ttl_seconds
+	// would overflow the duration and could wrap to a sub-second TTL that is
+	// sent as 0.
+	maxTTL := int(service.MaxRebindTokenTTL / time.Second)
+	if input.TTLSeconds < 0 || input.TTLSeconds > maxTTL {
+		return s.errorResult(&service.Error{Code: service.CodeInvalidInput, Message: fmt.Sprintf("ttl_seconds must be between 1 and %d (omit it for 86400)", maxTTL)})
+	}
 	if !input.Confirm {
 		return s.previewResult("issue rebind token for", input.Device)
 	}
-
 	ttl := time.Duration(input.TTLSeconds) * time.Second
 	if input.TTLSeconds == 0 {
 		ttl = 24 * time.Hour
@@ -583,6 +594,7 @@ func deviceSummary(d *models.Device) map[string]interface{} {
 		"uuid":                 d.UUID,
 		"status":               d.Status,
 		"organizational_units": d.OrganizationalUnits,
+		"online":               d.Online,
 		"heartbeat":            d.Heartbeat,
 		"synced_at":            d.SyncedAt,
 		"drift_status":         d.DriftStatus,
@@ -625,6 +637,7 @@ func deviceFull(d *models.Device) map[string]interface{} {
 		"status":               d.Status,
 		"organization":         d.Organization,
 		"organizational_units": d.OrganizationalUnits,
+		"online":               d.Online,
 		"heartbeat":            d.Heartbeat,
 		"synced_at":            d.SyncedAt,
 		"synced_hash":          d.SyncedHash,

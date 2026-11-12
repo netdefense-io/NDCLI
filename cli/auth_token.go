@@ -26,12 +26,14 @@ var authTokenCreateCmd = &cobra.Command{
 The raw token value is displayed once and cannot be retrieved again.
 Token create always requires interactive authentication — NDCLI_TOKEN
 cannot be used for this command.`,
+	Args: noArgs,
 	RunE: runAuthTokenCreate,
 }
 
 var authTokenListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List personal access tokens",
+	Args:  noArgs,
 	RunE:  runAuthTokenList,
 }
 

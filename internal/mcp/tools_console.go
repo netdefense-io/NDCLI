@@ -181,6 +181,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	// enforcement. The agent block remains the authoritative guarantee; this is
 	// the clarity layer.
 	if connResult.ReadOnly != nil && *connResult.ReadOnly {
+		_ = s.svc.CloseConnectSession(connResult.Task)
 		return s.errorResult(&ToolError{
 			Code:    "READ_ONLY_SESSION",
 			Message: pathfinder.ErrReadOnlySession.Message,
@@ -194,6 +195,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 		OnProgress:      pathfinder.ProgressCallback(progress),
 	})
 	if pfErr != nil {
+		_ = s.svc.CloseConnectSession(connResult.Task)
 		return s.errorResult(&service.Error{
 			Code:    service.CodeAPIError,
 			Message: "relay client init failed: " + pfErr.Error(),
@@ -203,6 +205,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 
 	handle, pfErr := pfClient.ConnectExecContext(ctx)
 	if pfErr != nil {
+		_ = s.svc.CloseConnectSession(connResult.Task)
 		return s.relayConnectErrorResult(pfErr)
 	}
 
@@ -238,24 +241,26 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 }
 
 // progressNotifier sends each message as an MCP progress notification when the
-// caller asked for them with a progressToken, and does nothing otherwise. A
-// client can then keep a long console_open alive instead of timing it out.
+// caller asked for them with a progressToken. A client can then keep a long
+// console_open alive instead of timing it out. Without a token it returns nil,
+// so nothing downstream (the pairing heartbeat included) runs for no one.
 func progressNotifier(ctx context.Context, req *mcp.CallToolRequest) func(string) {
 	if req == nil || req.Params == nil || req.Session == nil {
-		return func(string) {}
+		return nil
 	}
 	token := req.Params.GetProgressToken()
 	if token == nil {
-		return func(string) {}
+		return nil
 	}
 	var mu sync.Mutex
 	var step float64
 	return func(msg string) {
+		// Sent under the lock: progress must reach the wire in increasing
+		// order whoever calls.
 		mu.Lock()
+		defer mu.Unlock()
 		step++
-		n := step
-		mu.Unlock()
-		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: n, Message: msg})
+		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: step, Message: msg})
 	}
 }
 

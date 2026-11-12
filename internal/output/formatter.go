@@ -228,6 +228,9 @@ type Formatter interface {
 	FormatTokenCreated(resp models.TokenCreateResponse) error
 	FormatTokenRevoked(name string) error
 
+	// Task cancel
+	FormatTaskCancelled(r *models.TaskCancelResult) error
+
 	// VPN prefix provisioning (network prefix add --value)
 	FormatVpnPrefixProvisioned(p VpnPrefixProvision) error
 	// network prefix add without --value

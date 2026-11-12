@@ -24,7 +24,7 @@ var networkLinkCmd = &cobra.Command{
 }
 
 var networkLinkListCmd = &cobra.Command{
-	Use:   "list [network]",
+	Use:   "list <network>",
 	Short: "List VPN connections",
 	Long: `Show all effective connections in a VPN network.
 
@@ -40,7 +40,7 @@ Use --raw to see VPN link database rows only.`,
 }
 
 var networkLinkCreateCmd = &cobra.Command{
-	Use:               "create [network] [device-a] [device-b]",
+	Use:               "create <network> <device-a> <device-b>",
 	Short:             "Create a VPN link between two members",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkThenTwoDevices,
@@ -48,7 +48,7 @@ var networkLinkCreateCmd = &cobra.Command{
 }
 
 var networkLinkDescribeCmd = &cobra.Command{
-	Use:               "describe [network] [device-a] [device-b]",
+	Use:               "describe <network> <device-a> <device-b>",
 	Short:             "Show VPN connection details",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkThenTwoDevices,
@@ -56,7 +56,7 @@ var networkLinkDescribeCmd = &cobra.Command{
 }
 
 var networkLinkUpdateCmd = &cobra.Command{
-	Use:               "update [network] [device-a] [device-b]",
+	Use:               "update <network> <device-a> <device-b>",
 	Short:             "Update a VPN link",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkThenTwoDevices,
@@ -64,7 +64,7 @@ var networkLinkUpdateCmd = &cobra.Command{
 }
 
 var networkLinkDeleteCmd = &cobra.Command{
-	Use:               "delete [network] [device-a] [device-b]",
+	Use:               "delete <network> <device-a> <device-b>",
 	Short:             "Delete a VPN link",
 	Args:              cobra.ExactArgs(3),
 	ValidArgsFunction: completeVpnNetworkThenTwoDevices,

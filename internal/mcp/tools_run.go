@@ -252,12 +252,12 @@ func (s *Server) registerRunTools() {
 
 	// ndcli.run.ping
 	pingProps := mergeProps(targetingProps, map[string]interface{}{
-		"host":  stringProperty("Target IP or hostname to ping (required)"),
+		"host":  stringProperty(fmt.Sprintf("IPv4 address or hostname to ping: ASCII letters, digits, dots and hyphens, not starting with a hyphen, at most %d characters (required; IPv6 is not supported yet)", service.PingHostMaxLength)),
 		"count": pingCountProperty(),
 	})
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.run.ping",
-		Description: fmt.Sprintf("Ping a target IP or hostname from one or more devices. `host` is required; `count` is %d to %d. Requires confirm=true.", service.PingCountMin, service.PingCountMax),
+		Description: fmt.Sprintf("Ping an IPv4 address or hostname from one or more devices. `host` is required; `count` is %d to %d. Requires confirm=true.", service.PingCountMin, service.PingCountMax),
 		InputSchema: map[string]interface{}{
 			"type":       "object",
 			"properties": pingProps,
@@ -470,9 +470,14 @@ func pingCountProperty() map[string]interface{} {
 }
 
 // pingPayload leaves count out when it is absent or the agent's default.
-// An explicit count, 0 included, must be in range.
+// An explicit count, 0 included, must be in range, and host must pass
+// service.CheckPingHost, as in `ndcli run ping`.
 func pingPayload(in *runInput) (map[string]interface{}, error) {
-	p := map[string]interface{}{"target": in.Host}
+	host, err := service.CheckPingHost(in.Host, "host")
+	if err != nil {
+		return nil, err
+	}
+	p := map[string]interface{}{"target": host}
 	if in.Count != nil {
 		if err := service.CheckPingCount(*in.Count, "count"); err != nil {
 			return nil, err

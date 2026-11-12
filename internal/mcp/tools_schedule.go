@@ -20,7 +20,9 @@ type scheduleNameInput struct {
 	Name         string `json:"name"`
 }
 
-type scheduleDeleteInput struct {
+// scheduleConfirmInput names a schedule for a tool that previews unless
+// confirmed: disable and delete.
+type scheduleConfirmInput struct {
 	Organization string `json:"organization,omitempty"`
 	Name         string `json:"name"`
 	Confirm      bool   `json:"confirm,omitempty"`
@@ -47,7 +49,9 @@ type scheduleTaskCodeInput struct {
 	Code         string `json:"code"`
 }
 
-type scheduleTaskRemoveInput struct {
+// scheduleTaskConfirmInput names a spec for a tool that previews unless
+// confirmed: disable and remove.
+type scheduleTaskConfirmInput struct {
 	Organization string `json:"organization,omitempty"`
 	Code         string `json:"code"`
 	Confirm      bool   `json:"confirm,omitempty"`
@@ -122,12 +126,13 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.disable
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.disable",
-		Description: "Disable a cadence schedule so no specs fire.",
+		Description: "Disable a cadence schedule so no specs fire. Requires confirm=true; without it, returns a preview.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization": organizationProperty(),
 				"name":         stringProperty("Schedule name"),
+				"confirm":      confirmProperty(),
 			},
 			"required": []string{"name"},
 		},
@@ -180,12 +185,13 @@ func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.tasks.disable
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.schedule.tasks.disable",
-		Description: "Disable a registered task spec by its code (org-wide, no schedule name needed). A spec of kind FIRMWARE is a firmware track's update window and belongs to the track: refused with FIRMWARE_SPEC_MANAGED; use ndcli.firmware.track_schedule instead.",
+		Description: "Disable a registered task spec by its code (org-wide, no schedule name needed). A spec of kind FIRMWARE is a firmware track's update window and belongs to the track: refused with FIRMWARE_SPEC_MANAGED; use ndcli.firmware.track_schedule instead. Requires confirm=true; without it, returns a preview.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"organization": organizationProperty(),
 				"code":         stringProperty("Task spec code (8-char base62)"),
+				"confirm":      confirmProperty(),
 			},
 			"required": []string{"code"},
 		},
@@ -327,9 +333,12 @@ func (s *Server) handleScheduleDisable(ctx context.Context, req *mcp.CallToolReq
 		return s.errorResult(err)
 	}
 	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[scheduleNameInput](argsJSON)
+	input, err := parseInput[scheduleConfirmInput](argsJSON)
 	if err != nil {
 		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		return s.previewResult("disable schedule", input.Name)
 	}
 	org, err := s.svc.ResolveOrg(input.Organization)
 	if err != nil {
@@ -351,7 +360,7 @@ func (s *Server) handleScheduleDelete(ctx context.Context, req *mcp.CallToolRequ
 		return s.errorResult(err)
 	}
 	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[scheduleDeleteInput](argsJSON)
+	input, err := parseInput[scheduleConfirmInput](argsJSON)
 	if err != nil {
 		return s.errorResult(err)
 	}
@@ -433,9 +442,12 @@ func (s *Server) handleScheduleTasksDisable(ctx context.Context, req *mcp.CallTo
 		return s.errorResult(err)
 	}
 	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[scheduleTaskCodeInput](argsJSON)
+	input, err := parseInput[scheduleTaskConfirmInput](argsJSON)
 	if err != nil {
 		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		return s.previewResult("disable task spec", input.Code)
 	}
 	org, err := s.svc.ResolveOrg(input.Organization)
 	if err != nil {
@@ -457,7 +469,7 @@ func (s *Server) handleScheduleTasksRemove(ctx context.Context, req *mcp.CallToo
 		return s.errorResult(err)
 	}
 	argsJSON, _ := json.Marshal(req.Params.Arguments)
-	input, err := parseInput[scheduleTaskRemoveInput](argsJSON)
+	input, err := parseInput[scheduleTaskConfirmInput](argsJSON)
 	if err != nil {
 		return s.errorResult(err)
 	}

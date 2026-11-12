@@ -81,14 +81,16 @@ func TestUsageArgRange(t *testing.T) {
 
 // A Use line is the help a user reads to call the command, so it must
 // describe what the Args rule accepts (issue #275: "quota [org]" read as
-// optional on a command that takes exactly one argument). Group commands are
-// TestEveryParentCommandRejectsUnknownSubcommand's.
+// optional on a command that takes exactly one argument), and a leaf needs a
+// rule, or cobra silently accepts extra words (#340). Every command is
+// checked except the group commands, which are
+// TestEveryParentCommandRejectsUnknownSubcommand's, and usageArgsExempt.
 func TestUsageLinesMatchTheirArgumentRules(t *testing.T) {
 	prepareRootCommand()
 
-	for _, root := range []*cobra.Command{orgCmd} {
+	for _, root := range []*cobra.Command{rootCmd} {
 		for _, cmd := range walkCommands(root) {
-			if isGroupCommand(cmd) {
+			if isGroupCommand(cmd) || usageArgsExempt(cmd) {
 				continue
 			}
 			t.Run(cmd.CommandPath(), func(t *testing.T) {
@@ -117,4 +119,11 @@ func TestUsageLinesMatchTheirArgumentRules(t *testing.T) {
 			})
 		}
 	}
+}
+
+// usageArgsExempt names the commands the usage guard leaves alone: the root,
+// whose bare arguments are unknown subcommands and get their own message, and
+// cobra's help, whose Use is cobra's.
+func usageArgsExempt(cmd *cobra.Command) bool {
+	return cmd == rootCmd || (cmd.Name() == "help" && cmd.Parent() == rootCmd)
 }

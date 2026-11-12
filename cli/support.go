@@ -38,24 +38,26 @@ The surface is cross-organization, so no --org is required. On 'respond list'
 var supportMeCmd = &cobra.Command{
 	Use:   "me",
 	Short: "Show your support responder profile",
+	Args:  noArgs,
 	RunE:  runSupportMe,
 }
 
 var supportListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tickets across every organization",
+	Args:  noArgs,
 	RunE:  runSupportList,
 }
 
 var supportShowCmd = &cobra.Command{
-	Use:   "show [code]",
+	Use:   "show <code>",
 	Short: "Show a ticket and its messages",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportShow,
 }
 
 var supportSetCmd = &cobra.Command{
-	Use:   "set [code]",
+	Use:   "set <code>",
 	Short: "Set a ticket's priority and/or category",
 	Long: `Set a ticket's priority and/or category.
 
@@ -66,28 +68,28 @@ and participants stay organization-owned and cannot be changed here.`,
 }
 
 var supportCloseCmd = &cobra.Command{
-	Use:   "close [code]",
+	Use:   "close <code>",
 	Short: "Close a ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportClose,
 }
 
 var supportReopenCmd = &cobra.Command{
-	Use:   "reopen [code]",
+	Use:   "reopen <code>",
 	Short: "Reopen a closed ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportReopen,
 }
 
 var supportMessagesCmd = &cobra.Command{
-	Use:   "messages [code]",
+	Use:   "messages <code>",
 	Short: "List a ticket's messages",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportMessages,
 }
 
 var supportReplyCmd = &cobra.Command{
-	Use:   "reply [code]",
+	Use:   "reply <code>",
 	Short: "Post a reply to the organization",
 	Long: `Post a reply visible to the organization.
 
@@ -98,7 +100,7 @@ every participant.`,
 }
 
 var supportNoteCmd = &cobra.Command{
-	Use:   "note [code]",
+	Use:   "note <code>",
 	Short: "Post an internal note visible only to support",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportNote,
@@ -110,21 +112,21 @@ var supportAttachmentCmd = &cobra.Command{
 }
 
 var supportAttachmentUploadCmd = &cobra.Command{
-	Use:   "upload [code] [path]",
+	Use:   "upload <code> <path>",
 	Short: "Upload a file into a ticket's scope and print its uuid",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runSupportAttachmentUpload,
 }
 
 var supportAttachmentDeleteCmd = &cobra.Command{
-	Use:   "delete [uuid]",
+	Use:   "delete <uuid>",
 	Short: "Delete an attachment that is not yet bound to a ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSupportAttachmentDelete,
 }
 
 var supportDownloadCmd = &cobra.Command{
-	Use:   "download [code] [attachment-uuid]",
+	Use:   "download <code> <attachment-uuid>",
 	Short: "Download a ticket attachment",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runSupportDownload,

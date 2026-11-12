@@ -67,7 +67,7 @@ func (deviceResource) Actions() []registry.Action {
 		{Key: "P", Label: "poweroff", Destructive: true,
 			Prompt: "Power off device {id}? It will shut down."},
 		{Key: "p", Label: "ping", Form: []registry.FormField{
-			{Key: "host", Label: "Host/IP", Required: true, Placeholder: "1.1.1.1"},
+			{Key: "host", Label: "Host/IPv4", Required: true, Placeholder: "1.1.1.1"},
 			{Key: "count", Label: fmt.Sprintf("Count (%d-%d)", service.PingCountMin, service.PingCountMax), Default: strconv.Itoa(service.PingCountDefault)},
 		}},
 		{Key: "f", Label: "firmware", Form: []registry.FormField{
@@ -152,9 +152,9 @@ func (deviceResource) Execute(ctx context.Context, svc *service.Service, org, id
 }
 
 func devicePing(ctx context.Context, svc *service.Service, org, id string, args map[string]string) (string, error) {
-	host := args["host"]
-	if host == "" {
-		return "", fmt.Errorf("host is required")
+	host, err := service.CheckPingHost(args["host"], "host")
+	if err != nil {
+		return "", err
 	}
 	payload := map[string]interface{}{"target": host}
 	if c := strings.TrimSpace(args["count"]); c != "" {

@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -88,19 +89,9 @@ func ParseFutureTimeZoned(input string, loc *time.Location) (time.Time, error) {
 
 	// 1. Relative offset
 	if m := relativeFuturePattern.FindStringSubmatch(strings.ToLower(input)); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		var d time.Duration
-		switch m[2] {
-		case "s":
-			d = time.Duration(n) * time.Second
-		case "m":
-			d = time.Duration(n) * time.Minute
-		case "h":
-			d = time.Duration(n) * time.Hour
-		case "d":
-			d = time.Duration(n) * 24 * time.Hour
-		case "w":
-			d = time.Duration(n) * 7 * 24 * time.Hour
+		d, err := relativeOffset(input, m[1], m[2], maxDuration)
+		if err != nil {
+			return time.Time{}, err
 		}
 		return time.Now().Add(d).UTC(), nil
 	}
@@ -134,8 +125,28 @@ func ParseFutureTimeZoned(input string, loc *time.Location) (time.Time, error) {
 // ahead.
 var relativeFilterPattern = regexp.MustCompile(`^([+-]?)(\d+)([smhdw])$`)
 
-// maxFilterOffset bounds a relative bound well inside time.Duration's range.
+// maxFilterOffset bounds ResolveTimeFilter's relative bound well inside
+// time.Duration's range.
 const maxFilterOffset = 100 * 365 * 24 * time.Hour
+
+// maxDuration is the longest offset time.Duration holds; past it a count
+// wraps around.
+const maxDuration = time.Duration(math.MaxInt64)
+
+var relativeUnits = map[string]time.Duration{
+	"s": time.Second, "m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour,
+}
+
+// relativeOffset is count units as a duration, refused past limit so a huge
+// count cannot overflow time.Duration and wrap.
+func relativeOffset(input, count, unit string, limit time.Duration) (time.Duration, error) {
+	n, err := strconv.Atoi(count)
+	u := relativeUnits[unit]
+	if err != nil || u == 0 || time.Duration(n) > limit/u {
+		return 0, fmt.Errorf("%q is too far from now", input)
+	}
+	return time.Duration(n) * u, nil
+}
 
 // ResolveTimeFilter turns a list filter's time bound into an instant:
 //
@@ -149,14 +160,10 @@ const maxFilterOffset = 100 * 365 * 24 * time.Hour
 func ResolveTimeFilter(input string, now time.Time) (time.Time, error) {
 	input = strings.TrimSpace(input)
 	if m := relativeFilterPattern.FindStringSubmatch(strings.ToLower(input)); m != nil {
-		n, err := strconv.Atoi(m[2])
-		unit := map[string]time.Duration{
-			"s": time.Second, "m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour,
-		}[m[3]]
-		if err != nil || time.Duration(n) > maxFilterOffset/unit {
-			return time.Time{}, fmt.Errorf("%q is too far from now", input)
+		offset, err := relativeOffset(input, m[2], m[3], maxFilterOffset)
+		if err != nil {
+			return time.Time{}, err
 		}
-		offset := time.Duration(n) * unit
 		if m[1] != "+" {
 			offset = -offset
 		}
@@ -183,33 +190,21 @@ func ParseTimeFilter(input string) (string, error) {
 	return parseTimeFilterAt(input, time.Now())
 }
 
+// relativeAgoPattern is ParseTimeFilter's relative form: 30m, 2h, 7d, 2w ago.
+var relativeAgoPattern = regexp.MustCompile(`^(\d+)([mhdw])$`)
+
 func parseTimeFilterAt(input string, now time.Time) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", nil
 	}
 
-	// Try to parse as relative time (e.g., 30m, 2h, 7d, 2w)
-	relativePattern := regexp.MustCompile(`^(\d+)([mhdw])$`)
-	if matches := relativePattern.FindStringSubmatch(strings.ToLower(input)); matches != nil {
-		value, _ := strconv.Atoi(matches[1])
-		unit := matches[2]
-
-		var duration time.Duration
-		switch unit {
-		case "m":
-			duration = time.Duration(value) * time.Minute
-		case "h":
-			duration = time.Duration(value) * time.Hour
-		case "d":
-			duration = time.Duration(value) * 24 * time.Hour
-		case "w":
-			duration = time.Duration(value) * 7 * 24 * time.Hour
-		default:
-			return "", fmt.Errorf("unknown time unit: %s", unit)
+	if m := relativeAgoPattern.FindStringSubmatch(strings.ToLower(input)); m != nil {
+		d, err := relativeOffset(input, m[1], m[2], maxDuration)
+		if err != nil {
+			return "", err
 		}
-
-		return now.Add(-duration).UTC().Format(time.RFC3339), nil
+		return now.Add(-d).UTC().Format(time.RFC3339), nil
 	}
 
 	return input, nil

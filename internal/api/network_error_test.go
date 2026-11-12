@@ -55,3 +55,22 @@ func TestIsNetworkErrorMatchesOnlyAFailedControlPlaneRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAPIErrorMatchesOnlyAnHTTPErrorAnswer(t *testing.T) {
+	transit := &url.Error{Op: "Get", URL: "https://x", Err: errors.New("connection refused")}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"an HTTP error answer", &APIError{StatusCode: 429}, true},
+		{"wrapped", fmt.Errorf("initiate connect: %w", &APIError{StatusCode: 503}), true},
+		{"a request that failed in transit", &networkError{msg: "cannot connect", err: transit}, false},
+		{"an answer that did not decode", errors.New("invalid character 'n'"), false},
+		{"nil", nil, false},
+	} {
+		if got := IsAPIError(tc.err); got != tc.want {
+			t.Errorf("%s: IsAPIError = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -30,18 +30,19 @@ template attaches the policy.`,
 var softwareListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List software policies",
+	Args:  noArgs,
 	RunE:  runSoftwareList,
 }
 
 var softwareCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new software policy",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSoftwareCreate,
 }
 
 var softwareDescribeCmd = &cobra.Command{
-	Use:               "describe [name]",
+	Use:               "describe <name>",
 	Short:             "Show software policy details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSoftwarePolicies,
@@ -49,7 +50,7 @@ var softwareDescribeCmd = &cobra.Command{
 }
 
 var softwareEditCmd = &cobra.Command{
-	Use:               "edit [name]",
+	Use:               "edit <name>",
 	Short:             "Edit software policy content in an external editor",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSoftwarePolicies,
@@ -57,7 +58,7 @@ var softwareEditCmd = &cobra.Command{
 }
 
 var softwareUpdateContentCmd = &cobra.Command{
-	Use:               "update-content [name] [file]",
+	Use:               "update-content <name> <file>",
 	Short:             "Update software policy content from a file",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSoftwarePolicies,
@@ -65,7 +66,7 @@ var softwareUpdateContentCmd = &cobra.Command{
 }
 
 var softwareRenameCmd = &cobra.Command{
-	Use:               "rename [name] [new-name]",
+	Use:               "rename <name> <new-name>",
 	Short:             "Rename a software policy",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSoftwarePolicies,
@@ -73,7 +74,7 @@ var softwareRenameCmd = &cobra.Command{
 }
 
 var softwareDeleteCmd = &cobra.Command{
-	Use:               "delete [name]",
+	Use:               "delete <name>",
 	Short:             "Delete a software policy",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSoftwarePolicies,
@@ -81,7 +82,7 @@ var softwareDeleteCmd = &cobra.Command{
 }
 
 var softwareRequirePackageCmd = &cobra.Command{
-	Use:   "require-package [policy] [package...]",
+	Use:   "require-package <policy> <package...>",
 	Short: "Mark one or more packages as required by a software policy",
 	Long: `Mark one or more packages as required by a software policy.
 
@@ -95,7 +96,7 @@ notice.`,
 }
 
 var softwareBlockPackageCmd = &cobra.Command{
-	Use:   "block-package [policy] [package...]",
+	Use:   "block-package <policy> <package...>",
 	Short: "Mark one or more packages as blocked by a software policy",
 	Long: `Mark one or more packages as blocked by a software policy.
 
@@ -109,7 +110,7 @@ notice.`,
 }
 
 var softwareWaivePackageCmd = &cobra.Command{
-	Use:   "waive-package [policy] [package...]",
+	Use:   "waive-package <policy> <package...>",
 	Short: "Stop having an opinion about one or more packages",
 	Long: `Stop having an opinion about one or more packages.
 
@@ -123,7 +124,7 @@ re-install anything.`,
 }
 
 var softwareAddRepoCmd = &cobra.Command{
-	Use:   "add-repo [policy]",
+	Use:   "add-repo <policy>",
 	Short: "Add or update a custom package repository in a software policy",
 	Long: `Add or update a custom package repository in a software policy.
 
@@ -153,7 +154,7 @@ must have unverified repositories enabled for the server to accept it.`,
 }
 
 var softwareRemoveRepoCmd = &cobra.Command{
-	Use:   "remove-repo [policy] [repository]",
+	Use:   "remove-repo <policy> <repository>",
 	Short: "Remove a custom package repository from a software policy",
 	Long: `Remove a custom package repository from a software policy.
 
@@ -166,7 +167,7 @@ installed — removing a repository is not an uninstall.`,
 }
 
 var softwareAddExternalCmd = &cobra.Command{
-	Use:   "add-external [policy]",
+	Use:   "add-external <policy>",
 	Short: "Add or update an external (URL-installed) package in a software policy",
 	Long: `Add or update an external package in a software policy.
 
@@ -188,7 +189,7 @@ keep their stored values.`,
 }
 
 var softwareRemoveExternalCmd = &cobra.Command{
-	Use:   "remove-external [policy] [package]",
+	Use:   "remove-external <policy> <package>",
 	Short: "Remove an external package from a software policy",
 	Long: `Remove an external package from a software policy.
 
@@ -208,6 +209,7 @@ func init() {
 	softwareCmd.AddCommand(softwareUpdateContentCmd)
 	softwareCmd.AddCommand(softwareRenameCmd)
 	softwareCmd.AddCommand(softwareDeleteCmd)
+	addYesFlag(softwareDeleteCmd)
 	softwareCmd.AddCommand(softwareRequirePackageCmd)
 	softwareCmd.AddCommand(softwareBlockPackageCmd)
 	softwareCmd.AddCommand(softwareWaivePackageCmd)
@@ -377,7 +379,7 @@ func runSoftwareDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !internalHelpers.Confirm(fmt.Sprintf("Delete software policy '%s'?", name)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete software policy '%s'?", name)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

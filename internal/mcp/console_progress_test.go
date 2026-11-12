@@ -123,3 +123,51 @@ func TestConsoleOpenSendsNoProgressUnasked(t *testing.T) {
 		t.Errorf("got %d progress notifications without a progressToken, want none", len(got))
 	}
 }
+
+// Without a progressToken there is no notifier at all, so the pairing
+// heartbeat and every other progress path stay off. The probe runs inside a
+// real tool call, so the request has a live session and the check that
+// decides is the token one.
+func TestProgressNotifierIsNilWithoutAToken(t *testing.T) {
+	if progressNotifier(context.Background(), nil) != nil {
+		t.Error("nil request: want a nil notifier")
+	}
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "probe", Version: "1"}, nil)
+	var mu sync.Mutex
+	var isNil []bool
+	srv.AddTool(&mcp.Tool{Name: "probe", InputSchema: map[string]any{"type": "object"}},
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			mu.Lock()
+			isNil = append(isNil, progressNotifier(ctx, req) == nil)
+			mu.Unlock()
+			return &mcp.CallToolResult{}, nil
+		})
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	if _, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "probe"}); err != nil {
+		t.Fatalf("call without a token: %v", err)
+	}
+	withToken := &mcp.CallToolParams{Name: "probe"}
+	withToken.SetProgressToken("tok-1")
+	if _, err := cs.CallTool(ctx, withToken); err != nil {
+		t.Fatalf("call with a token: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(isNil) != 2 || !isNil[0] || isNil[1] {
+		t.Errorf("notifier nil = %v, want [true false] (no token, then a token)", isNil)
+	}
+}

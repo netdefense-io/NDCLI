@@ -235,14 +235,21 @@ type RebindTokenResult struct {
 	Message        string `json:"message"`
 }
 
+// MaxRebindTokenTTL is the longest validity window NDManager gives a re-bind
+// token.
+const MaxRebindTokenTTL = 7 * 24 * time.Hour
+
 // DeviceRebindToken issues a one-time signing-key re-bind token for the
-// device. ttl is the desired validity window; NDManager caps it at 7 days.
+// device. ttl is the desired validity window, at most MaxRebindTokenTTL.
 func (s *Service) DeviceRebindToken(ctx context.Context, org, name string, ttl time.Duration) (*RebindTokenResult, error) {
 	if name == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "device name is required"}
 	}
 	if ttl <= 0 {
 		return nil, &Error{Code: CodeInvalidInput, Message: "ttl must be positive"}
+	}
+	if ttl > MaxRebindTokenTTL {
+		return nil, &Error{Code: CodeInvalidInput, Message: "ttl must be at most 7 days"}
 	}
 	body := map[string]int{"ttl_seconds": int(ttl.Seconds())}
 	resp, err := s.api.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/issue-rebind-token", org, name), body)

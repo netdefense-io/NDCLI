@@ -35,7 +35,24 @@ const (
 	// slowDownBackoffUnits is how much is added to the poll interval each
 	// time the provider says slow_down, matching the interactive renderer.
 	slowDownBackoffUnits = 5
+	// maxPollIntervalUnits and maxDeviceCodeLifetimeUnits bound what the
+	// provider may ask for (5 minutes between polls, a 24-hour code).
+	maxPollIntervalUnits       = 300
+	maxDeviceCodeLifetimeUnits = 86400
 )
+
+// providerDuration is n units from the identity provider as a Duration: def
+// units when n is zero or negative, and at most max units, checked before
+// multiplying so a huge n cannot wrap to a short or negative duration.
+func providerDuration(n, def, max int) time.Duration {
+	switch {
+	case n <= 0:
+		n = def
+	case n > max:
+		n = max
+	}
+	return time.Duration(n) * pollIntervalUnit
+}
 
 // pollIntervalUnit converts the provider's integer seconds into a Duration.
 // A test overrides it so the poll loop does not take real seconds.
@@ -188,14 +205,8 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 // The caller has already printed the verification URL and user code once; from
 // here the only output is whatever the caller makes of the returned result.
 func (c *Client) pollNonInteractive(ctx context.Context, authResp *models.DeviceAuthResponse, pollFunc func() (*models.TokenResponse, error)) (*models.TokenResponse, AuthResult, error) {
-	interval := time.Duration(authResp.Interval) * pollIntervalUnit
-	if interval <= 0 {
-		interval = defaultPollIntervalUnits * pollIntervalUnit
-	}
-	expiresIn := time.Duration(authResp.ExpiresIn) * pollIntervalUnit
-	if expiresIn <= 0 {
-		expiresIn = defaultDeviceCodeLifetimeUnits * pollIntervalUnit
-	}
+	interval := providerDuration(authResp.Interval, defaultPollIntervalUnits, maxPollIntervalUnits)
+	expiresIn := providerDuration(authResp.ExpiresIn, defaultDeviceCodeLifetimeUnits, maxDeviceCodeLifetimeUnits)
 
 	// Handle Ctrl-C ourselves so an interrupted login reports "cancelled"
 	// rather than dying mid-poll.

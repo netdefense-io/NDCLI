@@ -60,10 +60,11 @@ func (taskResource) Actions() []registry.Action {
 func (taskResource) Execute(ctx context.Context, svc *service.Service, org, id, actionKey string, args map[string]string) (string, error) {
 	switch actionKey {
 	case "x":
-		if err := svc.TaskCancel(ctx, id); err != nil {
+		result, err := svc.TaskCancel(ctx, id)
+		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("cancelled %s", uihelp.Truncate(id, 8)), nil
+		return result.Summary(), nil
 	}
 	return "", fmt.Errorf("unknown action %q", actionKey)
 }

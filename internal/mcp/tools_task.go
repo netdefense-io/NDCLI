@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -44,7 +43,7 @@ type taskIDInput struct {
 // left to the caller to guess from the raw message.
 const syncResultGuide = "A SYNC task's message is a JSON envelope: message (the summary line), " +
 	"results[] (type, name, action, status, code, error) and validation_errors[]. " +
-	"A result with status warning is informational; error and blocked results are failures. " +
+	"A result with status warning is informational; status skipped means the device left that item alone on purpose, not a failure; error and blocked results are failures. " +
 	"A local rule that rule placement moved has action renumbered, with its old and new sequence in before/after."
 
 // taskFieldsGuide tells a caller what each task says about where it came from
@@ -126,8 +125,11 @@ func (s *Server) registerTaskTools() {
 
 	// ndcli.task.cancel
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.task.cancel",
-		Description: "Cancel a pending or scheduled task. Requires confirm=true.",
+		Name: "ndcli.task.cancel",
+		Description: "Cancel a pending or scheduled task, or a CONNECT task while it is in progress; for a completed CONNECT task, close its relay session. " +
+			"action is always cancelled, the request made. outcome says what happened: CANCELED (the task is now CANCELED) or " +
+			"SESSION_CLOSED (a completed CONNECT task's relay session was closed; the task stays COMPLETED); branch on it. " +
+			"It is null when the control plane predates it; then, or for a value not listed here, message, NDManager's sentence, is the account. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -234,13 +236,20 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *mcp.CallToolRequest)
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	if err := s.svc.TaskCancel(apiCtx, input.Task); err != nil {
+	result, err := s.svc.TaskCancel(apiCtx, input.Task)
+	if err != nil {
 		return s.errorResult(err)
 	}
+	var outcome interface{}
+	if result.Outcome != "" {
+		outcome = result.Outcome
+	}
 	return s.successResult(map[string]interface{}{
-		"task":   input.Task,
-		"action": "cancelled",
-	}, fmt.Sprintf("Task %s cancelled", input.Task))
+		"task":    input.Task,
+		"action":  "cancelled",
+		"outcome": outcome,
+		"message": result.Message,
+	}, result.Summary())
 }
 
 func taskSummary(t *models.Task) map[string]interface{} {

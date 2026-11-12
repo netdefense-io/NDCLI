@@ -8,7 +8,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -21,18 +20,19 @@ var templateCmd = &cobra.Command{
 var templateListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List templates",
+	Args:  noArgs,
 	RunE:  runTemplateList,
 }
 
 var templateCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new template",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTemplateCreate,
 }
 
 var templateDescribeCmd = &cobra.Command{
-	Use:               "describe [name]",
+	Use:               "describe <name>",
 	Short:             "Show template details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTemplates,
@@ -40,7 +40,7 @@ var templateDescribeCmd = &cobra.Command{
 }
 
 var templateUpdateCmd = &cobra.Command{
-	Use:               "update [name]",
+	Use:               "update <name>",
 	Short:             "Update a template",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTemplates,
@@ -48,7 +48,7 @@ var templateUpdateCmd = &cobra.Command{
 }
 
 var templateDeleteCmd = &cobra.Command{
-	Use:               "delete [name]",
+	Use:               "delete <name>",
 	Short:             "Delete a template",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTemplates,
@@ -56,7 +56,7 @@ var templateDeleteCmd = &cobra.Command{
 }
 
 var templateAddSnippetCmd = &cobra.Command{
-	Use:               "add-snippet [template] [snippet]",
+	Use:               "add-snippet <template> <snippet>",
 	Short:             "Add a snippet to a template",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTemplateThenSnippet,
@@ -64,7 +64,7 @@ var templateAddSnippetCmd = &cobra.Command{
 }
 
 var templateRemoveSnippetCmd = &cobra.Command{
-	Use:               "remove-snippet [template] [snippet]",
+	Use:               "remove-snippet <template> <snippet>",
 	Short:             "Remove a snippet from a template",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTemplateThenSnippet,
@@ -72,7 +72,7 @@ var templateRemoveSnippetCmd = &cobra.Command{
 }
 
 var templateAddSoftwareCmd = &cobra.Command{
-	Use:               "add-software [template] [software-policy]",
+	Use:               "add-software <template> <software-policy>",
 	Short:             "Attach a software policy to a template",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTemplates,
@@ -80,7 +80,7 @@ var templateAddSoftwareCmd = &cobra.Command{
 }
 
 var templateRemoveSoftwareCmd = &cobra.Command{
-	Use:               "remove-software [template] [software-policy]",
+	Use:               "remove-software <template> <software-policy>",
 	Short:             "Detach a software policy from a template",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTemplates,
@@ -93,6 +93,7 @@ func init() {
 	templateCmd.AddCommand(templateDescribeCmd)
 	templateCmd.AddCommand(templateUpdateCmd)
 	templateCmd.AddCommand(templateDeleteCmd)
+	addYesFlag(templateDeleteCmd)
 	templateCmd.AddCommand(templateAddSnippetCmd)
 	templateCmd.AddCommand(templateRemoveSnippetCmd)
 	templateCmd.AddCommand(templateAddSoftwareCmd)
@@ -205,7 +206,7 @@ func runTemplateDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !helpers.Confirm(fmt.Sprintf("Delete template '%s'?", name)) {
+	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete template '%s'?", name)) {
 		fmt.Fprintln(os.Stderr, "Cancelled")
 		return nil
 	}

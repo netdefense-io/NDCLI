@@ -19,6 +19,7 @@ func TestTaskDescribeToolExplainsSyncResults(t *testing.T) {
 	description := registeredToolDescription(t, "ndcli.task.describe")
 	for _, want := range []string{
 		"status warning is informational",
+		"status skipped means the device left that item alone on purpose, not a failure",
 		"error and blocked results are failures",
 		"action renumbered",
 		"before/after",

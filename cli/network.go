@@ -23,18 +23,19 @@ var networkCmd = &cobra.Command{
 var networkListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List VPN networks",
+	Args:  noArgs,
 	RunE:  runNetworkList,
 }
 
 var networkCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a VPN network",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runNetworkCreate,
 }
 
 var networkDescribeCmd = &cobra.Command{
-	Use:               "describe [network]",
+	Use:               "describe <network>",
 	Short:             "Show VPN network details",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeVpnNetworks,
@@ -42,7 +43,7 @@ var networkDescribeCmd = &cobra.Command{
 }
 
 var networkUpdateCmd = &cobra.Command{
-	Use:               "update [network]",
+	Use:               "update <network>",
 	Short:             "Update a VPN network",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeVpnNetworks,
@@ -50,7 +51,7 @@ var networkUpdateCmd = &cobra.Command{
 }
 
 var networkDeleteCmd = &cobra.Command{
-	Use:               "delete [network]",
+	Use:               "delete <network>",
 	Short:             "Delete a VPN network",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeVpnNetworks,

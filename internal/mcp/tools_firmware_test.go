@@ -748,7 +748,7 @@ func TestScheduleTaskToolsPointFirmwareSpecsAtTheirTrack(t *testing.T) {
 	const body = `{"error":"This schedule entry belongs to a firmware track. Attach or detach the track's schedule through the firmware configuration instead.","code":"FIRMWARE_SPEC_MANAGED"}`
 	for tool, args := range map[string]string{
 		"ndcli.schedule.tasks.enable":  `{"code":"Fw123456"}`,
-		"ndcli.schedule.tasks.disable": `{"code":"Fw123456"}`,
+		"ndcli.schedule.tasks.disable": `{"code":"Fw123456","confirm":true}`,
 		"ndcli.schedule.tasks.remove":  `{"code":"Fw123456","confirm":true}`,
 	} {
 		cs, _ := firmwareClient(t, http.StatusConflict, body)
