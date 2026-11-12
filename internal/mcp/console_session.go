@@ -88,6 +88,7 @@ func (s *consoleSession) getLastActivity() time.Time {
 type ConsoleSessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*consoleSession
+	reserved int
 	done     chan struct{}
 
 	// closed remembers why recently ended sessions went away, so a later
@@ -97,6 +98,31 @@ type ConsoleSessionManager struct {
 }
 
 const maxClosedSessionsRemembered = 100
+
+// maxConsoleSessions caps the console sessions one MCP server holds, open or
+// still connecting. Each keeps a relay connection, its goroutines and a stream
+// buffer of 100000 frames.
+const maxConsoleSessions = 8
+
+// reserve takes a slot for a console_open about to connect, or reports false
+// when open and connecting sessions already reach maxConsoleSessions. The
+// caller releases the slot when the open ends, after Add on success.
+func (m *ConsoleSessionManager) reserve() (release func(), ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.sessions)+m.reserved >= maxConsoleSessions {
+		return nil, false
+	}
+	m.reserved++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.mu.Lock()
+			m.reserved--
+			m.mu.Unlock()
+		})
+	}, true
+}
 
 // newConsoleSessionManager creates and starts the manager, including the
 // background idle reaper goroutine.

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,19 @@ func TestRelayConnectErrorResult_RateLimited(t *testing.T) {
 	data, _ := tr.Data.(map[string]interface{})
 	if data["retry_after_seconds"] != float64(7) {
 		t.Errorf("data = %#v", tr.Data)
+	}
+
+	// A sub-second Retry-After (the HTTP-date form) must not read as 0, the
+	// value for a relay that gave none.
+	cause = &pathfinder.RateLimitedError{RetryAfter: 400 * time.Millisecond}
+	res, _ = s.relayConnectErrorResult(&pathfinder.PathfinderError{Message: "failed to connect to relay: " + cause.Error(), Err: cause})
+	tr = decodeToolResponse(t, res)
+	data, _ = tr.Data.(map[string]interface{})
+	if data["retry_after_seconds"] != float64(1) {
+		t.Errorf("400ms Retry-After: data = %#v, want retry_after_seconds 1", data)
+	}
+	if !strings.Contains(tr.Error.Message, "retry in 1s") {
+		t.Errorf("400ms Retry-After: message %q, want it to say retry in 1s like the data", tr.Error.Message)
 	}
 }
 

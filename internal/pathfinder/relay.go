@@ -72,7 +72,7 @@ type RateLimitedError struct {
 
 func (e *RateLimitedError) Error() string {
 	if e.RetryAfter > 0 {
-		return fmt.Sprintf("relay is rate limiting new sessions (HTTP 429); retry in %s", e.RetryAfter.Round(time.Second))
+		return fmt.Sprintf("relay is rate limiting new sessions (HTTP 429); retry in %ds", RetryAfterSeconds(e.RetryAfter))
 	}
 	return "relay is rate limiting new sessions (HTTP 429); retry in a few seconds"
 }

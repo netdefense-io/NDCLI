@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
@@ -58,6 +60,7 @@ type APIError struct {
 	Conflicts          []VariableConflict // For VARIABLE_CONFLICT errors
 	UndefinedVariables []string           // For UNDEFINED_VARIABLES errors
 	Skipped            []SkippedDevice    // For BACKUP_NO_ELIGIBLE_DEVICES: why each targeted device was left out
+	RetryAfter         time.Duration      // From the Retry-After header (429, 503); 0 when absent. A date is resolved against the local clock when the response is parsed
 }
 
 func (e *APIError) Error() string {
@@ -110,6 +113,7 @@ func (e *APIError) Error() string {
 func ParseError(resp *http.Response) *APIError {
 	apiErr := &APIError{
 		StatusCode: resp.StatusCode,
+		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
 	}
 
 	// Read body once, bounded to guard against an oversized error response
@@ -353,4 +357,33 @@ func IsFeatureNotAvailableError(err error) bool {
 func IsRegistrationRestrictedError(err error) bool {
 	apiErr, ok := asAPIError(err)
 	return ok && apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "REGISTRATION_RESTRICTED"
+}
+
+// maxRetryAfter bounds a Retry-After so an absurd value cannot overflow.
+const maxRetryAfter = 24 * time.Hour
+
+// parseRetryAfter reads a Retry-After header in either form, delta seconds or
+// an HTTP date. A missing, malformed or past value is 0.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	// On ErrRange ParseInt returns the int64 limit of the right sign, so the
+	// switch below clamps a huge value either way.
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		switch {
+		case secs <= 0:
+			return 0
+		case secs >= int64(maxRetryAfter/time.Second):
+			return maxRetryAfter
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return min(d, maxRetryAfter)
+		}
+	}
+	return 0
 }

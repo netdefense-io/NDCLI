@@ -142,6 +142,14 @@ func (c *Client) ConnectExec() (*ExecHandle, error) {
 	return c.ConnectExecContext(context.Background())
 }
 
+// execPairingTimeout is how long ConnectExecContext waits for the device to
+// join the relay session.
+const execPairingTimeout = 120 * time.Second
+
+// pairingHeartbeat is how often ConnectExecContext repeats its progress while
+// the device has not joined yet. A var so tests can shorten it.
+var pairingHeartbeat = 10 * time.Second
+
 // ConnectExecContext is ConnectExec that gives up, and closes the relay
 // connection, as soon as ctx is done.
 func (c *Client) ConnectExecContext(ctx context.Context) (*ExecHandle, error) {
@@ -162,7 +170,10 @@ func (c *Client) ConnectExecContext(ctx context.Context) (*ExecHandle, error) {
 
 	c.progress("Waiting for device...")
 
-	if err := relay.WaitForPairing(120 * time.Second); err != nil {
+	stopBeat := c.heartbeat(pairingHeartbeat, execPairingTimeout)
+	err = relay.WaitForPairing(execPairingTimeout)
+	stopBeat()
+	if err != nil {
 		relay.Close()
 		return nil, &PathfinderError{Message: "pairing failed: " + err.Error()}
 	}
@@ -454,4 +465,35 @@ func newUUID() (string, error) {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// heartbeat repeats a waiting-for-the-device progress every interval until
+// the returned stop runs, so a caller that resets its timeout on progress
+// keeps the pairing wait alive. Without a progress callback it does nothing.
+// stop returns once the last message has been sent.
+func (c *Client) heartbeat(interval, limit time.Duration) (stop func()) {
+	if c.onProgress == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				left := max(0, int((limit - time.Since(start)).Seconds()))
+				c.progress(fmt.Sprintf("Still waiting for the device to join the relay (%ds left)", left))
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
 }

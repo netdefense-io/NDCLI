@@ -41,6 +41,7 @@ type Client struct {
 	webAdminPort    int
 	webAdminOnly    bool
 	onProgress      ProgressCallback
+	relayRetryAfter time.Duration
 	isTTY           bool
 	endReported     bool
 }
@@ -122,11 +123,33 @@ func (e *PathfinderError) Error() string {
 // single retry of a relay dial refused with 429.
 const maxRelayRetryWait = 10 * time.Second
 
+// relayRetryAllowed reports whether a relay 429 asking to wait retryAfter is
+// waited out and dialed once more.
+func relayRetryAllowed(retryAfter time.Duration) bool {
+	return retryAfter > 0 && retryAfter <= maxRelayRetryWait
+}
+
+// RetryAfterSeconds is d in whole seconds, rounded up: a sub-second wait reads
+// as 1, and 0 means no wait at all.
+func RetryAfterSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Second - 1) / time.Second)
+}
+
+// RelayRetryAfter is the Retry-After the last relay dial waited out before its
+// retry, or 0 when it needed none.
+func (c *Client) RelayRetryAfter() time.Duration {
+	return c.relayRetryAfter
+}
+
 // dialRelay connects a new RelayClient. A 429 whose Retry-After is at most
 // maxRelayRetryWait is waited out and dialed once more; a second refusal, a
 // longer Retry-After, or a context deadline sooner than the wait is returned
 // as is. The returned stop func releases the ctx watcher.
 func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, func(), error) {
+	c.relayRetryAfter = 0
 	for attempt := 0; ; attempt++ {
 		relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
 		stop := context.AfterFunc(ctx, relay.cancel)
@@ -137,12 +160,13 @@ func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, fun
 		stop()
 
 		var rl *RateLimitedError
-		if attempt == 0 && errors.As(err, &rl) && rl.RetryAfter > 0 && rl.RetryAfter <= maxRelayRetryWait {
+		if attempt == 0 && errors.As(err, &rl) && relayRetryAllowed(rl.RetryAfter) {
 			if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= rl.RetryAfter {
-				c.progress(fmt.Sprintf("Relay is rate limiting; retrying in %s...", rl.RetryAfter.Round(time.Second)))
+				c.progress(fmt.Sprintf("Relay is rate limiting; retrying in %ds...", RetryAfterSeconds(rl.RetryAfter)))
 				timer := time.NewTimer(rl.RetryAfter)
 				select {
 				case <-timer.C:
+					c.relayRetryAfter = rl.RetryAfter
 					continue
 				case <-ctx.Done():
 					timer.Stop()

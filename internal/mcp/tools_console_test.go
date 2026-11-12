@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,5 +246,31 @@ func TestConsoleExec_BinaryEmptyOutput(t *testing.T) {
 	}
 	if enc, _ := decoded["encoding"].(string); enc != "base64" {
 		t.Errorf("encoding = %q, want %q", enc, "base64")
+	}
+}
+
+func TestConsoleOpenResultReportsTheRelayRetry(t *testing.T) {
+	expires := time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		retry     time.Duration
+		want      int
+		msgSuffix string
+	}{
+		{0, 0, "'fw-01'"},
+		{400 * time.Millisecond, 1, "made it wait 1s"},
+		{time.Second, 1, "made it wait 1s"},
+		{1500 * time.Millisecond, 2, "made it wait 2s"},
+		{10 * time.Second, 10, "made it wait 10s"},
+	} {
+		data, msg := consoleOpenResult("abc123", "fw-01", "acme", expires, tc.retry)
+		if got, ok := data["relay_retry_after_seconds"].(int); !ok || got != tc.want {
+			t.Errorf("retry %v: relay_retry_after_seconds = %v, want %d", tc.retry, data["relay_retry_after_seconds"], tc.want)
+		}
+		if !strings.HasSuffix(msg, tc.msgSuffix) {
+			t.Errorf("retry %v: message %q does not end with %q", tc.retry, msg, tc.msgSuffix)
+		}
+		if data["session_id"] != "abc123" || data["device"] != "fw-01" || data["org"] != "acme" || data["expires_at"] != "2026-11-12T01:00:00Z" {
+			t.Errorf("retry %v: the other fields changed: %v", tc.retry, data)
+		}
 	}
 }

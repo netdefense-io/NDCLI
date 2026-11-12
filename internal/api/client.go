@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,6 +94,11 @@ func NewClient(baseURL string, sslVerify bool, authMgr AuthProvider) *Client {
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: !sslVerify,
 		},
+		// The MCP server polls with several consoles at once; the default of
+		// 2 idle connections per host made most polls open a new TLS
+		// connection.
+		MaxIdleConnsPerHost: 16,
+		IdleConnTimeout:     90 * time.Second,
 	}
 
 	return &Client{
@@ -207,11 +213,29 @@ func (c *Client) handleNetworkError(err error) error {
 
 	if urlErr, ok := err.(*url.Error); ok {
 		if urlErr.Timeout() {
-			return fmt.Errorf("request timed out connecting to %s\nPlease check your network connection", cfg.Controlplane.Host)
+			return &networkError{msg: fmt.Sprintf("request timed out connecting to %s\nPlease check your network connection", cfg.Controlplane.Host), err: err}
 		}
 	}
 
-	return fmt.Errorf("cannot connect to controlplane at %s\n\nPlease check:\n  - Your network connection\n  - The controlplane host setting\n  - If SSL verification is required", cfg.Controlplane.Host)
+	return &networkError{msg: fmt.Sprintf("cannot connect to controlplane at %s\n\nPlease check:\n  - Your network connection\n  - The controlplane host setting\n  - If SSL verification is required", cfg.Controlplane.Host), err: err}
+}
+
+// networkError is the user-facing text for a failed request, keeping the
+// transport error underneath so callers can tell a cancel or a timeout apart.
+type networkError struct {
+	msg string
+	err error
+}
+
+func (e *networkError) Error() string { return e.msg }
+func (e *networkError) Unwrap() error { return e.err }
+
+// IsNetworkError reports whether err is a request to the control plane that
+// failed in transit. A failed token refresh is not one, even when the
+// refresh itself failed in transit: it runs on the auth provider's client.
+func IsNetworkError(err error) bool {
+	var n *networkError
+	return errors.As(err, &n)
 }
 
 // Get performs a GET request

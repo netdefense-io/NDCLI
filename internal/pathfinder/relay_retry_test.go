@@ -63,6 +63,63 @@ func TestDialRelayRetriesOnceAfterRetryAfter(t *testing.T) {
 	if el := time.Since(start); el < time.Second {
 		t.Errorf("retried after %v, before Retry-After", el)
 	}
+	if got := c.RelayRetryAfter(); got != time.Second {
+		t.Errorf("RelayRetryAfter() = %v, want the 1s waited out", got)
+	}
+}
+
+func TestDialRelayWithoutRefusalReportsNoRetry(t *testing.T) {
+	c, _ := limitedRelay(t, 0, "")
+	c.relayRetryAfter = time.Minute
+	relay, stop, err := c.dialRelay(context.Background(), c.buildWebSocketURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = relay.Close() }()
+	defer stop()
+	if got := c.RelayRetryAfter(); got != 0 {
+		t.Errorf("RelayRetryAfter() = %v, want 0 after a dial that needed no retry", got)
+	}
+}
+
+func TestRetryAfterSecondsRoundsUp(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want int
+	}{
+		{0, 0},
+		{-time.Second, 0},
+		{time.Nanosecond, 1},
+		{400 * time.Millisecond, 1},
+		{time.Second, 1},
+		{1500 * time.Millisecond, 2},
+		{10 * time.Second, 10},
+	} {
+		if got := RetryAfterSeconds(tc.d); got != tc.want {
+			t.Errorf("RetryAfterSeconds(%v) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+}
+
+func TestRelayRetryAllowedBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		retryAfter time.Duration
+		want       bool
+	}{
+		{0, false},
+		{-time.Second, false},
+		{time.Second, true},
+		{maxRelayRetryWait, true},
+		{maxRelayRetryWait + time.Nanosecond, false},
+		{11 * time.Second, false},
+	} {
+		if got := relayRetryAllowed(tc.retryAfter); got != tc.want {
+			t.Errorf("relayRetryAllowed(%v) = %v, want %v", tc.retryAfter, got, tc.want)
+		}
+	}
+	if maxRelayRetryWait != 10*time.Second {
+		t.Errorf("maxRelayRetryWait = %v, want the documented 10s", maxRelayRetryWait)
+	}
 }
 
 func TestDialRelayNoRetryWhenRetryAfterTooLong(t *testing.T) {

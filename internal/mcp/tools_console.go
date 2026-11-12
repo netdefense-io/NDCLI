@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,7 +54,10 @@ func (s *Server) registerConsoleTools() {
 		Name: "ndcli.device.console_open",
 		Description: "Open a persistent console session to a device. " +
 			"The session stays alive in the MCP server process until explicitly closed or idle for 30 minutes. " +
-			"Returns a session_id that must be supplied to console_exec and console_close.",
+			"Returns a session_id that must be supplied to console_exec and console_close. " +
+			"Send a progressToken to get a progress notification for each step and each status poll while the device picks up the connect task. " +
+			fmt.Sprintf("One server keeps at most %d sessions open or opening; another console_open fails with CONSOLE_LIMIT until one is closed. ", maxConsoleSessions) +
+			"relay_retry_after_seconds is how long the relay's rate limit made the open wait before its single retry (0 when it did not).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -146,6 +150,15 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 		return s.errorResult(err)
 	}
 
+	release, ok := s.consoleSessions.reserve()
+	if !ok {
+		return s.errorResultWithData(&ToolError{
+			Code:    "CONSOLE_LIMIT",
+			Message: fmt.Sprintf("%d console sessions are already open or opening, the most one server keeps; close one with ndcli.device.console_close first", maxConsoleSessions),
+		}, map[string]interface{}{"max_sessions": maxConsoleSessions})
+	}
+	defer release()
+
 	connectTimeout := resolveConnectTimeout(input.ConnectTimeout)
 
 	// Run the control-plane connect flow (POST + poll) to get the pathfinder session key.
@@ -153,7 +166,8 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	apiCtx, cancel := context.WithTimeout(ctx, connectTimeout+30*time.Second)
 	defer cancel()
 
-	connResult, connErr := s.svc.ConsoleConnect(apiCtx, org, input.Device, connectTimeout)
+	progress := progressNotifier(ctx, req)
+	connResult, connErr := s.svc.ConsoleConnectWithProgress(apiCtx, org, input.Device, connectTimeout, progress)
 	if connErr != nil {
 		return s.errorResult(connErr)
 	}
@@ -177,6 +191,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	pfClient, pfErr := pathfinder.NewClient(pathfinder.ClientConfig{
 		SessionID:       connResult.PathfinderSession,
 		WebAdminEnabled: false,
+		OnProgress:      pathfinder.ProgressCallback(progress),
 	})
 	if pfErr != nil {
 		return s.errorResult(&service.Error{
@@ -218,13 +233,46 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	s.consoleSessions.Add(sess)
 
 	expiresAt := now.Add(consoleSessionIdleTimeout)
+	data, msg := consoleOpenResult(sessionID, input.Device, org, expiresAt, pfClient.RelayRetryAfter())
+	return s.successResult(data, msg)
+}
 
-	return s.successResult(map[string]interface{}{
-		"session_id": sessionID,
-		"device":     input.Device,
-		"org":        org,
-		"expires_at": expiresAt.Format(time.RFC3339),
-	}, fmt.Sprintf("Console session opened for device '%s'", input.Device))
+// progressNotifier sends each message as an MCP progress notification when the
+// caller asked for them with a progressToken, and does nothing otherwise. A
+// client can then keep a long console_open alive instead of timing it out.
+func progressNotifier(ctx context.Context, req *mcp.CallToolRequest) func(string) {
+	if req == nil || req.Params == nil || req.Session == nil {
+		return func(string) {}
+	}
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return func(string) {}
+	}
+	var mu sync.Mutex
+	var step float64
+	return func(msg string) {
+		mu.Lock()
+		step++
+		n := step
+		mu.Unlock()
+		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: n, Message: msg})
+	}
+}
+
+// consoleOpenResult builds console_open's data and message.
+func consoleOpenResult(sessionID, device, org string, expiresAt time.Time, relayRetry time.Duration) (map[string]interface{}, string) {
+	retrySeconds := pathfinder.RetryAfterSeconds(relayRetry)
+	msg := fmt.Sprintf("Console session opened for device '%s'", device)
+	if retrySeconds > 0 {
+		msg += fmt.Sprintf(" after the relay's rate limit made it wait %ds", retrySeconds)
+	}
+	return map[string]interface{}{
+		"session_id":                sessionID,
+		"device":                    device,
+		"org":                       org,
+		"expires_at":                expiresAt.Format(time.RFC3339),
+		"relay_retry_after_seconds": retrySeconds,
+	}, msg
 }
 
 func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -296,7 +344,7 @@ func (s *Server) relayConnectErrorResult(err error) (*mcp.CallToolResult, error)
 	if errors.As(err, &rl) {
 		return s.errorResultWithData(
 			&ToolError{Code: "RATE_LIMITED", Message: err.Error()},
-			map[string]interface{}{"retry_after_seconds": int(rl.RetryAfter.Round(time.Second) / time.Second)},
+			map[string]interface{}{"retry_after_seconds": pathfinder.RetryAfterSeconds(rl.RetryAfter)},
 		)
 	}
 	return s.errorResult(&service.Error{Code: service.CodeAPIError, Message: err.Error(), Err: err})
