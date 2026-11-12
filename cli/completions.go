@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // Completion list endpoints paginate, and without an explicit page size
@@ -661,6 +663,7 @@ func completeSoftwarePolicyEntries(cmd *cobra.Command, args []string, pick func(
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	sanitize.Struct(reflect.ValueOf(content))
 	return pick(content), cobra.ShellCompDirectiveNoFileComp
 }
 

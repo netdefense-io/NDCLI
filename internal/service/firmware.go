@@ -231,7 +231,7 @@ func (s *Service) FirmwareTrackUpdate(ctx context.Context, org, track string, op
 	if err != nil {
 		if opts.AutoApplyMajor != nil && predatesAutoApplyMajor(err) {
 			return nil, &Error{Code: CodeServerTooOld, Err: err,
-				Message: "this NDManager predates major upgrades: it does not know auto_apply_major and refused the request as empty, so the switch was not changed"}
+				Message: "this server predates major upgrades: it does not know auto_apply_major and refused the request as empty, so the switch was not changed"}
 		}
 		return nil, err
 	}
@@ -293,10 +293,10 @@ func predatesAutoApplyMajor(err error) bool {
 func checkAutoApplyMajorEcho(track *models.FirmwareTrack, want bool) error {
 	switch {
 	case track.AutoApplyMajor == nil:
-		return &Error{Code: CodeServerTooOld, Message: "this NDManager predates major upgrades: its answer does not carry auto_apply_major, so the switch was not changed"}
+		return &Error{Code: CodeServerTooOld, Message: "this server predates major upgrades: its answer does not carry auto_apply_major, so the switch was not changed"}
 	case *track.AutoApplyMajor != want:
 		return &Error{Code: CodeAPIError, Message: fmt.Sprintf(
-			"NDManager answered auto_apply_major=%t to a request for %t: the switch was not changed", *track.AutoApplyMajor, want)}
+			"the server answered auto_apply_major=%t to a request for %t: the switch was not changed", *track.AutoApplyMajor, want)}
 	}
 	return nil
 }
@@ -372,7 +372,7 @@ func (s *Service) FirmwareDeviceAssign(ctx context.Context, org string, devices 
 	if err != nil {
 		if track == "" && predatesBootEnvironment(err) {
 			return nil, &Error{Code: CodeServerTooOld, Err: err,
-				Message: "this NDManager predates the boot-environment setting: it requires a track and refused the request"}
+				Message: "this server predates the boot-environment setting: it requires a track and refused the request"}
 		}
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func checkBootEnvironmentEcho(a *models.FirmwareAssignment, want bool, track str
 		}
 	}
 	if len(missing) > 0 {
-		msg := fmt.Sprintf("this NDManager predates the boot-environment setting: its answer does not carry boot_environment for %s, so the setting was not changed",
+		msg := fmt.Sprintf("this server predates the boot-environment setting: its answer does not carry boot_environment for %s, so the setting was not changed",
 			strings.Join(missing, ", "))
 		if track != "" {
 			msg += fmt.Sprintf(" (the move to %s itself was made)", track)
@@ -455,7 +455,7 @@ func checkBootEnvironmentEcho(a *models.FirmwareAssignment, want bool, track str
 	}
 	if len(wrong) > 0 {
 		return &Error{Code: CodeAPIError, Message: fmt.Sprintf(
-			"NDManager reports a different boot_environment than the requested %t for %s: the setting was not changed",
+			"the server reports a different boot_environment than the requested %t for %s: the setting was not changed",
 			want, strings.Join(wrong, ", "))}
 	}
 	return nil

@@ -129,7 +129,7 @@ func (s *Server) registerTaskTools() {
 		Description: "Cancel a pending or scheduled task, or a CONNECT task while it is in progress; for a completed CONNECT task, close its relay session. " +
 			"action is always cancelled, the request made. outcome says what happened: CANCELED (the task is now CANCELED) or " +
 			"SESSION_CLOSED (a completed CONNECT task's relay session was closed; the task stays COMPLETED); branch on it. " +
-			"It is null when the control plane predates it; then, or for a value not listed here, message, NDManager's sentence, is the account. Requires confirm=true.",
+			"It is null when the control plane predates it; then, or for a value not listed here, message, the server's sentence, is the account. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -193,9 +193,11 @@ func (s *Server) handleTaskList(ctx context.Context, req *mcp.CallToolRequest) (
 	for _, t := range result.Tasks {
 		tasks = append(tasks, taskSummary(&t))
 	}
-	return s.successResultWithPagination(map[string]interface{}{
-		"tasks": tasks,
-	}, result.Page, result.PerPage, result.Total)
+	data := map[string]interface{}{"tasks": tasks}
+	if result.Filters != nil {
+		data["filters"] = result.Filters
+	}
+	return s.successResultWithPagination(data, result.Page, result.PerPage, result.Total)
 }
 
 func (s *Server) handleTaskDescribe(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -16,11 +16,11 @@ func trackName(s string) *string { return &s }
 func scheduleSpecsSample() []models.ScheduledTask {
 	return []models.ScheduledTask{
 		{Code: "Fw111111", ScheduleName: "night", Kind: models.ScheduledTaskKindFirmware, FirmwareTrack: trackName("fast"),
-			Request: json.RawMessage(`{}`), Enabled: true, CreatedBy: "admin@acme.com"},
+			Request: models.DisplayJSON(`{}`), Enabled: true, CreatedBy: "admin@acme.com"},
 		{Code: "Fw222222", ScheduleName: "night", Kind: models.ScheduledTaskKindFirmware, FirmwareTrack: trackName("regular"),
-			Request: json.RawMessage(`{}`), Enabled: false, CreatedBy: "admin@acme.com"},
+			Request: models.DisplayJSON(`{}`), Enabled: false, CreatedBy: "admin@acme.com"},
 		{Code: "Bk333333", ScheduleName: "night", Kind: models.ScheduledTaskKindBackup,
-			Request: json.RawMessage(`{"type":"BACKUP"}`), Enabled: true, CreatedBy: "admin@acme.com"},
+			Request: models.DisplayJSON(`{"type":"BACKUP"}`), Enabled: true, CreatedBy: "admin@acme.com"},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestFirmwareSpecWithoutATrackKeepsThePlainWording(t *testing.T) {
 		t.Errorf("summary = %q", got)
 	}
 	// The track belongs to FIRMWARE specs only; any other kind shows its request.
-	if got := scheduledTaskSummary(models.ScheduledTaskKindBackup, "fast", json.RawMessage(`{"type":"BACKUP"}`)); !strings.Contains(got, "type=BACKUP") {
+	if got := scheduledTaskSummary(models.ScheduledTaskKindBackup, "fast", models.DisplayJSON(`{"type":"BACKUP"}`)); !strings.Contains(got, "type=BACKUP") {
 		t.Errorf("a BACKUP spec's summary = %q, want its request", got)
 	}
 }
@@ -136,4 +136,38 @@ func TestDetailedScheduleBoxKeepsItsBorderAroundFirmwareSpecs(t *testing.T) {
 	if rows < 4 { // three specs and the bottom edge
 		t.Errorf("only %d rows after the title:\n%s", rows, out)
 	}
+}
+
+// A list item carries no nested specs (#269): the count the service counted is
+// shown, and a schedule that was not counted shows "-", never a false 0.
+func TestScheduleListShowsTheCountedSpecs(t *testing.T) {
+	two, zero := 2, 0
+	list := []models.Schedule{
+		{Name: "nightly", Enabled: true, Schedule: "0 2 * * *", Timezone: "UTC", SpecCount: &two},
+		{Name: "unused", Enabled: true, Schedule: "0 3 * * *", Timezone: "UTC", SpecCount: &zero},
+		{Name: "uncounted", Enabled: true, Schedule: "0 4 * * *", Timezone: "UTC"},
+	}
+	table := render(t, "table", "FormatSchedules", list, 3)
+	for _, row := range []struct{ name, cell string }{{"nightly", "2"}, {"unused", "0"}, {"uncounted", "-"}} {
+		line := ""
+		for _, l := range strings.Split(table, "\n") {
+			if strings.Contains(l, row.name) {
+				line = l
+			}
+		}
+		if fields := strings.Fields(strings.ReplaceAll(line, "│", " ")); len(fields) == 0 || fields[len(fields)-1] != row.cell {
+			t.Errorf("table row for %s = %q, want Specs %s", row.name, line, row.cell)
+		}
+	}
+	simple := render(t, "simple", "FormatSchedules", list, 3)
+	mustContain(t, "simple", simple, "nightly [", "· 2 specs", "· 0 specs")
+	if strings.Count(simple, "specs") != 2 {
+		t.Errorf("simple list should count only the counted schedules:\n%s", simple)
+	}
+	detailed := render(t, "detailed", "FormatSchedules", list, 3)
+	if !strings.Contains(detailed, "Specs") || !strings.Contains(detailed, " 2\n") {
+		t.Errorf("detailed list does not show the count:\n%s", detailed)
+	}
+	out := render(t, "json", "FormatSchedules", list, 3)
+	mustContain(t, "json", out, `"spec_count": 2`, `"spec_count": 0`)
 }

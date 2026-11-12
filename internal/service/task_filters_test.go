@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -143,14 +144,14 @@ func TestTaskList_RefusesAListTheServerDidNotFilter(t *testing.T) {
 	}{
 		{"1.100 applies every filter", echo1100, everything, ""},
 		{"1.99 does not have run_id", echo199, TaskListOpts{RunID: "R7x2Kp9Q"},
-			"this NDManager predates the task list filter run_id: it did not apply it, so no list is shown"},
+			"this server predates the task list filter run_id: it did not apply it, so no list is shown"},
 		{"1.99 does not have run_id or requested_by", echo199, everything,
-			"this NDManager predates the task list filters requested_by, run_id: it did not apply them, so no list is shown"},
+			"this server predates the task list filters requested_by, run_id: it did not apply them, so no list is shown"},
 		{"1.99 applies its own filters", echo199, TaskListOpts{Origins: []string{"MANUAL"}, Search: "q", Devices: []string{"d"}}, ""},
 		{"before 1.99 none of them", echoBefore199, TaskListOpts{Origins: []string{"MANUAL"}, Search: "q", Devices: []string{"d"}},
-			"this NDManager predates the task list filters device_exact, origin, search: it did not apply them, so no list is shown"},
+			"this server predates the task list filters device_exact, origin, search: it did not apply them, so no list is shown"},
 		{"no echo at all", nil, TaskListOpts{IncludeActive: true},
-			"this NDManager predates the task list filter include_active: it did not apply it, so no list is shown"},
+			"this server predates the task list filter include_active: it did not apply it, so no list is shown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, rec := newEchoingTaskListService(t, tc.echo)
@@ -232,5 +233,22 @@ func TestTaskList_KeepsTheQueryShapeForTheNewFilters(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rec.query, want) {
 		t.Errorf("query = %v, want %v", rec.query, want)
+	}
+}
+
+// TaskList reports the server's paging when it sends it, since it may clamp a
+// page size, and keeps the filters it echoed.
+func TestTaskListReportsTheServersPagingAndFilters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"items": [], "total": 250, "page": 1, "per_page": 100, "filters": {"status": ["FAILED"]}}`)
+	}))
+	defer srv.Close()
+	result, err := newTestService(t, srv).TaskList(context.Background(), "acme", TaskListOpts{PerPage: 500, Statuses: []string{"FAILED"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PerPage != 100 || result.Page != 1 || result.Total != 250 || result.Filters["status"] == nil {
+		t.Errorf("result = %+v, want the server's per_page 100 and its filters", result)
 	}
 }

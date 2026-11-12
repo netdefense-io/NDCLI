@@ -1,6 +1,7 @@
 package pathfinder
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -41,6 +42,39 @@ type execResponse struct {
 	Data      string `json:"data"`      // base64; absent on result frames
 	ExitCode  int    `json:"exit_code"` // present on result frames (0 = success, 124 = timeout, etc.)
 	Truncated bool   `json:"truncated"` // absent when false
+}
+
+// MaxExecFrameBytes is the largest exec request frame sent, header included:
+// the relay's binary message limit (NDPathFinder #31 lowers it from 1 MiB to
+// 64 KiB). A larger message would end the session rather than run.
+const MaxExecFrameBytes = 64 * 1024
+
+// ExecRequestTooLargeError is a command whose exec request would not fit in
+// one relay frame. Nothing is sent.
+type ExecRequestTooLargeError struct {
+	Size int
+}
+
+func (e *ExecRequestTooLargeError) Error() string {
+	return fmt.Sprintf("the command encodes to a %d-byte request, more than the %d bytes one relay frame takes", e.Size, MaxExecFrameBytes)
+}
+
+// encodeExecRequest is the request as one frame payload, or an
+// ExecRequestTooLargeError when the frame would pass MaxExecFrameBytes. HTML
+// characters are left as they are: escaped, each of <, > and & would take six
+// bytes.
+func encodeExecRequest(req execRequest) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(req); err != nil {
+		return nil, fmt.Errorf("marshal exec request: %w", err)
+	}
+	payload := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	if size := frameHeaderLen + len(payload); size > MaxExecFrameBytes {
+		return nil, &ExecRequestTooLargeError{Size: size}
+	}
+	return payload, nil
 }
 
 // maxExecOutputBytes caps combined stdout+stderr accumulated by a single
@@ -328,13 +362,14 @@ func (h *ExecHandle) Exec(ctx context.Context, command string, timeout time.Dura
 		timeoutSecs = 60
 	}
 
-	reqBytes, err := json.Marshal(execRequest{
+	reqBytes, err := encodeExecRequest(execRequest{
 		ID:             reqID,
 		Command:        command,
 		TimeoutSeconds: timeoutSecs,
 	})
 	if err != nil {
-		return "", "", -1, false, fmt.Errorf("marshal exec request: %w", err)
+		reqID = ""
+		return "", "", -1, false, err
 	}
 
 	// Send the request as a single FrameTypeData payload on the exec stream.

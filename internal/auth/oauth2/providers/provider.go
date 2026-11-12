@@ -10,8 +10,9 @@ type Provider interface {
 	// RequestDeviceAuthorization initiates the device authorization flow
 	RequestDeviceAuthorization(scopes string) (*models.DeviceAuthResponse, error)
 
-	// PollForToken polls for the access token during device flow
-	PollForToken(deviceCode string, interval int) (*models.TokenResponse, error)
+	// PollForToken makes one poll for the access token during the device
+	// flow; the caller paces the polls.
+	PollForToken(deviceCode string) (*models.TokenResponse, error)
 
 	// RefreshToken refreshes an access token using a refresh token
 	RefreshToken(refreshToken string) (*models.TokenResponse, error)

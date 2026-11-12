@@ -240,18 +240,20 @@ type RebindTokenResult struct {
 const MaxRebindTokenTTL = 7 * 24 * time.Hour
 
 // DeviceRebindToken issues a one-time signing-key re-bind token for the
-// device. ttl is the desired validity window, at most MaxRebindTokenTTL.
+// device. ttl is the desired validity window, from 1 second to
+// MaxRebindTokenTTL; the control plane takes whole seconds, so a fraction is
+// rounded up.
 func (s *Service) DeviceRebindToken(ctx context.Context, org, name string, ttl time.Duration) (*RebindTokenResult, error) {
 	if name == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "device name is required"}
 	}
-	if ttl <= 0 {
-		return nil, &Error{Code: CodeInvalidInput, Message: "ttl must be positive"}
+	if ttl < time.Second {
+		return nil, &Error{Code: CodeInvalidInput, Message: "ttl must be at least 1 second"}
 	}
 	if ttl > MaxRebindTokenTTL {
 		return nil, &Error{Code: CodeInvalidInput, Message: "ttl must be at most 7 days"}
 	}
-	body := map[string]int{"ttl_seconds": int(ttl.Seconds())}
+	body := map[string]int{"ttl_seconds": int((ttl + time.Second - 1) / time.Second)}
 	resp, err := s.api.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/issue-rebind-token", org, name), body)
 	if err != nil {
 		return nil, wrapAPI("%v", err)

@@ -93,6 +93,12 @@ const AuthOrderConsistencyRule = `every name must be an auth server delivered to
 const SnippetUUIDGuidance = "ALIAS, RULE and UNBOUND_* content: leave uuid out and NetDefense supplies it. " +
 	"When copying another snippet's content, drop its uuid: a uuid that another snippet already holds is refused with SNIPPET_UUID_IN_USE."
 
+// SnippetPullUUIDNote is what snippet pull says about the uuid of the content a
+// pull shows without storing it: the control plane mints a new managed one
+// rather than show the device's own, so the content is ready for a create.
+const SnippetPullUUIDNote = "A pull that stores nothing shows ALIAS, RULE and UNBOUND_* content with a new managed uuid, " +
+	"never the device's own: the uuid shown is ready to paste into one create (a second create with it is refused with SNIPPET_UUID_IN_USE)."
+
 // SnippetFieldMinAgentVersion is the first ndagent release that applies every
 // field of a RULE, ALIAS or UNBOUND_HOST_OVERRIDE snippet. NDManager refuses
 // to build a sync for an older agent that would apply one only in part

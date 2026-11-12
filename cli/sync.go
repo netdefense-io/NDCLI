@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -36,7 +37,7 @@ const syncOrgHelp = "The organization is the global -o/--org, or the configured 
 var syncStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sync status for devices",
-	Long:  "Show sync status for the devices of an organization.\n\n" + syncOrgHelp,
+	Long:  "Show sync status for the devices of an organization.\n\n" + syncOrgHelp + "\n\n" + models.DriftStatusMeaning,
 	Args:  noArgsHint(syncTargetsHint),
 	RunE:  runSyncStatus,
 }
@@ -44,7 +45,7 @@ var syncStatusCmd = &cobra.Command{
 var syncApplyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Trigger sync for devices",
-	Long:  "Trigger a sync for the devices of an organization.\n\n" + syncOrgHelp,
+	Long:  "Trigger a sync for the devices of an organization.\n\n" + syncOrgHelp + "\n\n" + models.DriftStatusMeaning,
 	Args:  noArgsHint(syncTargetsHint),
 	RunE:  runSyncApply,
 }

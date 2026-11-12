@@ -57,7 +57,9 @@ func (s *Server) registerConsoleTools() {
 			"Returns a session_id that must be supplied to console_exec and console_close. " +
 			"Send a progressToken to get a progress notification for each step and each status poll while the device picks up the connect task. " +
 			fmt.Sprintf("One server keeps at most %d sessions open or opening; another console_open fails with CONSOLE_LIMIT until one is closed. ", maxConsoleSessions) +
-			"relay_retry_after_seconds is how long the relay's rate limit made the open wait before its single retry (0 when it did not).",
+			"relay_retry_after_seconds is how long the open waited for the relay before it got in, a 503's small jitter included (0 when it did not wait): a rate limit (429) is waited out once, " +
+			"a relay at capacity (503 with Retry-After) up to twice, two retries in all. A refusal not waited out is RATE_LIMITED or RELAY_BUSY, with retry_after_seconds; " +
+			"a 503 without Retry-After is RELAY_UNAVAILABLE, with no wait to honour: the relay is restarting or down, so retrying at once only creates another connect task.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -82,7 +84,7 @@ func (s *Server) registerConsoleTools() {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"session_id":      stringProperty("Session ID returned by console_open"),
-				"command":         stringProperty("Shell command to execute on the device"),
+				"command":         stringProperty(fmt.Sprintf("Shell command to execute on the device, at most %d bytes (32 KiB)", service.MaxConsoleCommandBytes)),
 				"timeout_seconds": intProperty("Per-command timeout in seconds (default 60, max 3600)", 60),
 				"binary":          boolProperty("Return stdout/stderr as standard base64 (StdEncoding) strings and add encoding='base64' to the response. Use when the command may produce non-UTF-8 output."),
 			},
@@ -134,6 +136,12 @@ type consoleCloseInput struct {
 	SessionID string `json:"session_id"`
 }
 
+// consoleAgentTooOldHint is console_open's way forward when the control plane
+// refuses a read-only session to the device's agent. Updating the agent would
+// not help the caller: console_open refuses a read-only session on any agent.
+const consoleAgentTooOldHint = "console_open needs read-write (RW) access on any agent: it refuses a read-only (RO) session itself " +
+	"(READ_ONLY_SESSION), so updating the agent would not let this caller run commands. A member with read-write access has to open it."
+
 func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err := s.svc.RequireAuth(); err != nil {
 		return s.errorResult(err)
@@ -169,7 +177,7 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	progress := progressNotifier(ctx, req)
 	connResult, connErr := s.svc.ConsoleConnectWithProgress(apiCtx, org, input.Device, connectTimeout, progress)
 	if connErr != nil {
-		return s.errorResult(connErr)
+		return s.errorResult(service.ConnectAdvice(connErr, consoleAgentTooOldHint))
 	}
 
 	// Authoritative read-only gate. NDManager derives read_only from the
@@ -269,7 +277,7 @@ func consoleOpenResult(sessionID, device, org string, expiresAt time.Time, relay
 	retrySeconds := pathfinder.RetryAfterSeconds(relayRetry)
 	msg := fmt.Sprintf("Console session opened for device '%s'", device)
 	if retrySeconds > 0 {
-		msg += fmt.Sprintf(" after the relay's rate limit made it wait %ds", retrySeconds)
+		msg += fmt.Sprintf(" after waiting %ds for the relay", retrySeconds)
 	}
 	return map[string]interface{}{
 		"session_id":                sessionID,
@@ -294,8 +302,8 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 	if input.SessionID == "" {
 		return s.errorResult(&ToolError{Code: "INVALID_INPUT", Message: "session_id is required"})
 	}
-	if input.Command == "" {
-		return s.errorResult(&ToolError{Code: "INVALID_INPUT", Message: "command is required"})
+	if err := service.CheckConsoleCommand(input.Command); err != nil {
+		return s.errorResult(err)
 	}
 
 	sess, lookupErr := s.consoleSessions.Get(input.SessionID)
@@ -342,14 +350,26 @@ func (s *Server) handleConsoleExec(ctx context.Context, req *mcp.CallToolRequest
 	}, "")
 }
 
-// relayConnectErrorResult reports a failed relay dial. A relay 429 gets its own
-// code and a retry_after_seconds field (0 when the relay gave no Retry-After).
+// relayConnectErrorResult reports a failed relay dial. A refusal the relay
+// asks to retry gets its own code with retry_after_seconds: RATE_LIMITED for a
+// 429 (0 when it gave no Retry-After), RELAY_BUSY for a 503 with one. A 503
+// without one is RELAY_UNAVAILABLE, with no wait to offer.
 func (s *Server) relayConnectErrorResult(err error) (*mcp.CallToolResult, error) {
 	var rl *pathfinder.RateLimitedError
 	if errors.As(err, &rl) {
 		return s.errorResultWithData(
 			&ToolError{Code: "RATE_LIMITED", Message: err.Error()},
 			map[string]interface{}{"retry_after_seconds": pathfinder.RetryAfterSeconds(rl.RetryAfter)},
+		)
+	}
+	var busy *pathfinder.RelayBusyError
+	if errors.As(err, &busy) {
+		if busy.RetryAfter <= 0 {
+			return s.errorResult(&ToolError{Code: "RELAY_UNAVAILABLE", Message: err.Error()})
+		}
+		return s.errorResultWithData(
+			&ToolError{Code: "RELAY_BUSY", Message: err.Error()},
+			map[string]interface{}{"retry_after_seconds": pathfinder.RetryAfterSeconds(busy.RetryAfter)},
 		)
 	}
 	return s.errorResult(&service.Error{Code: service.CodeAPIError, Message: err.Error(), Err: err})

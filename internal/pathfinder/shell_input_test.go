@@ -303,3 +303,18 @@ func TestForwardInput_EscapeSplitAcrossReads(t *testing.T) {
 		t.Fatal("forwardInput did not close forceQuit when ~. was split across two reads")
 	}
 }
+
+// TestForwardInput_HeldTildeBeforeAPaste verifies that a '~' held at line
+// start is forwarded with the multi-byte read after it intact. Written into
+// the read buffer itself, the '~' ran one byte ahead of the bytes still to be
+// read, and "abc" went out as "~aaa".
+func TestForwardInput_HeldTildeBeforeAPaste(t *testing.T) {
+	readFD, input := newInputPipe(t)
+	s, forwarded := newStreamForTest(t, readFD)
+	_, _, _ = startForwardInput(t, s, readFD)
+
+	writeInput(t, input, []byte{'\r', '~'})
+	expectForwarded(t, forwarded, []byte{'\r'})
+	writeInput(t, input, []byte("abc"))
+	expectForwarded(t, forwarded, []byte("~abc"))
+}

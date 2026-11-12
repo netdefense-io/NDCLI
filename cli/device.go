@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,6 +31,7 @@ var deviceCmd = &cobra.Command{
 var deviceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List devices",
+	Long:  "List the devices of an organization.\n\n" + models.DriftStatusMeaning,
 	Args:  noArgs,
 	RunE:  runDeviceList,
 }
@@ -171,7 +173,7 @@ func init() {
 	deviceConnectCmd.Flags().Bool("webadmin-only", false, "Skip the interactive terminal and keep the webadmin tunnel open until you quit (Ctrl-C). Auto-enabled when the device refuses a terminal (e.g. read-only sessions) or when stdin or stdout is not a terminal.")
 
 	// Rebind-token flags
-	deviceRebindTokenCmd.Flags().Duration("ttl", 24*time.Hour, "Token validity window (max 7d)")
+	deviceRebindTokenCmd.Flags().Duration("ttl", 24*time.Hour, "Token validity window, 1s to 7d (a fraction of a second is rounded up)")
 
 	// List flags
 	deviceListCmd.Flags().String("status", "", "Filter by status (PENDING, ENABLED, DISABLED)")
@@ -357,6 +359,25 @@ func connectRefusal(noWebadmin, webadminOnly, stdoutTTY, stdinTTY bool) error {
 	return nil
 }
 
+// bindWebAdminPort holds --webadmin-port before POST /connect, so a port in
+// use is found before the device is asked for a session. With no shell to
+// run, a busy port leaves nothing to serve and is refused; with one, it is
+// left to the tunnel, which says so on stderr and lets the shell go on. A
+// variable so a test can leave the port to the tunnel.
+var bindWebAdminPort = func(port int, noWebadmin, webadminOnly, stdoutTTY, stdinTTY bool) (net.Listener, error) {
+	if port <= 0 || noWebadmin {
+		return nil, nil
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err == nil {
+		return ln, nil
+	}
+	if stdoutTTY && stdinTTY && !webadminOnly {
+		return nil, nil
+	}
+	return nil, &service.Error{Code: service.CodeInvalidInput, Message: fmt.Sprintf("--webadmin-port %d cannot be used: %v", port, err)}
+}
+
 // connectClientConfig is the relay client's configuration. The terminal
 // reads are the ones connectRefusal judged, so the refusal and the shell
 // decision follow one rule.
@@ -392,6 +413,13 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	if err := connectRefusal(noWebadmin, webadminOnly, stdoutTTY, stdinTTY); err != nil {
 		return err
 	}
+	webadminListener, err := bindWebAdminPort(webadminPort, noWebadmin, webadminOnly, stdoutTTY, stdinTTY)
+	if err != nil {
+		return err
+	}
+	if webadminListener != nil {
+		defer func() { _ = webadminListener.Close() }()
+	}
 
 	// Until the device pairs, an interrupt gives the connect up, so the CONNECT
 	// task is cancelled below rather than left for the device to join. Once
@@ -413,7 +441,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 	var initResp models.ConnectInitResponse
 	if err := api.ParseResponse(resp, &initResp); err != nil {
 		spinner.Stop()
-		return err
+		return service.ConnectAdvice(err, connectAgentTooOldHint(deviceName))
 	}
 
 	// Whatever ends the connect before the user has a session (a timeout, an
@@ -477,6 +505,7 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 			// Step 3: Connect via Pathfinder
 			// Pass spinner callback to pathfinder
 			cfg := connectClientConfig(payload.PathfinderSession, webadminPort, noWebadmin, webadminOnly, spinner.UpdateMessage, stdoutTTY, stdinTTY)
+			cfg.WebAdminListener = webadminListener
 			// Stopping the signal context also cancels ctx, so from here an
 			// error is the session's own, not an interrupt.
 			paired := false
@@ -528,6 +557,13 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// connectAgentTooOldHint is the CLI's way forward when the control plane
+// refuses a read-only session to the device's agent.
+func connectAgentTooOldHint(device string) string {
+	return "your role on this organization is read-only, so the control plane makes the session read-only; 'ndcli device describe " +
+		device + "' shows the agent's version, and shows none when the device has not reported one"
 }
 
 // connectError is err, or "connect interrupted" once the user's interrupt is

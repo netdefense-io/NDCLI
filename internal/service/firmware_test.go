@@ -854,7 +854,7 @@ func TestFirmwareTrackSwitchIsSentAloneAndTheEchoIsChecked(t *testing.T) {
 		_, err := newTestService(t, srv).FirmwareTrackUpdate(context.Background(), "acme", "regular", FirmwareTrackUpdateOpts{AutoApplyMajor: &on})
 		var svcErr *Error
 		if !errors.As(err, &svcErr) || svcErr.Code != CodeServerTooOld ||
-			!strings.HasPrefix(err.Error(), "this NDManager predates major upgrades:") || !strings.Contains(err.Error(), "the switch was not changed") {
+			!strings.HasPrefix(err.Error(), "this server predates major upgrades:") || !strings.Contains(err.Error(), "the switch was not changed") {
 			t.Fatalf("err = %#v", err)
 		}
 		if !reflect.DeepEqual(seen.body, map[string]interface{}{"auto_apply_major": true}) || seen.hits != 1 {
@@ -904,7 +904,7 @@ func TestFirmwareTrackSwitchIsSentAloneAndTheEchoIsChecked(t *testing.T) {
 		_, err := newTestService(t, srv).FirmwareTrackUpdate(context.Background(), "acme", "regular", FirmwareTrackUpdateOpts{AutoApplyMajor: &on})
 		var svcErr *Error
 		if !errors.As(err, &svcErr) || svcErr.Code != CodeServerTooOld ||
-			!strings.Contains(err.Error(), "this NDManager predates major upgrades") || !strings.Contains(err.Error(), "the switch was not changed") {
+			!strings.Contains(err.Error(), "this server predates major upgrades") || !strings.Contains(err.Error(), "the switch was not changed") {
 			t.Fatalf("err = %#v", err)
 		}
 		if ErrorCode(err) != CodeServerTooOld {
@@ -986,7 +986,7 @@ func TestFirmwareBootEnvironmentIsSentAndTheEchoIsChecked(t *testing.T) {
 		_, err := newTestService(t, srv).FirmwareDeviceAssign(context.Background(), "acme", []string{"fw-a"}, FirmwareDeviceAssignOpts{BootEnvironment: &off})
 		var svcErr *Error
 		if !errors.As(err, &svcErr) || svcErr.Code != CodeServerTooOld ||
-			!strings.Contains(err.Error(), "this NDManager predates the boot-environment setting") || !strings.Contains(err.Error(), "fw-a") {
+			!strings.Contains(err.Error(), "this server predates the boot-environment setting") || !strings.Contains(err.Error(), "fw-a") {
 			t.Fatalf("err = %#v", err)
 		}
 		if strings.Contains(err.Error(), "itself was made") {
@@ -1014,7 +1014,7 @@ func TestFirmwareBootEnvironmentIsSentAndTheEchoIsChecked(t *testing.T) {
 		_, err := newTestService(t, srv).FirmwareDeviceAssign(context.Background(), "acme", devices, FirmwareDeviceAssignOpts{BootEnvironment: &on})
 		var svcErr *Error
 		if !errors.As(err, &svcErr) || svcErr.Code != CodeServerTooOld ||
-			!strings.Contains(err.Error(), "this NDManager predates the boot-environment setting") {
+			!strings.Contains(err.Error(), "this server predates the boot-environment setting") {
 			t.Fatalf("err = %#v", err)
 		}
 		// What the server said is still underneath.
@@ -1391,8 +1391,8 @@ func TestErrorCodeShowsTheServersCodeExceptForAVersionSkew(t *testing.T) {
 		"NDManager's code":                       {refusal, "MISSING_FIELD"},
 		"through the service's":                  {wrapAPI("%v", refusal), "MISSING_FIELD"},
 		"a service error of its own":             {&Error{Code: CodeInvalidInput, Message: "nope"}, ""},
-		"a version skew over the refusal":        {&Error{Code: CodeServerTooOld, Err: refusal, Message: "this NDManager predates it"}, CodeServerTooOld},
-		"a version skew with nothing underneath": {&Error{Code: CodeServerTooOld, Message: "this NDManager predates it"}, CodeServerTooOld},
+		"a version skew over the refusal":        {&Error{Code: CodeServerTooOld, Err: refusal, Message: "this server predates it"}, CodeServerTooOld},
+		"a version skew with nothing underneath": {&Error{Code: CodeServerTooOld, Message: "this server predates it"}, CodeServerTooOld},
 		"a version skew inside advice":           {FirmwareAdvice(&Error{Code: CodeServerTooOld, Err: refusal, Message: "m"}, FirmwareVocabulary{}), CodeServerTooOld},
 	} {
 		if got := ErrorCode(tc.err); got != tc.want {

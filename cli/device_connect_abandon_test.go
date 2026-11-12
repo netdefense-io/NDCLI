@@ -129,6 +129,10 @@ func TestDeviceConnectReportsAnErrorAfterPairingAsItIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = busy.Close() }()
+	// The port is left to the tunnel, so it fails after the device paired.
+	origBind := bindWebAdminPort
+	bindWebAdminPort = func(int, bool, bool, bool, bool) (net.Listener, error) { return nil, nil }
+	t.Cleanup(func() { bindWebAdminPort = origBind })
 
 	origHost := config.Get().Pathfinder.Host
 	config.Get().Pathfinder.Host = relay.URL

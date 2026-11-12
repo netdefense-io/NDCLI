@@ -211,8 +211,9 @@ func (s *Server) registerSnippetTools() {
 	}, s.handleSnippetDelete)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.snippet.pull",
-		Description: "Ask a device to pull a config object back to the platform as a snippet. Returns the task code; poll ndcli.task.describe to retrieve the result. Requires confirm=true.",
+		Name: "ndcli.snippet.pull",
+		Description: "Ask a device to pull a config object back to the platform as a snippet. Returns the task code; poll ndcli.task.describe to retrieve the result. " +
+			models.SnippetPullUUIDNote + " A pull stores nothing without auto_create or overwrite; its content comes back in ndcli.task.describe. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

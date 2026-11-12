@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // scheduleEnabledLabel returns a display string for the enabled field.
@@ -49,20 +50,26 @@ func scheduleLastFired(sch *models.Schedule) string {
 // descriptor; one that does not send it leaves a plain "firmware track window".
 // The phrase stays short on purpose: the detailed schedule view draws its specs
 // in a box 60 columns wide that does not wrap.
-func scheduledTaskSummary(kind, track string, raw json.RawMessage) string {
+func scheduledTaskSummary(kind, track string, raw models.DisplayJSON) string {
 	if kind == models.ScheduledTaskKindFirmware {
 		if track != "" {
 			return track + " track window"
 		}
 		return "firmware track window"
 	}
-	return scheduledTaskRequestSummary(raw)
+	return scheduledTaskRequestSummary(json.RawMessage(raw))
 }
 
 // scheduledTaskRequestSummary returns a one-line summary of the raw request
 // JSON stored in a ScheduledTask. It extracts the most useful fields without
-// requiring a full parse of every possible shape.
+// requiring a full parse of every possible shape. Every return is scrubbed:
+// the fields decoded here turn an escaped \u001b into a live byte, and the
+// fallbacks show the bytes as sent.
 func scheduledTaskRequestSummary(raw json.RawMessage) string {
+	return sanitize.String(requestSummary(raw))
+}
+
+func requestSummary(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -143,11 +150,20 @@ func (f *TableFormatter) FormatSchedules(schedules []models.Schedule, total int)
 			s.Schedule,
 			s.Timezone,
 			nextRun,
-			fmt.Sprintf("%d", len(s.ScheduledTasks)),
+			scheduleSpecsCell(s),
 		})
 	}
 	table.Render()
 	return nil
+}
+
+// scheduleSpecsCell is the schedule's spec count, or "-" when it was not
+// counted.
+func scheduleSpecsCell(s models.Schedule) string {
+	if n, ok := s.Specs(); ok {
+		return fmt.Sprintf("%d", n)
+	}
+	return "-"
 }
 
 // FormatSchedule formats a single schedule (table/key-value), including any
@@ -228,8 +244,12 @@ func (f *SimpleFormatter) FormatSchedules(schedules []models.Schedule, total int
 		if s.NextRunAt != nil && !s.NextRunAt.IsZero() {
 			nextRun = RelativeTimeShort(s.NextRunAt.Time)
 		}
-		fmt.Fprintf(f.Writer, "• %s [%s] %s (%s) → next: %s\n",
-			s.Name, scheduleEnabledLabel(s.Enabled), s.Schedule, s.Timezone, nextRun)
+		specs := ""
+		if n, ok := s.Specs(); ok {
+			specs = fmt.Sprintf(" · %d specs", n)
+		}
+		fmt.Fprintf(f.Writer, "• %s [%s] %s (%s) → next: %s%s\n",
+			s.Name, scheduleEnabledLabel(s.Enabled), s.Schedule, s.Timezone, nextRun, specs)
 	}
 	return nil
 }
@@ -336,6 +356,9 @@ func (f *DetailedFormatter) formatScheduleRich(sch *models.Schedule) {
 
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Next Run", scheduleNextRun(sch))
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Last Fired", scheduleLastFired(sch))
+	if n, ok := sch.Specs(); ok && len(sch.ScheduledTasks) == 0 {
+		fmt.Fprintf(f.Writer, "  %-14s %d\n", "Specs", n)
+	}
 	fmt.Fprintln(f.Writer)
 
 	fmt.Fprintf(f.Writer, "  %-14s %s\n", "Created By", sch.CreatedBy)

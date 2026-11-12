@@ -71,6 +71,8 @@ type TaskListResult struct {
 	Total   int
 	Page    int
 	PerPage int
+	// Filters is the server's echo of the filters it applied.
+	Filters map[string]any
 }
 
 // taskFilterFields names a filter by the field a caller sets it with, where
@@ -285,14 +287,23 @@ func (s *Service) TaskList(ctx context.Context, org string, opts TaskListOpts) (
 		}
 		slices.Sort(ignored)
 		return nil, &Error{Code: CodeServerTooOld, Message: fmt.Sprintf(
-			"this NDManager predates the task list %s %s: it did not apply %s, so no list is shown",
+			"this server predates the task list %s %s: it did not apply %s, so no list is shown",
 			noun, strings.Join(ignored, ", "), pronoun)}
+	}
+	// The server's paging when it sends it: it may clamp a per_page it was
+	// asked for.
+	if result.Page > 0 {
+		page = result.Page
+	}
+	if result.PerPage > 0 {
+		perPage = result.PerPage
 	}
 	return &TaskListResult{
 		Tasks:   result.Items,
 		Total:   result.Total,
 		Page:    page,
 		PerPage: perPage,
+		Filters: result.Filters,
 	}, nil
 }
 

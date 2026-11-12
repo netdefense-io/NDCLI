@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/url"
 	"os"
@@ -25,13 +26,16 @@ type ProgressCallback func(message string)
 // ClientConfig holds configuration for the Pathfinder client
 type ClientConfig struct {
 	SessionID       string
-	WebAdminEnabled bool             // Enable webadmin tunnel (default: true)
-	WebAdminPort    int              // 0 = auto-assign, >0 = specific port
-	WebAdminOnly    bool             // Skip the interactive shell; serve webadmin until quit
-	OnProgress      ProgressCallback // Optional progress callback
-	OnPaired        func()           // Optional; called once the device has paired
-	IsTTY           bool             // Whether stdout is a terminal (WebAdmin box, messages)
-	StdinIsTTY      bool             // Whether stdin is a terminal; the shell needs both
+	WebAdminEnabled bool // Enable webadmin tunnel (default: true)
+	WebAdminPort    int  // 0 = auto-assign, >0 = specific port
+	// WebAdminListener, when set, is the tunnel's listener, bound by the
+	// caller before the connect began; it replaces WebAdminPort.
+	WebAdminListener net.Listener
+	WebAdminOnly     bool             // Skip the interactive shell; serve webadmin until quit
+	OnProgress       ProgressCallback // Optional progress callback
+	OnPaired         func()           // Optional; called once the device has paired
+	IsTTY            bool             // Whether stdout is a terminal (WebAdmin box, messages)
+	StdinIsTTY       bool             // Whether stdin is a terminal; the shell needs both
 }
 
 // Client represents a Pathfinder WebSocket client
@@ -41,6 +45,7 @@ type Client struct {
 	sessionID       string
 	webAdminEnabled bool
 	webAdminPort    int
+	webAdminLn      net.Listener
 	webAdminOnly    bool
 	onProgress      ProgressCallback
 	onPaired        func()
@@ -76,6 +81,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		sessionID:       cfg.SessionID,
 		webAdminEnabled: cfg.WebAdminEnabled,
 		webAdminPort:    cfg.WebAdminPort,
+		webAdminLn:      cfg.WebAdminListener,
 		webAdminOnly:    cfg.WebAdminOnly,
 		onProgress:      cfg.OnProgress,
 		onPaired:        cfg.OnPaired,
@@ -135,6 +141,86 @@ func relayRetryAllowed(retryAfter time.Duration) bool {
 	return retryAfter > 0 && retryAfter <= maxRelayRetryWait
 }
 
+// maxRelayBusyWait is the longest Retry-After a relay 503 is waited out for;
+// the relay sends 15 s when its cap on unregistered connections is reached.
+const maxRelayBusyWait = 15 * time.Second
+
+// maxRelayRetries is how many times one dial is retried in all: a 503 that
+// is waited out counts, and so does the one retry a 429 gets.
+const maxRelayRetries = 2
+
+// relayBusyRetryAllowed reports whether a relay 503 asking to wait
+// retryAfter is waited out and dialed again. A 503 without Retry-After is
+// not: nothing says the relay will take the connection later.
+func relayBusyRetryAllowed(retryAfter time.Duration) bool {
+	return retryAfter > 0 && retryAfter <= maxRelayBusyWait
+}
+
+// relayRefusal is a relay refusal that is waited out.
+type relayRefusal int
+
+const (
+	relayRateLimited relayRefusal = iota + 1
+	relayBusy
+)
+
+// line is the progress line while left remains of the wait.
+func (r relayRefusal) line(left time.Duration) string {
+	if r == relayRateLimited {
+		return fmt.Sprintf("Relay is rate limiting; retrying in %ds...", RetryAfterSeconds(left))
+	}
+	return fmt.Sprintf("Relay is at capacity; retrying in %ds...", RetryAfterSeconds(left))
+}
+
+// relayBusyJitter is added to a 503's wait, so the clients the relay's cap
+// refused at once do not all come back at once. A variable so a test can fix
+// it.
+var relayBusyJitter = func() time.Duration { return rand.N(time.Second) }
+
+// relayRetryWait is how long to wait before dialing again after err, and which
+// refusal it was; kind is 0 when err is not retried. retries is how many times
+// this dial has been retried, rateLimited whether a 429 was.
+func relayRetryWait(err error, retries int, rateLimited bool) (wait time.Duration, kind relayRefusal) {
+	if retries >= maxRelayRetries {
+		return 0, 0
+	}
+	var rl *RateLimitedError
+	if errors.As(err, &rl) && !rateLimited && relayRetryAllowed(rl.RetryAfter) {
+		return rl.RetryAfter, relayRateLimited
+	}
+	var busy *RelayBusyError
+	if errors.As(err, &busy) && relayBusyRetryAllowed(busy.RetryAfter) {
+		return busy.RetryAfter + relayBusyJitter(), relayBusy
+	}
+	return 0, 0
+}
+
+// waitOutRelay waits out a relay refusal, repeating its progress line every
+// pairingHeartbeat so a caller that resets its timeout on progress keeps the
+// connect alive through a wait longer than that.
+func (c *Client) waitOutRelay(ctx context.Context, wait time.Duration, kind relayRefusal) error {
+	end := time.Now().Add(wait)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	beat := time.NewTicker(pairingHeartbeat)
+	defer beat.Stop()
+	c.progress(kind.line(wait))
+	for {
+		select {
+		case <-timer.C:
+			return nil
+		case <-beat.C:
+			// A beat that fires with the timer would announce "retrying in 0s";
+			// any time left rounds up to at least 1s.
+			if left := time.Until(end); left > 0 {
+				c.progress(kind.line(left))
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // RetryAfterSeconds is d in whole seconds, rounded up: a sub-second wait reads
 // as 1, and 0 means no wait at all.
 func RetryAfterSeconds(d time.Duration) int {
@@ -144,20 +230,26 @@ func RetryAfterSeconds(d time.Duration) int {
 	return int((d + time.Second - 1) / time.Second)
 }
 
-// RelayRetryAfter is the Retry-After the last relay dial waited out before its
-// retry, or 0 when it needed none.
+// RelayRetryAfter is how long the last relay dial waited before it got in,
+// summed over its retries, or 0 when it needed none: the relay's Retry-After,
+// plus the jitter a 503's wait gets.
 func (c *Client) RelayRetryAfter() time.Duration {
 	return c.relayRetryAfter
 }
 
-// dialRelay connects a new RelayClient. A 429 whose Retry-After is at most
-// maxRelayRetryWait is waited out and dialed once more; a second refusal, a
-// longer Retry-After, or a context deadline sooner than the wait is returned
-// as is. The returned stop func releases the ctx watcher; it reports false
-// when the watcher had already fired, so ctx has ended the connection.
+// dialRelay connects a new RelayClient. A refusal the relay asks to retry is
+// waited out and dialed again (relayRetryWait): a 429 with a Retry-After of at
+// most maxRelayRetryWait once, a 503 with one of at most maxRelayBusyWait (plus
+// up to a second of jitter) while the dial has been retried fewer than
+// maxRelayRetries times. Any other
+// refusal, a longer Retry-After, one retry too many, or a context deadline
+// sooner than the wait is returned as is. The returned stop func releases the
+// ctx watcher; it reports false when the watcher had already fired, so ctx has
+// ended the connection.
 func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, func() bool, error) {
 	c.relayRetryAfter = 0
-	for attempt := 0; ; attempt++ {
+	rateLimited := false
+	for retries := 0; ; retries++ {
 		relay := NewRelayClient(wsURL, c.sessionID, c.sslVerify)
 		stop := context.AfterFunc(ctx, relay.cancel)
 		err := relay.Connect()
@@ -166,19 +258,14 @@ func (c *Client) dialRelay(ctx context.Context, wsURL string) (*RelayClient, fun
 		}
 		stop()
 
-		var rl *RateLimitedError
-		if attempt == 0 && errors.As(err, &rl) && relayRetryAllowed(rl.RetryAfter) {
-			if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= rl.RetryAfter {
-				c.progress(fmt.Sprintf("Relay is rate limiting; retrying in %ds...", RetryAfterSeconds(rl.RetryAfter)))
-				timer := time.NewTimer(rl.RetryAfter)
-				select {
-				case <-timer.C:
-					c.relayRetryAfter = rl.RetryAfter
-					continue
-				case <-ctx.Done():
-					timer.Stop()
-					return nil, nil, &PathfinderError{Message: "failed to connect to relay: " + ctx.Err().Error(), Err: ctx.Err()}
+		if wait, kind := relayRetryWait(err, retries, rateLimited); kind != 0 {
+			if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= wait {
+				rateLimited = rateLimited || kind == relayRateLimited
+				if werr := c.waitOutRelay(ctx, wait, kind); werr != nil {
+					return nil, nil, &PathfinderError{Message: "failed to connect to relay: " + werr.Error(), Err: werr}
 				}
+				c.relayRetryAfter += wait
+				continue
 			}
 		}
 		return nil, nil, &PathfinderError{Message: "failed to connect to relay: " + err.Error(), Err: err}
@@ -325,6 +412,9 @@ func (c *Client) ConnectContext(ctx context.Context) error {
 // failure is the command's.
 func (c *Client) startTunnel(streamMgr *StreamManager, stderr io.Writer) (*Tunnel, error) {
 	tunnel := NewTunnel(c.webAdminPort, "webadmin", streamMgr)
+	if c.webAdminLn != nil {
+		tunnel = NewTunnelOn(c.webAdminLn, "webadmin", streamMgr)
+	}
 	if err := tunnel.Start(); err != nil {
 		if !c.shellWanted() {
 			return nil, &PathfinderError{Message: "webadmin tunnel did not start: " + err.Error(), Err: err}

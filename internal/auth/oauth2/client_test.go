@@ -21,7 +21,7 @@ func (m *mockProvider) Name() string { return "mock" }
 func (m *mockProvider) RequestDeviceAuthorization(scopes string) (*models.DeviceAuthResponse, error) {
 	return nil, nil
 }
-func (m *mockProvider) PollForToken(deviceCode string, interval int) (*models.TokenResponse, error) {
+func (m *mockProvider) PollForToken(deviceCode string) (*models.TokenResponse, error) {
 	return nil, nil
 }
 func (m *mockProvider) RefreshToken(refreshToken string) (*models.TokenResponse, error) {

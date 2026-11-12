@@ -31,7 +31,7 @@ func (f *fakeProvider) RequestDeviceAuthorization(string) (*models.DeviceAuthRes
 	return deviceAuthResponse(), nil
 }
 
-func (f *fakeProvider) PollForToken(string, int) (*models.TokenResponse, error) {
+func (f *fakeProvider) PollForToken(string) (*models.TokenResponse, error) {
 	i := int(f.polls.Add(1)) - 1
 	if i >= len(f.results) {
 		i = len(f.results) - 1

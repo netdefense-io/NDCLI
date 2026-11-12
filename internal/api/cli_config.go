@@ -38,7 +38,7 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reach NDManager at %s: %w", cfg.Controlplane.Host, err)
+		return nil, fmt.Errorf("failed to reach the NetDefense server at %s: %w", cfg.Controlplane.Host, err)
 	}
 	defer resp.Body.Close()
 
@@ -60,10 +60,10 @@ func FetchCLIConfig(ctx context.Context) (*CLIConfigResponse, error) {
 
 	// Validate required fields
 	if cliConfig.OAuth2.Domain == "" {
-		return nil, fmt.Errorf("NDManager returned empty oauth2.domain")
+		return nil, fmt.Errorf("the server returned an empty oauth2.domain")
 	}
 	if cliConfig.OAuth2.ClientID == "" {
-		return nil, fmt.Errorf("NDManager returned empty oauth2.client_id")
+		return nil, fmt.Errorf("the server returned an empty oauth2.client_id")
 	}
 
 	return &cliConfig, nil

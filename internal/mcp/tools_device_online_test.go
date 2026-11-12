@@ -3,6 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -60,5 +63,80 @@ func TestDeviceToolDescriptionsExplainOnline(t *testing.T) {
 	}
 	if seen != len(want) {
 		t.Fatalf("found %d of the %d tools that return online", seen, len(want))
+	}
+}
+
+// ndcli.device.health keeps a null `online`: the telemetry model no longer
+// drops it, so "could not tell" stays apart from "not sent".
+func TestDeviceHealthKeepsANullOnline(t *testing.T) {
+	raw, err := json.Marshal(models.DeviceTelemetryResponse{Name: "fw-01"})
+	if err != nil || !strings.Contains(string(raw), `"online":null`) {
+		t.Errorf("telemetry %s (%v), want online null", raw, err)
+	}
+	session := connectTestClient(t)
+	defer func() { _ = session.Close() }()
+	result, err := session.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	found := false
+	for _, tool := range result.Tools {
+		if tool.Name == "ndcli.device.health" {
+			found = true
+			if !strings.Contains(tool.Description, deviceOnlineMeaning) {
+				t.Errorf("ndcli.device.health description does not explain online")
+			}
+		}
+	}
+	if !found {
+		t.Error("ndcli.device.health not registered")
+	}
+}
+
+// The ndcli://org/{name}/devices resource carries `online` like the device
+// tools, null included, and its description says what it means.
+func TestOrgDevicesResourceReturnsOnline(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/organizations/acme/devices" || r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("fetched %s?%s, want the org's devices at per_page=100", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"devices": [{"name": "fw-01", "online": true}, {"name": "fw-02", "online": null}], "total": 2}`)
+	}))
+	t.Cleanup(api.Close)
+	s := newStaticAuthTestServerWithAPI(t, api, "acme")
+	res, err := s.handleOrgDevicesResource(context.Background(), &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{URI: "ndcli://org/acme/devices"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Devices []map[string]json.RawMessage `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(res.Contents[0].Text), &body); err != nil || len(body.Devices) != 2 {
+		t.Fatalf("resource %s: %v", res.Contents[0].Text, err)
+	}
+	for i, want := range []string{"true", "null"} {
+		if got, ok := body.Devices[i]["online"]; !ok || string(got) != want {
+			t.Errorf("device %d: online %s (present %v), want %s", i, got, ok, want)
+		}
+	}
+
+	session := connectTestClient(t)
+	defer func() { _ = session.Close() }()
+	templates, err := session.ListResourceTemplates(context.Background(), &mcp.ListResourceTemplatesParams{})
+	if err != nil {
+		t.Fatalf("ListResourceTemplates: %v", err)
+	}
+	found := false
+	for _, tmpl := range templates.ResourceTemplates {
+		if tmpl.URITemplate == "ndcli://org/{name}/devices" {
+			found = true
+			if !strings.Contains(tmpl.Description, deviceOnlineDescription) {
+				t.Errorf("devices resource description does not explain online: %q", tmpl.Description)
+			}
+		}
+	}
+	if !found {
+		t.Error("devices resource template not listed")
 	}
 }

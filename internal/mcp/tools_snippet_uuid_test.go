@@ -29,3 +29,11 @@ func TestSnippetWriteToolsStateTheFieldContract(t *testing.T) {
 		}
 	}
 }
+
+// ndcli.snippet.pull says the uuid in the content it shows is a new managed
+// one, as the CLI help does.
+func TestSnippetPullToolStatesTheShownUUIDIsNew(t *testing.T) {
+	if description := registeredToolDescription(t, "ndcli.snippet.pull"); !strings.Contains(description, models.SnippetPullUUIDNote) {
+		t.Errorf("ndcli.snippet.pull description does not carry the uuid note:\n%s", description)
+	}
+}

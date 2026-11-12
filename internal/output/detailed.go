@@ -143,7 +143,8 @@ func (f *DetailedFormatter) FormatDevice(device *models.Device) error {
 }
 
 // FormatTasks formats a list of tasks with full details
-func (f *DetailedFormatter) FormatTasks(tasks []models.Task, total int) error {
+func (f *DetailedFormatter) FormatTasks(list models.TaskList) error {
+	tasks := list.Tasks
 	if len(tasks) == 0 {
 		f.Info("No tasks found")
 		return nil

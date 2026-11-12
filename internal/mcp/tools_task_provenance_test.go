@@ -238,7 +238,7 @@ func TestTaskListToolRefusesWhatAnOlderNDManagerIgnored(t *testing.T) {
 	_, resp := filteredTaskListCall(t, map[string]any{"organization": "acme-corp", "sort_by": "created_at:desc"},
 		`{"origin":["MANUAL"],"run_id":"R7x2Kp9Q"}`)
 	if resp.Success || resp.Error == nil || resp.Error.Code != "SERVER_TOO_OLD" ||
-		resp.Error.Message != "this NDManager predates the task list filters origin, run_id: it did not apply them, so no list is shown" {
+		resp.Error.Message != "this server predates the task list filters origin, run_id: it did not apply them, so no list is shown" {
 		t.Errorf("response = %+v, want SERVER_TOO_OLD naming origin and run_id", resp)
 	}
 	if resp.Data != nil {

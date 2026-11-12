@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
@@ -70,7 +69,7 @@ func firmwareSoakLeft(c *models.FirmwareCandidate) string {
 	if *c.SoakRemainingSeconds <= 0 {
 		return "over"
 	}
-	return firmwareDuration(time.Duration(*c.SoakRemainingSeconds) * time.Second)
+	return firmwareDuration(firmwareSecondsDuration(*c.SoakRemainingSeconds))
 }
 
 func firmwareEvidenceCell(c *models.FirmwareCandidate) string {

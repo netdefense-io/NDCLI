@@ -122,7 +122,7 @@ func validateOAuth2Domain(serverDomain string) error {
 		expected = config.DefaultOAuth2Domain
 	}
 	if serverDomain != expected {
-		return fmt.Errorf("refusing to authenticate: NDManager returned OAuth2 domain %q, expected %q — this may indicate a compromised control plane; if this is an intentional self-hosted deployment, set oauth2.domain in config.yaml to match", serverDomain, expected)
+		return fmt.Errorf("refusing to authenticate: the server returned OAuth2 domain %q, expected %q — this may indicate a compromised control plane; if this is an intentional self-hosted deployment, set oauth2.domain in config.yaml to match", serverDomain, expected)
 	}
 	return nil
 }

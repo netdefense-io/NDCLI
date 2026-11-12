@@ -102,7 +102,7 @@ func TestTaskListRefusesAFilterAnOlderNDManagerIgnored(t *testing.T) {
 		t.Errorf("tasks were rendered with the refusal: %+v", rec.tasks)
 	}
 	useFormatter(t, output.NewTableFormatter(), "")
-	want := "Error: [SERVER_TOO_OLD] this NDManager predates the task list filter run_id: it did not apply it, so no list is shown\n"
+	want := "Error: [SERVER_TOO_OLD] this server predates the task list filter run_id: it did not apply it, so no list is shown\n"
 	if got := printed(err); got != want {
 		t.Errorf("printed %q, want %q", got, want)
 	}

@@ -86,8 +86,9 @@ func (p *Auth0Provider) RequestDeviceAuthorization(scopes string) (*models.Devic
 	return &authResp, nil
 }
 
-// PollForToken polls for the access token during device flow
-func (p *Auth0Provider) PollForToken(deviceCode string, interval int) (*models.TokenResponse, error) {
+// PollForToken makes one poll for the access token during the device flow;
+// the caller paces the polls.
+func (p *Auth0Provider) PollForToken(deviceCode string) (*models.TokenResponse, error) {
 	tokenURL := fmt.Sprintf("https://%s/oauth/token", p.domain)
 
 	data := url.Values{}

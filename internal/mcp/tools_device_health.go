@@ -18,8 +18,9 @@ type deviceHealthInput struct {
 
 func (s *Server) registerDeviceHealthTool() {
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.device.health",
-		Description: "Per-device drill-down with the full agent telemetry snapshot — uptime, load, mem/swap, disks per mountpoint, service running state, pending OS/plugin updates, certificate expiries. No history; this is the instant snapshot.",
+		Name: "ndcli.device.health",
+		Description: "Per-device drill-down with the full agent telemetry snapshot — uptime, load, mem/swap, disks per mountpoint, service running state, pending OS/plugin updates, certificate expiries. No history; this is the instant snapshot. " +
+			"The device carries `online`: " + deviceOnlineMeaning,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

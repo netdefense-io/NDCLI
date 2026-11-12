@@ -39,9 +39,12 @@ var scheduleListCmd = &cobra.Command{
 func runScheduleList(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-	result, err := svc.ScheduleList(context.Background(), org)
+	result, err := svc.ScheduleListWithSpecs(context.Background(), org)
 	if err != nil {
 		return err
+	}
+	if result.SpecCountErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: the specs of each schedule could not be counted: %v\n", result.SpecCountErr)
 	}
 	return formatter.FormatSchedules(result.Schedules, result.Total)
 }
@@ -158,7 +161,11 @@ var scheduleDeleteCmd = &cobra.Command{
 
 A schedule that a firmware track's update windows run on is refused, and the
 refusal names those tracks: detach each first with
-'ndcli firmware track schedule <track> --no-schedule', then delete.`,
+'ndcli firmware track schedule <track> --no-schedule', then delete.
+
+It asks before deleting. Without a terminal on stdin (a script, CI) it cannot
+ask, so it refuses unless --force is given: deleting every spec on a schedule
+is not done on an unanswered prompt.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeScheduleNames,
 	RunE:              runScheduleDelete,

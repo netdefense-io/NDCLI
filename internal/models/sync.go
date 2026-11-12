@@ -119,3 +119,12 @@ type SyncApplyResponse struct {
 func (r *SyncApplyResponse) AllRefused() bool {
 	return r != nil && len(r.Errors) > 0 && r.DevicesAffected == 0
 }
+
+// DriftStatusMeaning is what a device's drift status says, on every surface
+// that shows or filters it. DRIFT is computed by NetDefense from what it would
+// push now and what it last pushed; a change made on the device itself is
+// not seen.
+const DriftStatusMeaning = "Drift status compares the configuration NetDefense would push now with the one it last delivered: " +
+	"IN_SYNC means they match, DRIFT means NetDefense has changes not yet pushed (a sync applies them), NEVER_SYNCED " +
+	"means nothing was delivered yet, UNKNOWN means the check has not run for the device yet, and ERROR means NetDefense " +
+	"could not build the configuration to compare. Changes made on the device itself are not detected."

@@ -74,8 +74,8 @@ type taskRecorder struct {
 	tasks []models.Task
 }
 
-func (r *taskRecorder) FormatTasks(tasks []models.Task, total int) error {
-	r.tasks = tasks
+func (r *taskRecorder) FormatTasks(list models.TaskList) error {
+	r.tasks = list.Tasks
 	return nil
 }
 

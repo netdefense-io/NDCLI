@@ -1044,7 +1044,7 @@ func TestFirmwareMajorSwitchPreviewCarriesTheConsequences(t *testing.T) {
 			cs, seen := firmwareClient(t, tc.status, tc.body)
 			resp := callTool(t, cs, "ndcli.firmware.track_set", `{"track":"regular","auto_apply_major":true,"confirm":true}`)
 			if resp.Success || resp.Error == nil || resp.Error.Code != "SERVER_TOO_OLD" ||
-				!strings.HasPrefix(resp.Error.Message, "this NDManager predates major upgrades: ") {
+				!strings.HasPrefix(resp.Error.Message, "this server predates major upgrades: ") {
 				t.Errorf("resp = %+v", resp)
 			}
 			if seen.hits != 1 || !reflect.DeepEqual(seen.body, map[string]interface{}{"auto_apply_major": true}) {
@@ -1347,7 +1347,7 @@ func TestFirmwareMajorRefusalsAreAdvisedInToolWords(t *testing.T) {
 		cs, _ := firmwareClient(t, http.StatusOK, mcpAssign)
 		resp := callTool(t, cs, "ndcli.firmware.device_set", `{"devices":["fw-a"],"boot_environment":false,"confirm":true}`)
 		if resp.Success || resp.Error == nil || resp.Error.Code != "SERVER_TOO_OLD" ||
-			!strings.Contains(resp.Error.Message, "this NDManager predates the boot-environment setting") {
+			!strings.Contains(resp.Error.Message, "this server predates the boot-environment setting") {
 			t.Errorf("response = %+v", resp)
 		}
 	})
@@ -1376,7 +1376,7 @@ func TestFirmwareMajorToolDescriptions(t *testing.T) {
 		"which is changed on its own, in a call of its own",
 		"Needs a plan that includes firmware tracks (FEATURE_NOT_AVAILABLE otherwise). Requires confirm=true.")
 	has("track_show", "auto_apply_major", "off, the series is approved but no device is asked to upgrade")
-	has("config_show", "auto_apply_major (whether the track's windows apply major upgrades; off by default; absent from an NDManager that predates them)")
+	has("config_show", "auto_apply_major (whether the track's windows apply major upgrades; off by default; absent from a server that predates them)")
 	has("device_set",
 		"boot_environment is whether the agent makes a ZFS boot environment before a major upgrade of the device",
 		"a recovery path from the console only",

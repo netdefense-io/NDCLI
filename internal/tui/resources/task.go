@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
@@ -109,6 +111,7 @@ func jsonSection(title, raw string) (registry.Section, bool) {
 	}
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(raw), &obj); err == nil {
+		sanitize.Struct(reflect.ValueOf(&obj))
 		keys := make([]string, 0, len(obj))
 		for k := range obj {
 			keys = append(keys, k)
@@ -120,6 +123,8 @@ func jsonSection(title, raw string) (registry.Section, bool) {
 		}
 		return registry.Section{Title: title, Fields: fields}, true
 	}
+	// raw is the outer decode's scrubbed string, and Indent does not decode
+	// escapes, so these two fallbacks show nothing live.
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, []byte(raw), "", "  "); err == nil {
 		return registry.Section{Title: title, Text: pretty.String()}, true

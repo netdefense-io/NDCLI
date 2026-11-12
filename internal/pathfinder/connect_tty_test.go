@@ -2,6 +2,7 @@ package pathfinder
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -80,5 +81,29 @@ func TestRefusedShellWithoutATunnelFails(t *testing.T) {
 		if err := c.refusedShellError(false); err == nil || !strings.Contains(err.Error(), "refused the terminal") {
 			t.Errorf("webadmin %v, no tunnel: err = %v, want the refusal", c.webAdminEnabled, err)
 		}
+	}
+}
+
+// A listener bound before the connect is the one the tunnel serves on, and
+// stopping the tunnel closes it.
+func TestTunnelServesOnTheBoundListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	c := &Client{webAdminLn: ln, webAdminOnly: true}
+	tunnel, err := c.startTunnel(nil, io.Discard)
+	if err != nil || tunnel == nil {
+		t.Fatalf("startTunnel: %v, %v", tunnel, err)
+	}
+	if tunnel.Port() != port {
+		t.Errorf("tunnel port %d, want the bound %d", tunnel.Port(), port)
+	}
+	_ = tunnel.Stop()
+	if again, err := net.Listen("tcp", ln.Addr().String()); err != nil {
+		t.Errorf("port still held after Stop: %v", err)
+	} else {
+		_ = again.Close()
 	}
 }

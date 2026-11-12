@@ -48,13 +48,13 @@ func capBody(r io.Reader) io.Reader {
 // (the OAuth2 provider's calls to Auth0). Any of those, left unrouted
 // through this helper, would let a malicious/misbehaving server stream an
 // unbounded body or smuggle terminal escape sequences into decoded
-// strings that are later printed verbatim.
+// strings that are later printed verbatim. target is scrubbed even when the
+// decode fails: a field of the wrong type still leaves the others filled,
+// and a caller that keeps them must not get them raw.
 func DecodeJSON(r io.Reader, target interface{}) error {
-	if err := json.NewDecoder(capBody(r)).Decode(target); err != nil {
-		return err
-	}
+	err := json.NewDecoder(capBody(r)).Decode(target)
 	sanitize.Struct(reflect.ValueOf(target))
-	return nil
+	return err
 }
 
 // ReadBody reads r fully, bounded to maxResponseBodyBytes. It is the raw-

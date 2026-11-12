@@ -78,3 +78,24 @@ func TestConsoleExecErrorResult_SessionEnded(t *testing.T) {
 		t.Errorf("message = %q", tr.Error.Message)
 	}
 }
+
+// A relay at capacity that was not waited out is RELAY_BUSY, with its wait.
+func TestRelayConnectErrorResult_Busy(t *testing.T) {
+	s := &Server{}
+	cause := &pathfinder.RelayBusyError{RetryAfter: 15 * time.Second}
+	res, _ := s.relayConnectErrorResult(&pathfinder.PathfinderError{Message: "failed to connect to relay: " + cause.Error(), Err: cause})
+	tr := decodeToolResponse(t, res)
+	data, _ := tr.Data.(map[string]interface{})
+	if tr.Error.Code != "RELAY_BUSY" || data["retry_after_seconds"] != float64(15) {
+		t.Errorf("code %q, data %#v; want RELAY_BUSY with retry_after_seconds 15", tr.Error.Code, tr.Data)
+	}
+
+	// A 503 without Retry-After (a restarting relay, a failing proxy) offers
+	// no wait, so it is not "busy" and carries no retry_after_seconds.
+	bare := &pathfinder.RelayBusyError{}
+	res, _ = s.relayConnectErrorResult(&pathfinder.PathfinderError{Message: "failed to connect to relay: " + bare.Error(), Err: bare})
+	tr = decodeToolResponse(t, res)
+	if data, _ := tr.Data.(map[string]interface{}); tr.Error.Code != "RELAY_UNAVAILABLE" || data["retry_after_seconds"] != nil {
+		t.Errorf("bare 503: code %q, data %#v; want RELAY_UNAVAILABLE without a wait", tr.Error.Code, tr.Data)
+	}
+}

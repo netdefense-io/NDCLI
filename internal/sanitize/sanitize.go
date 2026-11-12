@@ -16,9 +16,12 @@
 package sanitize
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 )
+
+var rawMessageType = reflect.TypeOf(json.RawMessage(nil))
 
 // String removes control code points a terminal would interpret as the
 // start of an escape/control sequence: the C0 range (ESC 0x1B, BEL 0x07,
@@ -69,9 +72,10 @@ func isStrippedRune(r rune) bool {
 // Struct walks a decoded value in place — struct fields, pointers,
 // slices/arrays, and map values with string keys — and sanitizes every
 // string leaf found via String(). It is meant to be called once, right
-// after a successful JSON decode, on the value produced by
-// json.Decoder.Decode (typically reflect.ValueOf(target) where target is
-// a pointer).
+// after a JSON decode, successful or not (a failed decode can leave fields
+// filled), on the value produced by json.Decoder.Decode (typically
+// reflect.ValueOf(target) where target is a pointer). A string that holds
+// JSON is a new decode: whoever decodes it again calls Struct on that result.
 //
 // Kinds that can't be inspected without risking a panic on arbitrary
 // decoded data (chan, func, and unexported/unaddressable fields) are left
@@ -93,9 +97,11 @@ func isStrippedRune(r rune) bool {
 // MapIndex is not addressable and neither shape can be written back field
 // by field. A map of slices, pointers or maps has no such problem: those
 // are reference kinds, so what the unaddressable value refers to is still
-// settable and sanitizeMap recurses into it. No model has the struct or
-// array shape today, and internal/output's sanitizer coverage guard fails
-// if one is added.
+// settable and sanitizeMap recurses into it. The exception among slices is
+// json.RawMessage, scrubbed by replacing its bytes, which a map value read
+// with MapIndex cannot have. No model has the struct or array shape, or a
+// map of json.RawMessage that is shown, today, and internal/output's
+// sanitizer coverage guard fails if one is added.
 func Struct(v reflect.Value) {
 	if !v.IsValid() {
 		return
@@ -116,6 +122,15 @@ func Struct(v reflect.Value) {
 			Struct(field)
 		}
 	case reflect.Slice, reflect.Array:
+		if v.Type() == rawMessageType {
+			// Kept as bytes for a later decode or a re-encode, which would
+			// print a control as sent, or, escaped, bring it back to life
+			// (jq -r). JSON removes both forms and keeps everything else.
+			if v.CanSet() && v.Len() > 0 {
+				v.SetBytes(JSON(v.Bytes()))
+			}
+			return
+		}
 		for i := 0; i < v.Len(); i++ {
 			Struct(v.Index(i))
 		}

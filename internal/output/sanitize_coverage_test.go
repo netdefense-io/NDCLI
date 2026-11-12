@@ -82,15 +82,29 @@ func hasControl(s string) bool {
 var escapedControlForms = []string{`\u001b`, `\u0007`}
 
 var (
-	timeType       = reflect.TypeOf(time.Time{})
-	rawMessageType = reflect.TypeOf(json.RawMessage{})
+	timeType        = reflect.TypeOf(time.Time{})
+	rawMessageType  = reflect.TypeOf(json.RawMessage{})
+	displayJSONType = reflect.TypeOf(models.DisplayJSON{})
 )
+
+// poisonedDisplayJSON is a models.DisplayJSON decoded from a document with an
+// escaped marker in a key, a value and a nested value: the scrub happens on
+// decode, so the stand-in is built the way a response builds it.
+func poisonedDisplayJSON() reflect.Value {
+	var d models.DisplayJSON
+	doc := `{"k\u001b[31m` + guardToken + `": "v\u001b[31m` + guardToken + `", "n": {"x": ["\u0007` + guardToken + `"]}}`
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		panic(err)
+	}
+	return reflect.ValueOf(d)
+}
 
 // poisonValue builds a value of type t with poisonString in every string
 // leaf it can reach, including map keys and values stored inside an
-// interface. Types whose contents are not free-form server data —
-// time.Time, json.RawMessage — get a valid stand-in instead, so formatters
-// that parse them still behave.
+// interface. A time.Time gets a valid stand-in, so formatters that parse it
+// still behave; a json.RawMessage gets valid JSON with an escaped marker in a
+// key and a value, which sanitize.Struct must take out; a models.DisplayJSON is
+// decoded from a poisoned document, the way a response builds it.
 //
 // Recursion stops on the type graph, not on a nesting depth. A flat depth
 // cap silently stopped generating before it reached the deeper shapes — a
@@ -109,7 +123,9 @@ func poisonValue(t reflect.Type, seen map[reflect.Type]int) reflect.Value {
 	case timeType:
 		return reflect.ValueOf(time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC))
 	case rawMessageType:
-		return reflect.ValueOf(json.RawMessage(`"` + guardToken + `"`))
+		return reflect.ValueOf(json.RawMessage(`{"k\u001b[31m` + guardToken + `": ["\u0007` + guardToken + `"]}`))
+	case displayJSONType:
+		return poisonedDisplayJSON()
 	}
 
 	switch t.Kind() {

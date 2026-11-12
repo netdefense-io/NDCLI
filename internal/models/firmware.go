@@ -318,6 +318,12 @@ func FirmwareMajorStateText(state string) string {
 	return state
 }
 
+// FirmwareNoSupportedHop is the blocked reason, for a track or a device, that
+// no supported major upgrade starts from the series: the normal state on the
+// newest series, and no gate on an older one either, so it is shown as "none
+// available", not as a block.
+const FirmwareNoSupportedHop = "no_supported_hop"
+
 // FirmwareMajorBlockedReasons are the values of FirmwareMajorEntry.BlockedReason,
 // why no upgrade starts from a track although the operator wants one, in the
 // order NDManager applies them (the first that holds is the one sent). Read-only.

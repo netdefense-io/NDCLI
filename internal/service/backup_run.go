@@ -84,7 +84,7 @@ func (s *Service) BackupRun(ctx context.Context, org string, opts BackupRunOpts)
 		if api.IsNotFoundError(err) && api.GetErrorCode(err) == "" {
 			return nil, &Error{
 				Code:    CodeServerTooOld,
-				Message: "this NDManager predates on-demand backups: it has no route to start one",
+				Message: "this server predates on-demand backups: it has no route to start one",
 				Err:     err,
 			}
 		}

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -13,7 +12,6 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
-	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // SnippetListOpts mirrors the filters accepted by the snippets list endpoint.
@@ -429,14 +427,6 @@ func (s *Service) SnippetExample(ctx context.Context, snippetType, id string) (*
 			return nil, &Error{Code: CodeServerTooOld, Message: "this server has no snippet examples", Err: err}
 		}
 		return nil, wrapAPI("%v", err)
-	}
-
-	// json.RawMessage is opaque to the response sanitizer, so scrub it here.
-	for i := range reg.Types {
-		for j := range reg.Types[i].Examples {
-			ex := &reg.Types[i].Examples[j]
-			ex.Content = json.RawMessage(sanitize.String(string(ex.Content)))
-		}
 	}
 
 	want := strings.ToUpper(snippetType)

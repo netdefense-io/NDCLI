@@ -142,7 +142,9 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := formatter.FormatTasks(result.Tasks, result.Total); err != nil {
+	if err := formatter.FormatTasks(models.TaskList{
+		Tasks: result.Tasks, Total: result.Total, Page: result.Page, PerPage: result.PerPage, Filters: result.Filters,
+	}); err != nil {
 		return err
 	}
 	output.PrintPagination(result.Page, result.Total, result.PerPage)

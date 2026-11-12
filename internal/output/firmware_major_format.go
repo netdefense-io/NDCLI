@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
 )
@@ -73,7 +72,7 @@ func firmwareSecondsLeft(seconds *int) string {
 	if *seconds <= 0 {
 		return "over"
 	}
-	return firmwareDuration(time.Duration(*seconds) * time.Second)
+	return firmwareDuration(firmwareSecondsDuration(*seconds))
 }
 
 func firmwareEvidenceOf(e *models.FirmwareEvidence) string {
@@ -124,7 +123,11 @@ func firmwareMajorNotes(e models.FirmwareMajorEntry) []string {
 	// blocked reason; saying it twice helps nobody.
 	stallNamesTheCause := e.Stalled && e.StallReason == models.FirmwareStallEvidenceUnreachable
 	if e.BlockedReason != "" && !stallNamesTheCause {
-		notes = append(notes, "blocked: "+models.FirmwareMajorBlockedReasonText(e.BlockedReason))
+		prefix := "blocked: "
+		if e.BlockedReason == models.FirmwareNoSupportedHop {
+			prefix = "none available: "
+		}
+		notes = append(notes, prefix+models.FirmwareMajorBlockedReasonText(e.BlockedReason))
 	}
 	if e.DevicesAwaitingMinorEvidence > 0 {
 		notes = append(notes, firmwarePlural(e.DevicesAwaitingMinorEvidence, "device", "devices")+

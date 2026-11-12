@@ -1,6 +1,7 @@
 package sanitize
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -289,4 +290,18 @@ func keysOfSlices(m map[string][]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A json.RawMessage keeps bytes for a later decode or re-encode; its controls
+// are removed, raw (C1, DEL) and escaped, everything else kept, and the JSON
+// stays valid.
+func TestStructScrubsRawMessage(t *testing.T) {
+	v := struct {
+		Request json.RawMessage
+		Empty   json.RawMessage
+	}{Request: json.RawMessage("{\"x\": \"\u009b2J\u007f\", \"y\": \"\\u001b[0m\"}")}
+	Struct(reflect.ValueOf(&v))
+	if got := string(v.Request); got != `{"x": "2J", "y": "[0m"}` || !json.Valid(v.Request) || v.Empty != nil {
+		t.Errorf("Request = %q (valid %v), Empty = %v", got, json.Valid(v.Request), v.Empty)
+	}
 }

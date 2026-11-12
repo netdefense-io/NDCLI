@@ -25,7 +25,11 @@ var authTokenCreateCmd = &cobra.Command{
 
 The raw token value is displayed once and cannot be retrieved again.
 Token create always requires interactive authentication — NDCLI_TOKEN
-cannot be used for this command.`,
+cannot be used for this command.
+
+-o/--org restricts the new token to that organization. Here it does not select
+the organization a command acts in, as it does elsewhere; without it the token
+is not restricted to one organization.`,
 	Args: noArgs,
 	RunE: runAuthTokenCreate,
 }
@@ -56,7 +60,7 @@ func init() {
 	// Create flags
 	authTokenCreateCmd.Flags().String("name", "", "Token name (required)")
 	authTokenCreateCmd.Flags().String("scope", "", "Token scope: RW or RO (required)")
-	authTokenCreateCmd.Flags().String("org", "", "Restrict token to a specific organization (optional)")
+	authTokenCreateCmd.Flags().StringP("org", "o", "", "Restrict the token to this organization (optional; here -o restricts the token)")
 	authTokenCreateCmd.Flags().String("expiry", "90d", "Token expiry: 30d, 60d, 90d, 180d, 365d, or never")
 	authTokenCreateCmd.MarkFlagRequired("name")
 	authTokenCreateCmd.MarkFlagRequired("scope")

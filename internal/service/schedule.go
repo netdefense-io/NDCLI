@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 
@@ -35,6 +36,9 @@ func scheduledTaskPath(org, code string) string {
 type ScheduleListResult struct {
 	Schedules []models.Schedule
 	Total     int
+	// SpecCountErr is why ScheduleListWithSpecs could not count the specs;
+	// the counts are then unknown.
+	SpecCountErr error
 }
 
 // ScheduleList returns all cadence schedules for the organization. The items
@@ -55,6 +59,41 @@ func (s *Service) ScheduleList(ctx context.Context, org string) (*ScheduleListRe
 		Schedules: result.Items,
 		Total:     result.Total,
 	}, nil
+}
+
+// ScheduleListWithSpecs is ScheduleList with each schedule's SpecCount set from
+// the org-wide spec list, since the list route nests no specs. When that list
+// cannot be read the counts stay unknown, SpecCountErr says why, and the
+// schedules are still returned.
+func (s *Service) ScheduleListWithSpecs(ctx context.Context, org string) (*ScheduleListResult, error) {
+	result, err := s.ScheduleList(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+	envelope, err := s.scheduleTaskList(ctx, org, "")
+	if err != nil {
+		result.SpecCountErr = err
+		return result, nil
+	}
+	specs := envelope.Items
+	if envelope.Total > len(specs) {
+		result.SpecCountErr = fmt.Errorf("the spec list sent %d of %d specs", len(specs), envelope.Total)
+		return result, nil
+	}
+	counts := make(map[string]int, len(result.Schedules))
+	for _, spec := range specs {
+		if spec.ScheduleName == "" {
+			// Counted under no schedule, every count would read a false 0.
+			result.SpecCountErr = errors.New("the spec list does not name the schedule of each spec")
+			return result, nil
+		}
+		counts[spec.ScheduleName]++
+	}
+	for i := range result.Schedules {
+		n := counts[result.Schedules[i].Name]
+		result.Schedules[i].SpecCount = &n
+	}
+	return result, nil
 }
 
 // ScheduleGet returns a single schedule by name, including the nested
@@ -171,6 +210,15 @@ func (s *Service) ScheduleSetEnabled(ctx context.Context, org, name string, enab
 // are returned (server-side ?schedule= query param). An unknown schedule name
 // returns an empty list rather than an error.
 func (s *Service) ScheduleTaskList(ctx context.Context, org, scheduleFilter string) ([]models.ScheduledTask, error) {
+	envelope, err := s.scheduleTaskList(ctx, org, scheduleFilter)
+	if err != nil {
+		return nil, err
+	}
+	return envelope.Items, nil
+}
+
+// scheduleTaskList is ScheduleTaskList with the envelope's total.
+func (s *Service) scheduleTaskList(ctx context.Context, org, scheduleFilter string) (*models.ScheduledTaskListResponse, error) {
 	if org == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "organization is required"}
 	}
@@ -186,7 +234,7 @@ func (s *Service) ScheduleTaskList(ctx context.Context, org, scheduleFilter stri
 	if err := api.ParseResponse(resp, &envelope); err != nil {
 		return nil, wrapAPI("%v", err)
 	}
-	return envelope.Items, nil
+	return &envelope, nil
 }
 
 // ScheduledTaskGet returns a single registered task spec by its org-wide

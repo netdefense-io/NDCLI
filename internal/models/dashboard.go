@@ -100,7 +100,7 @@ type DeviceTelemetryResponse struct {
 	Name            string              `json:"name"`
 	UUID            string              `json:"uuid"`
 	Status          string              `json:"status"`
-	Online          *bool               `json:"online,omitempty"`
+	Online          *bool               `json:"online"`
 	OUs             []string            `json:"ous,omitempty"`
 	AgentVersion    string              `json:"agent_version,omitempty"`
 	Heartbeat       string              `json:"heartbeat,omitempty"`

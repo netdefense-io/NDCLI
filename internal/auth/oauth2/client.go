@@ -123,14 +123,8 @@ func (c *Client) Login(ctx context.Context, scopes string, interactive bool) (*m
 		return nil, fmt.Errorf("failed to initiate device authorization: %w", err)
 	}
 
-	// Create poll function
-	interval := authResp.Interval
-	if interval == 0 {
-		interval = 5
-	}
-
 	pollFunc := func() (*models.TokenResponse, error) {
-		return c.provider.PollForToken(authResp.DeviceCode, interval)
+		return c.provider.PollForToken(authResp.DeviceCode)
 	}
 
 	// Wait for user to authenticate

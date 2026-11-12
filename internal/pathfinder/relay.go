@@ -78,6 +78,21 @@ func (e *RateLimitedError) Error() string {
 	return "relay is rate limiting new sessions (HTTP 429); retry in a few seconds"
 }
 
+// RelayBusyError is returned when the relay refuses the WebSocket upgrade
+// with HTTP 503. With a Retry-After, its cap on connections that have not
+// registered yet is reached; without one, the relay is restarting or
+// something in front of it failed.
+type RelayBusyError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RelayBusyError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("relay is refusing new connections for now (HTTP 503); retry in %ds", RetryAfterSeconds(e.RetryAfter))
+	}
+	return "relay is unavailable (HTTP 503)"
+}
+
 // maxRelayRetryAfter bounds a relay Retry-After.
 const maxRelayRetryAfter = 24 * time.Hour
 
@@ -199,6 +214,9 @@ func (c *RelayClient) Connect() error {
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
 			return &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+		}
+		if resp != nil && resp.StatusCode == http.StatusServiceUnavailable {
+			return &RelayBusyError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 		}
 		return fmt.Errorf("websocket dial failed: %w", err)
 	}

@@ -218,8 +218,9 @@ func runFirmwareConfigDisable(cmd *cobra.Command, args []string) error {
 var firmwareConfigDeleteCmd = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete the firmware configuration",
-	Long: `Delete the firmware configuration with its tracks, their schedules and the
-approvals. Halts and the history stay.
+	Long: `Delete the firmware configuration with its tracks, their windows on the
+schedules and the approvals. The schedules themselves stay, and so do halts and
+the history.
 
 Refused while any device is in a track or still leaving one: disable firmware
 or move the devices to unmanaged first, and delete once they are released.
@@ -237,7 +238,7 @@ func runFirmwareConfigDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 	force, _ := cmd.Flags().GetBool("force")
 	ok, err := helpers.ConfirmOrForce(
-		"Delete the firmware configuration with its tracks, schedules and approvals? This cannot be undone.", force)
+		"Delete the firmware configuration with its tracks, their windows on the schedules and the approvals (the schedules stay)? This cannot be undone.", force)
 	if err != nil {
 		return err
 	}

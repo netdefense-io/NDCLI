@@ -10,33 +10,17 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 // limitedRelay answers the first `refusals` upgrades with 429 and the given
 // Retry-After, then accepts and registers.
 func limitedRelay(t *testing.T, refusals int32, retryAfter string) (*Client, *int32) {
 	t.Helper()
-	var calls int32
-	up := websocket.Upgrader{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&calls, 1) <= refusals {
-			w.Header().Set("Retry-After", retryAfter)
-			http.Error(w, "slow down", http.StatusTooManyRequests)
-			return
-		}
-		conn, err := up.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		conn.ReadMessage()
-		conn.WriteJSON(map[string]any{"type": "registered", "payload": map[string]any{"peer_online": false}})
-		time.Sleep(2 * time.Second)
-	}))
-	t.Cleanup(srv.Close)
-	return &Client{host: "ws" + strings.TrimPrefix(srv.URL, "http"), sslVerify: true, sessionID: "k"}, &calls
+	limited := make([]refusal, refusals)
+	for i := range limited {
+		limited[i] = refusal{http.StatusTooManyRequests, retryAfter}
+	}
+	return refusingRelay(t, limited...)
 }
 
 func rateLimitedFrom(t *testing.T, err error) *RateLimitedError {

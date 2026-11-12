@@ -279,7 +279,10 @@ Matching behavior:
 - For ZABBIX_ALIAS: Exact item-alias key (e.g., nd-uname)
 
 By default, the command returns immediately with the task ID.
-Use --wait (-w) to wait for the task to complete and display the result.`,
+Use --wait (-w) to wait for the task to complete and display the result.
+
+A pull stores nothing without --auto-create or --overwrite; its content shows
+with --wait, or later in ndcli task describe. ` + models.SnippetPullUUIDNote,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeDevices,
 	RunE:              runSnippetPull,

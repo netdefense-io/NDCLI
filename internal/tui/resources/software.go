@@ -3,10 +3,12 @@ package resources
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/tui/registry"
 	"github.com/netdefense-io/NDCLI/internal/tui/uihelp"
@@ -199,6 +201,10 @@ func (softwareResource) Describe(ctx context.Context, svc *service.Service, org,
 	if content == nil {
 		content = &models.SoftwarePolicyContent{}
 	}
+	// Content is a JSON document inside a string, so its strings are decoded
+	// here for the first time. Only this display copy is scrubbed; the parser
+	// keeps the document as stored for the read-modify-write paths.
+	sanitize.Struct(reflect.ValueOf(content))
 	fields := []registry.Field{
 		{Label: "Name", Value: p.Name},
 		{Label: "Organization", Value: uihelp.Default(p.Organization, "—")},

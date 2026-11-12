@@ -106,6 +106,18 @@ func (t *Task) DurationSeconds() *int64 {
 	return &s
 }
 
+// TaskList is one page of a task listing as the front-ends show it: the rows,
+// the server's total, the page and page size (the server's when it sent them,
+// else those asked for), and the filters it echoed as applied (nil from a
+// server that echoes none).
+type TaskList struct {
+	Tasks   []Task
+	Total   int
+	Page    int
+	PerPage int
+	Filters map[string]any
+}
+
 // TaskListResponse represents a paginated list of tasks. Filters echoes the
 // filters the server applied; a filter it does not know is ignored and has no
 // key there.

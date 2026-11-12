@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/sanitize"
 )
 
 // sortedSnippetNames returns the snippet-name keys of an undefined-variables-by-snippet
@@ -126,7 +128,7 @@ type Formatter interface {
 	FormatDevice(device *models.Device) error
 
 	// Tasks
-	FormatTasks(tasks []models.Task, total int) error
+	FormatTasks(list models.TaskList) error
 	FormatTask(task *models.Task) error
 	FormatRunResult(result *models.RunResult) error
 
@@ -374,6 +376,9 @@ func parseFirmwareUpgradeData(raw string) *firmwareUpgradeData {
 	if err := json.Unmarshal([]byte(raw), &d); err != nil {
 		return nil
 	}
+	// The outer decode saw the message as one escaped string; this decode is
+	// the one that turns a \u001b in it into a live byte.
+	sanitize.Struct(reflect.ValueOf(&d))
 	// Require at least one firmware-specific field to be present so we
 	// don't accidentally claim a generic JSON message as firmware data.
 	if d.ResolvedMode == "" && d.FromVersion == "" && d.ToVersion == "" {

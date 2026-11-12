@@ -57,20 +57,27 @@ func (f *JSONFormatter) FormatDevice(device *models.Device) error {
 	return f.output(device)
 }
 
-// FormatTasks formats tasks as JSON
-func (f *JSONFormatter) FormatTasks(tasks []models.Task, total int) error {
+// FormatTasks formats tasks as JSON: the rows, the server's total and paging,
+// and the filters it echoed as applied, when it echoed any.
+func (f *JSONFormatter) FormatTasks(list models.TaskList) error {
 	// A nil list stays null and an empty one stays [], as they always printed.
 	var rows []jsonTask
-	if tasks != nil {
-		rows = make([]jsonTask, len(tasks))
-		for i := range tasks {
-			rows[i] = newJSONTask(&tasks[i])
+	if list.Tasks != nil {
+		rows = make([]jsonTask, len(list.Tasks))
+		for i := range list.Tasks {
+			rows[i] = newJSONTask(&list.Tasks[i])
 		}
 	}
-	return f.output(map[string]interface{}{
-		"tasks": rows,
-		"total": total,
-	})
+	out := map[string]interface{}{
+		"tasks":    rows,
+		"total":    list.Total,
+		"page":     list.Page,
+		"per_page": list.PerPage,
+	}
+	if list.Filters != nil {
+		out["filters"] = list.Filters
+	}
+	return f.output(out)
 }
 
 // FormatTask formats a single task as JSON

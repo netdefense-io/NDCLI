@@ -1,7 +1,5 @@
 package models
 
-import "encoding/json"
-
 // Schedule is a pure cadence definition (cron + timezone). It no longer
 // carries task-type or target information; those live in ScheduledTask specs
 // that are registered against a named schedule via `ndcli run --schedule` or
@@ -21,6 +19,22 @@ type Schedule struct {
 	CreatedAt        FlexibleTime    `json:"created_at"`
 	UpdatedAt        FlexibleTime    `json:"updated_at"`
 	ScheduledTasks   []ScheduledTask `json:"scheduled_tasks,omitempty"` // populated only on GET-one
+	// SpecCount is how many specs the schedule holds, counted by the client
+	// from the org-wide spec list for a list item, where the server nests
+	// none. Nil when it was not counted.
+	SpecCount *int `json:"spec_count,omitempty"`
+}
+
+// Specs is how many specs the schedule holds, and whether that is known: the
+// nested specs of a read by name, or the client's count on a list item.
+func (s Schedule) Specs() (int, bool) {
+	if s.SpecCount != nil {
+		return *s.SpecCount, true
+	}
+	if len(s.ScheduledTasks) > 0 {
+		return len(s.ScheduledTasks), true
+	}
+	return 0, false
 }
 
 // The kinds of work a ScheduledTask spec describes (NDDataModels'
@@ -50,16 +64,16 @@ const (
 // list and the specs nested in a schedule), so it is a pointer: a descriptor
 // decoded and printed again keeps the null instead of an empty string.
 type ScheduledTask struct {
-	Code          string          `json:"code"`
-	ScheduleName  string          `json:"schedule_name"`  // set on org-wide list items
-	Kind          string          `json:"kind"`           // RUN | SYNC | BACKUP | FIRMWARE
-	FirmwareTrack *string         `json:"firmware_track"` // fast | regular | stable for FIRMWARE, else null
-	Request       json.RawMessage `json:"request"`
-	Enabled       bool            `json:"enabled"`
-	CreatedBy     string          `json:"created_by"`
-	LastFiredAt   *FlexibleTime   `json:"last_fired_at"`
-	CreatedAt     FlexibleTime    `json:"created_at"`
-	UpdatedAt     FlexibleTime    `json:"updated_at"`
+	Code          string        `json:"code"`
+	ScheduleName  string        `json:"schedule_name"`  // set on org-wide list items
+	Kind          string        `json:"kind"`           // RUN | SYNC | BACKUP | FIRMWARE
+	FirmwareTrack *string       `json:"firmware_track"` // fast | regular | stable for FIRMWARE, else null
+	Request       DisplayJSON   `json:"request"`
+	Enabled       bool          `json:"enabled"`
+	CreatedBy     string        `json:"created_by"`
+	LastFiredAt   *FlexibleTime `json:"last_fired_at"`
+	CreatedAt     FlexibleTime  `json:"created_at"`
+	UpdatedAt     FlexibleTime  `json:"updated_at"`
 }
 
 // Track returns the firmware track the spec is the window of, or "" when it is
@@ -89,13 +103,13 @@ type ScheduledTaskListResponse struct {
 // request includes a "schedule" field — instead of a task table the server
 // returns the registered spec descriptor.
 type ScheduledTaskRegisterResult struct {
-	Code         string          `json:"code"`
-	Kind         string          `json:"kind"`
-	Request      json.RawMessage `json:"request"`
-	Enabled      bool            `json:"enabled"`
-	ScheduleName string          `json:"schedule_name"` // name of the parent schedule
-	CreatedBy    string          `json:"created_by"`
-	LastFiredAt  *FlexibleTime   `json:"last_fired_at"`
-	CreatedAt    FlexibleTime    `json:"created_at"`
-	UpdatedAt    FlexibleTime    `json:"updated_at"`
+	Code         string        `json:"code"`
+	Kind         string        `json:"kind"`
+	Request      DisplayJSON   `json:"request"`
+	Enabled      bool          `json:"enabled"`
+	ScheduleName string        `json:"schedule_name"` // name of the parent schedule
+	CreatedBy    string        `json:"created_by"`
+	LastFiredAt  *FlexibleTime `json:"last_fired_at"`
+	CreatedAt    FlexibleTime  `json:"created_at"`
+	UpdatedAt    FlexibleTime  `json:"updated_at"`
 }

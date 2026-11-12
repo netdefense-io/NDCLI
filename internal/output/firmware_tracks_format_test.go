@@ -353,7 +353,7 @@ func TestFirmwareConfigRendering(t *testing.T) {
 			out := render(t, format, "FormatFirmwareConfig", cfg)
 			mustContain(t, format, out,
 				"not included (no new steps are sent; devices still in a track are being released)",
-				"userland packages only", "Disabled", "4 devices leaving their track")
+				"userland packages only", "Disabled", "4 devices leaving their tracks")
 			mustNotContain(t, format, out, "created", "nothing acts")
 		}
 	})
@@ -381,7 +381,7 @@ func TestFirmwareConfigRendering(t *testing.T) {
 		cfg := firmwareConfigSample()
 		cfg.Status = "DISABLED"
 		cfg.Message = "Firmware disabled; every device in a track is being released"
-		for count, want := range map[int]string{0: "Releasing: 0 devices leaving their track", 1: "Releasing: 1 device leaving their track"} {
+		for count, want := range map[int]string{0: "Releasing: 0 devices leaving their tracks", 1: "Releasing: 1 device leaving its track"} {
 			cfg.ReleasedDevices = intRef(count)
 			for _, format := range []string{"table", "simple", "detailed"} {
 				mustContain(t, format, render(t, format, "FormatFirmwareConfig", cfg), want)
@@ -784,10 +784,10 @@ func TestFormatTaskRendersTheFirmwareTrackResult(t *testing.T) {
 		}
 	})
 	t.Run("json prints an empty list as it always did", func(t *testing.T) {
-		if out := render(t, "json", "FormatTasks", []models.Task{}, 0); !strings.Contains(out, `"tasks": []`) {
+		if out := render(t, "json", "FormatTasks", models.TaskList{Tasks: []models.Task{}, Total: 0}); !strings.Contains(out, `"tasks": []`) {
 			t.Errorf("an empty list should print []:\n%s", out)
 		}
-		if out := render(t, "json", "FormatTasks", []models.Task(nil), 0); !strings.Contains(out, `"tasks": null`) {
+		if out := render(t, "json", "FormatTasks", models.TaskList{Tasks: []models.Task(nil), Total: 0}); !strings.Contains(out, `"tasks": null`) {
 			t.Errorf("a nil list should print null, as before:\n%s", out)
 		}
 	})
@@ -819,7 +819,7 @@ func TestFormatTasksSummarisesFirmwareTrackResults(t *testing.T) {
 
 	for _, format := range []string{"table", "simple", "detailed"} {
 		t.Run(format, func(t *testing.T) {
-			out := render(t, format, "FormatTasks", tasks, 5)
+			out := render(t, format, "FormatTasks", models.TaskList{Tasks: tasks, Total: 5})
 			mustContain(t, format, out,
 				"advance success 26.7.3 → 26.7.5",
 				"advance held 26.7.3 (unchanged) — a reboot is pending on the device (pin drift)",
@@ -829,9 +829,9 @@ func TestFormatTasksSummarisesFirmwareTrackResults(t *testing.T) {
 	}
 
 	t.Run("the table grows a Result column only when a page has a result", func(t *testing.T) {
-		with := render(t, "table", "FormatTasks", tasks, 5)
+		with := render(t, "table", "FormatTasks", models.TaskList{Tasks: tasks, Total: 5})
 		mustContain(t, "with", with, "Result")
-		without := render(t, "table", "FormatTasks", []models.Task{*ping, *pending}, 2)
+		without := render(t, "table", "FormatTasks", models.TaskList{Tasks: []models.Task{*ping, *pending}, Total: 2})
 		mustNotContain(t, "without", without, "Result")
 		mustContain(t, "without", without, "PING", "FIRMWARE_TRACK")
 	})
@@ -841,7 +841,7 @@ func TestFormatTasksSummarisesFirmwareTrackResults(t *testing.T) {
 			`"reinstall_entries":0,"from_version":"26.7` + esc + `]0;pwn\u0007.3"}`)
 		hostile.ID = "ffffffff6666"
 		for _, format := range []string{"table", "simple", "detailed"} {
-			out := render(t, format, "FormatTasks", []models.Task{*hostile}, 1)
+			out := render(t, format, "FormatTasks", models.TaskList{Tasks: []models.Task{*hostile}, Total: 1})
 			if hasControl(out) {
 				t.Errorf("%s: a control sequence reached the output: %q", format, firstControlContext(out))
 			}
@@ -849,7 +849,7 @@ func TestFormatTasksSummarisesFirmwareTrackResults(t *testing.T) {
 		}
 	})
 	t.Run("json lists the tasks as they came, with the results parsed", func(t *testing.T) {
-		out := render(t, "json", "FormatTasks", tasks, 5)
+		out := render(t, "json", "FormatTasks", models.TaskList{Tasks: tasks, Total: 5})
 		var doc struct {
 			Tasks []struct {
 				models.Task

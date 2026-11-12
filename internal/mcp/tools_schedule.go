@@ -68,8 +68,9 @@ const scheduleSpecTrackGuide = "A spec of kind FIRMWARE is the update window of 
 func (s *Server) registerScheduleTools() {
 	// ndcli.schedule.list
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.schedule.list",
-		Description: "List all cadence schedules for an organization.",
+		Name: "ndcli.schedule.list",
+		Description: "List all cadence schedules for an organization. Each carries spec_count, the number of specs registered on it, " +
+			"counted from the organization's spec list. When that list could not be read, spec_count is absent from every schedule and spec_count_error says why.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -232,14 +233,18 @@ func (s *Server) handleScheduleList(ctx context.Context, req *mcp.CallToolReques
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	result, err := s.svc.ScheduleList(apiCtx, org)
+	result, err := s.svc.ScheduleListWithSpecs(apiCtx, org)
 	if err != nil {
 		return s.errorResult(err)
 	}
-	return s.successResult(map[string]interface{}{
+	data := map[string]interface{}{
 		"schedules": result.Schedules,
 		"total":     result.Total,
-	}, "")
+	}
+	if result.SpecCountErr != nil {
+		data["spec_count_error"] = result.SpecCountErr.Error()
+	}
+	return s.successResult(data, "")
 }
 
 func (s *Server) handleScheduleDescribe(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

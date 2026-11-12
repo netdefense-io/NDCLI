@@ -257,10 +257,10 @@ func TestConsoleOpenResultReportsTheRelayRetry(t *testing.T) {
 		msgSuffix string
 	}{
 		{0, 0, "'fw-01'"},
-		{400 * time.Millisecond, 1, "made it wait 1s"},
-		{time.Second, 1, "made it wait 1s"},
-		{1500 * time.Millisecond, 2, "made it wait 2s"},
-		{10 * time.Second, 10, "made it wait 10s"},
+		{400 * time.Millisecond, 1, "waiting 1s for the relay"},
+		{time.Second, 1, "waiting 1s for the relay"},
+		{1500 * time.Millisecond, 2, "waiting 2s for the relay"},
+		{10 * time.Second, 10, "waiting 10s for the relay"},
 	} {
 		data, msg := consoleOpenResult("abc123", "fw-01", "acme", expires, tc.retry)
 		if got, ok := data["relay_retry_after_seconds"].(int); !ok || got != tc.want {

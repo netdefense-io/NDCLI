@@ -19,6 +19,9 @@ const (
 // range where a uint32 sum could wrap.
 const maxFrameDataLen = 10 * 1024 * 1024
 
+// frameHeaderLen is a frame's header: type, stream id and length.
+const frameHeaderLen = 9
+
 // Frame represents a multiplexed data frame
 type Frame struct {
 	Type     byte
@@ -29,7 +32,7 @@ type Frame struct {
 // EncodeFrame encodes a frame for transmission
 // Frame format: [type:1][stream_id:4][length:4][data:length]
 func EncodeFrame(f *Frame) []byte {
-	buf := make([]byte, 9+len(f.Data))
+	buf := make([]byte, frameHeaderLen+len(f.Data))
 	buf[0] = f.Type
 	binary.BigEndian.PutUint32(buf[1:5], f.StreamID)
 	binary.BigEndian.PutUint32(buf[5:9], uint32(len(f.Data)))
@@ -39,7 +42,7 @@ func EncodeFrame(f *Frame) []byte {
 
 // DecodeFrame decodes a frame from received data
 func DecodeFrame(data []byte) (*Frame, error) {
-	if len(data) < 9 {
+	if len(data) < frameHeaderLen {
 		return nil, fmt.Errorf("frame too short: %d bytes", len(data))
 	}
 
@@ -53,7 +56,7 @@ func DecodeFrame(data []byte) (*Frame, error) {
 		return nil, fmt.Errorf("frame data too large: %d bytes (max %d)", length, maxFrameDataLen)
 	}
 
-	end := 9 + int(length)
+	end := frameHeaderLen + int(length)
 	if len(data) < end {
 		return nil, fmt.Errorf("frame data incomplete: expected %d, got %d", end, len(data))
 	}

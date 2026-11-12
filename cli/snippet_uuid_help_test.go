@@ -40,3 +40,16 @@ func TestSnippetWriteHelpStatesTheFieldContract(t *testing.T) {
 		}
 	}
 }
+
+// A pull that stores nothing shows a new managed uuid, never the device's own
+// (operator ruling on NDBroker #136); the pull help says so.
+func TestSnippetPullHelpStatesTheShownUUIDIsNew(t *testing.T) {
+	for _, want := range []string{"new managed uuid", "never the device's own", "paste into one create", "SNIPPET_UUID_IN_USE"} {
+		if !strings.Contains(models.SnippetPullUUIDNote, want) {
+			t.Errorf("note does not say %q: %s", want, models.SnippetPullUUIDNote)
+		}
+	}
+	if !strings.Contains(snippetPullCmd.Long, models.SnippetPullUUIDNote) {
+		t.Errorf("snippet pull help does not carry the uuid note:\n%s", snippetPullCmd.Long)
+	}
+}

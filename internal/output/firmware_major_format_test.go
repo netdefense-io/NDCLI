@@ -294,7 +294,34 @@ func TestFirmwareRolloutShowsTheMajorUpgrades(t *testing.T) {
 			r := firmwareRolloutMajorSample()
 			r.Majors = []models.FirmwareMajorEntry{{Track: "fast", Series: "26.7", State: "approved", BlockedReason: code}}
 			out := render(t, "simple", "FormatFirmwareRollout", r)
-			mustContain(t, code, out, "note: blocked: "+models.FirmwareMajorBlockedReasonText(code))
+			prefix := "note: blocked: "
+			if code == models.FirmwareNoSupportedHop {
+				prefix = "note: none available: "
+			}
+			mustContain(t, code, out, prefix+models.FirmwareMajorBlockedReasonText(code))
+		}
+	})
+
+	// On the newest series no supported upgrade starts anywhere, which is the
+	// normal state, not a fault (#272): the track reads "none available", a
+	// device "none", and neither says "blocked".
+	t.Run("no supported upgrade reads as none available", func(t *testing.T) {
+		r := firmwareRolloutMajorSample()
+		r.Majors = []models.FirmwareMajorEntry{{Track: "fast", Series: "26.7", State: "blocked", BlockedReason: models.FirmwareNoSupportedHop}}
+		for _, format := range []string{"table", "simple", "detailed"} {
+			out := render(t, format, "FormatFirmwareRollout", r)
+			mustContain(t, format, out, "none available: no device of the track is on a series that has a supported upgrade")
+			mustNotContain(t, format, out, "blocked: no device")
+		}
+		d := models.FirmwareDevice{DeviceName: "fw-z", Series: "26.7", Major: &models.FirmwareDeviceMajor{BlockedBy: models.FirmwareNoSupportedHop}}
+		if cell := firmwareMajorCell(&d); !strings.Contains(cell, "none") {
+			t.Errorf("Major cell = %q, want none", cell)
+		}
+		if status := firmwareMajorStatus(&d); status != "none available: no supported major upgrade starts from the device's series" {
+			t.Errorf("status = %q", status)
+		}
+		if note := firmwareMajorBlockedNote(&d); note != "no major upgrade available from the device's series" {
+			t.Errorf("note = %q", note)
 		}
 	})
 	t.Run("strings outside the sets are shown as sent, never an error", func(t *testing.T) {
@@ -451,11 +478,11 @@ func TestFormatTaskRendersTheMajorUpgradeResult(t *testing.T) {
 		task := firmwareTrackTask(majorApplied)
 		task.ID = "aaaaaaaa1111"
 		for _, format := range []string{"table", "simple", "detailed"} {
-			mustContain(t, format, render(t, format, "FormatTasks", []models.Task{*task}, 1), "advance success 26.1.11_10 → 26.7.1_1 (major upgrade)")
+			mustContain(t, format, render(t, format, "FormatTasks", models.TaskList{Tasks: []models.Task{*task}, Total: 1}), "advance success 26.1.11_10 → 26.7.1_1 (major upgrade)")
 		}
 		held := firmwareTrackTask(majorHeld)
 		held.ID = "bbbbbbbb2222"
-		mustContain(t, "held", render(t, "table", "FormatTasks", []models.Task{*held}, 1),
+		mustContain(t, "held", render(t, "table", "FormatTasks", models.TaskList{Tasks: []models.Task{*held}, Total: 1}),
 			"advance held 26.1.11_10 (unchanged) — the device has too little free disk space for the major upgrade (major upgrade)")
 	})
 	t.Run("an escape sequence in a note or the kind never reaches the terminal", func(t *testing.T) {

@@ -125,7 +125,7 @@ func TestPollForToken_SanitizesErrorDescription(t *testing.T) {
 	defer srv.Close()
 
 	p := newTestProvider(srv)
-	_, err := p.PollForToken("device-code", 5)
+	_, err := p.PollForToken("device-code")
 	if err == nil {
 		t.Fatal("expected error")
 	}

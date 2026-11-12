@@ -289,6 +289,23 @@ func (s *Service) CloseConnectSession(task string) error {
 	return err
 }
 
+// MaxConsoleCommandBytes is the longest console command: its exec request
+// travels as one relay frame, and the relay takes at most
+// pathfinder.MaxExecFrameBytes.
+const MaxConsoleCommandBytes = 32 * 1024
+
+// CheckConsoleCommand refuses a console command that is empty or longer than
+// MaxConsoleCommandBytes, before anything is sent.
+func CheckConsoleCommand(command string) error {
+	if command == "" {
+		return &Error{Code: CodeInvalidInput, Message: "command is required"}
+	}
+	if len(command) > MaxConsoleCommandBytes {
+		return &Error{Code: CodeInvalidInput, Message: fmt.Sprintf("command must be at most %d bytes (32 KiB); it has %d", MaxConsoleCommandBytes, len(command))}
+	}
+	return nil
+}
+
 // MaxConsoleExecTimeoutSeconds is the longest a single console command may run;
 // a longer timeout is clamped to it.
 const MaxConsoleExecTimeoutSeconds = 3600
@@ -321,11 +338,15 @@ type ConsoleExecResult struct {
 // This is a thin service-layer wrapper so tests can verify flag handling
 // without needing a live pathfinder connection.
 func (s *Service) ExecOnHandle(ctx context.Context, handle *pathfinder.ExecHandle, opts ConsoleExecOpts) (*ConsoleExecResult, error) {
-	if opts.Command == "" {
-		return nil, &Error{Code: CodeInvalidInput, Message: "command is required"}
+	if err := CheckConsoleCommand(opts.Command); err != nil {
+		return nil, err
 	}
 
 	stdout, stderr, exitCode, truncated, err := handle.Exec(ctx, opts.Command, consoleExecTimeout(opts.TimeoutSeconds))
+	var tooLarge *pathfinder.ExecRequestTooLargeError
+	if errors.As(err, &tooLarge) {
+		return nil, &Error{Code: CodeInvalidInput, Message: tooLarge.Error(), Err: err}
+	}
 	if err != nil {
 		return nil, &Error{
 			Code:    CodeAPIError,

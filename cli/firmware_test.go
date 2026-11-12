@@ -1295,11 +1295,11 @@ func TestFirmwareMajorRefusalsAreAdvisedInCLIWords(t *testing.T) {
 	})
 	t.Run("an NDManager that predates the setting", func(t *testing.T) {
 		_, _, _, err := runFirmware(t, http.StatusOK, fwAssign, "table", []string{"device", "set"}, "fw-a", "--boot-environment=false")
-		if err == nil || !strings.Contains(err.Error(), "this NDManager predates the boot-environment setting") {
+		if err == nil || !strings.Contains(err.Error(), "this server predates the boot-environment setting") {
 			t.Fatalf("err = %v", err)
 		}
 		useFormatter(t, output.NewTableFormatter(), "")
-		if text := printed(err); !strings.HasPrefix(text, "Error: [SERVER_TOO_OLD] this NDManager predates the boot-environment setting") {
+		if text := printed(err); !strings.HasPrefix(text, "Error: [SERVER_TOO_OLD] this server predates the boot-environment setting") {
 			t.Errorf("printed %q", text)
 		}
 	})
@@ -1315,7 +1315,7 @@ func TestFirmwareMajorRefusalsAreAdvisedInCLIWords(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			stdout, _, seen, err := runFirmware(t, tc.status, tc.body, "table", []string{"track", "set"}, "regular", "--auto-apply-major=true", "--force")
-			if err == nil || !strings.Contains(err.Error(), "this NDManager predates major upgrades") {
+			if err == nil || !strings.Contains(err.Error(), "this server predates major upgrades") {
 				t.Fatalf("err = %v", err)
 			}
 			if stdout != "" || seen.hits != 1 || !reflect.DeepEqual(seen.body, map[string]interface{}{"auto_apply_major": true}) {
@@ -1323,7 +1323,7 @@ func TestFirmwareMajorRefusalsAreAdvisedInCLIWords(t *testing.T) {
 			}
 			useFormatter(t, output.NewTableFormatter(), "")
 			text := printed(err)
-			if !strings.HasPrefix(text, "Error: [SERVER_TOO_OLD] this NDManager predates major upgrades: ") || strings.Contains(text, "[MISSING_FIELD]") {
+			if !strings.HasPrefix(text, "Error: [SERVER_TOO_OLD] this server predates major upgrades: ") || strings.Contains(text, "[MISSING_FIELD]") {
 				t.Errorf("printed %q", text)
 			}
 			useFormatter(t, output.NewJSONFormatter(), "json")

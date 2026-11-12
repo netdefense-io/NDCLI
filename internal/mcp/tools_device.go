@@ -20,7 +20,10 @@ const deviceKeyStateDescription = "A device whose agent presents a key other tha
 // deviceOnlineDescription is the single wording for `online` on every tool
 // that returns devices: NDManager answers it from its online-device registry, and null means
 // the registry could not be read, which says nothing about the device.
-const deviceOnlineDescription = "Each device carries `online`: true while a broker holds its connection, false when the control plane knows it is not connected, null when the control plane could not tell (never read null as offline)."
+const deviceOnlineDescription = "Each device carries `online`: " + deviceOnlineMeaning
+
+// deviceOnlineMeaning is what each value of `online` means.
+const deviceOnlineMeaning = "true while a broker holds its connection, false when the control plane knows it is not connected, null when the control plane could not tell (never read null as offline)."
 
 // deviceFactsDescription is the single wording for the agent-reported
 // facts on both device tools, so the two catalogs generated from the live
@@ -50,7 +53,7 @@ func (s *Server) registerDeviceTools() {
 				"synced_before":    stringProperty("Filter by synced-at before date (e.g., 30m, 2h, 7d or ISO 8601)"),
 				"created_after":    stringProperty("Filter by created date after (e.g., 30m, 2h, 7d or ISO 8601)"),
 				"created_before":   stringProperty("Filter by created date before (e.g., 30m, 2h, 7d or ISO 8601)"),
-				"drift_status":     stringEnumProperty("Filter by drift status", []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
+				"drift_status":     stringEnumProperty("Filter by drift status. "+models.DriftStatusMeaning, []string{"IN_SYNC", "DRIFT", "NEVER_SYNCED", "UNKNOWN", "ERROR"}),
 			},
 		},
 	}, s.handleDeviceList)

@@ -376,6 +376,10 @@ func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan 
 	// its normal blocking state keeps stdout writes normal.
 
 	buf := make([]byte, 1024)
+	// The filtered input goes to its own buffer: a '~' held from the last read
+	// is written ahead of this read's bytes, so filtering in place would
+	// overwrite bytes not yet read.
+	outBuf := make([]byte, 0, len(buf)+1)
 	for {
 		fds := []unix.PollFd{
 			{Fd: int32(fd), Events: unix.POLLIN},
@@ -425,7 +429,7 @@ func (s *ShellSession) forwardInput(ctx context.Context, fd int, inputDone chan 
 		// Ctrl-C (0x03) reaches this path unmodified and is forwarded to the
 		// remote shell, where it interrupts the foreground command without
 		// killing the session (the original correct behavior, before 616cffa).
-		out := buf[:0] // reuse the read buffer as output; we only shrink or equal
+		out := outBuf[:0]
 		for _, b := range buf[:nr] {
 			if escapePending {
 				escapePending = false

@@ -2,6 +2,7 @@ package output
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +74,14 @@ func firmwareTimestampShort(s string) string {
 		return s
 	}
 	return FormatTimestampShort(t)
+}
+
+// firmwareSecondsDuration is n seconds from the control plane as a duration,
+// capped before multiplying so a huge value cannot wrap to a negative one
+// (shown as "now").
+func firmwareSecondsDuration(n int) time.Duration {
+	const maxSeconds = int(math.MaxInt64 / int64(time.Second))
+	return time.Duration(min(n, maxSeconds)) * time.Second
 }
 
 // firmwareDuration renders a span compactly: "3d 4h", "5h 20m", "12m". A span
@@ -336,7 +345,7 @@ func firmwareConfigFields(cfg *models.FirmwareConfig) []firmwareField {
 	// The server sends the count on enabling too, always 0: it means something
 	// only when Firmware was just disabled.
 	if cfg.ReleasedDevices != nil && cfg.Status == models.FirmwareConfigDisabled {
-		fields = append(fields, firmwareField{"Releasing", firmwarePlural(*cfg.ReleasedDevices, "device", "devices") + " leaving their track"})
+		fields = append(fields, firmwareField{"Releasing", firmwarePlural(*cfg.ReleasedDevices, "device leaving its track", "devices leaving their tracks")})
 	}
 	fields = append(fields, firmwareField{"Created", firmwareTimestamp(cfg.CreatedAt)})
 	if cfg.UpdatedAt != "" {
@@ -808,6 +817,8 @@ func firmwareMajorCell(d *models.FirmwareDevice) string {
 		return ColorDim.Sprint("-")
 	case d.Major.Eligible:
 		return ColorEnabled.Sprint("eligible")
+	case d.Major.BlockedBy == models.FirmwareNoSupportedHop:
+		return ColorDim.Sprint("none")
 	default:
 		return ColorWarning.Sprint("blocked")
 	}
@@ -825,6 +836,8 @@ func firmwareMajorStatus(d *models.FirmwareDevice) string {
 		return "blocked"
 	case d.Major.BlockedBy == d.HeldReason:
 		return "blocked by the last hold"
+	case d.Major.BlockedBy == models.FirmwareNoSupportedHop:
+		return "none available: " + models.FirmwareDeviceMajorBlockedText(d.Major.BlockedBy)
 	default:
 		return "blocked: " + models.FirmwareDeviceMajorBlockedText(d.Major.BlockedBy)
 	}
@@ -839,6 +852,9 @@ func firmwareMajorBlockedNote(d *models.FirmwareDevice) string {
 	}
 	if d.Major.BlockedBy == d.HeldReason {
 		return "major upgrade blocked by the last hold"
+	}
+	if d.Major.BlockedBy == models.FirmwareNoSupportedHop {
+		return "no major upgrade available from the device's series"
 	}
 	return "major upgrade blocked: " + models.FirmwareDeviceMajorBlockedText(d.Major.BlockedBy)
 }

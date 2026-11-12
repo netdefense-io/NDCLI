@@ -292,7 +292,7 @@ func (s *Server) registerFirmwareTools() {
 			"firmware tracks; if false, "+
 			firmwarePlanOff+") and the three "+
 			"tracks (fast, regular, stable) with soak_days, min_success, the attached schedule, the next window, "+
-			"auto_apply_major (whether the track's windows apply major upgrades; off by default; absent from an NDManager "+
+			"auto_apply_major (whether the track's windows apply major upgrades; off by default; absent from a server "+
 			"that predates them) and device counts by state. On a plan that includes firmware tracks it returns "+
 			"FIRMWARE_NOT_CONFIGURED until ndcli.firmware.config_create has run. "+firmwarePlanRule,
 		firmwareOrgProps(nil), nil,
@@ -331,7 +331,7 @@ func (s *Server) registerFirmwareTools() {
 		firmwareHandler(s, orgOnly, s.firmwareConfigDisable))
 
 	add("ndcli.firmware.config_delete",
-		"Delete the firmware configuration with its tracks, their schedules and the approvals; halts and the history stay. "+
+		"Delete the firmware configuration with its tracks, their windows on the schedules and the approvals; the schedules themselves, halts and the history stay. "+
 			"Refused with HAS_DEPENDENCIES (the devices are listed) while any device is in a track or still leaving one: "+
 			"disable firmware or move the devices to unmanaged first. Still "+firmwareWindDown+" Both ways of releasing its "+
 			"devices, ndcli.firmware.config_disable and ndcli.firmware.device_set with track=unmanaged, work there too. "+
@@ -359,7 +359,7 @@ func (s *Server) registerFirmwareTools() {
 			"(off for every track until an operator turns it on). "+firmwareMajorWhat+" Turning it on is the operator's explicit "+
 			"decision: the preview carries the consequences (lead and consequences in its data), show them to the operator and "+
 			"call again with confirm=true only on their go-ahead. auto_apply_major=false cancels the major-upgrade steps queued "+
-			"for the track's devices and not yet dispatched (cancelled_tasks); an upgrade already running goes on. An NDManager "+
+			"for the track's devices and not yet dispatched (cancelled_tasks); an upgrade already running goes on. A server "+
 			"that predates major upgrades is reported as such (SERVER_TOO_OLD) and nothing changes. "+
 			firmwareNeedsPlan+" Requires confirm=true.",
 		firmwareOrgProps(map[string]interface{}{
@@ -399,7 +399,7 @@ func (s *Server) registerFirmwareTools() {
 			"path from the console only). It belongs to the device's place in a track: a device in no track has none "+
 			"(FIRMWARE_DEVICE_UNMANAGED names them; add them to a track first or give track too), it cannot be set with "+
 			"track=unmanaged, changing it cancels the device's queued major-upgrade step that was not yet dispatched "+
-			"(cancelled_tasks), and like moving into a track it is refused on a plan without firmware tracks. An NDManager "+
+			"(cancelled_tasks), and like moving into a track it is refused on a plan without firmware tracks. A server "+
 			"that predates the setting is reported as such (SERVER_TOO_OLD). Each result carries boot_environment (the setting "+
 			"afterwards) and notes: agent_too_old, agent_upgrade_required or device_disabled mean no step is sent until that changes. "+
 			"Requires confirm=true.",
@@ -422,11 +422,13 @@ func (s *Server) registerFirmwareTools() {
 			"of the pinned release); for a device in a track, managed and enabled, major {eligible, blocked_by}: whether the "+
 			"next window would send it a major upgrade as far as the device itself goes, and when not the first thing that "+
 			"stops it (the track's own gates are the blocked_reason of ndcli.firmware.rollout's majors). blocked_by: "+
-			firmwareDeviceMajorGuide+". And, for a device in a track, boot_environment {setting, last}: the device's setting "+
+			firmwareDeviceMajorGuide+". no_supported_hop is not a fault: no supported upgrade starts from the device's "+
+			"series, the normal state on the newest series (an older series without one is upgraded another way); the CLI "+
+			"shows it as none available. And, for a device in a track, boot_environment {setting, last}: the device's setting "+
 			"for making a ZFS boot environment before a major upgrade, and what the newest major upgrade answer did about it ("+
 			firmwareBootEnvironmentGuide+"; last is absent when that answer made no decision), and notes, the tokens of that "+
 			"answer, kept past the next ordinary window; a third-party repository or package is a warning, never a hold, and "+
-			"never named: "+firmwareNoteGuide+". These fields are absent from an NDManager that predates major upgrades. "+
+			"never named: "+firmwareNoteGuide+". These fields are absent from a server that predates major upgrades. "+
 			firmwareOutcomeGuide+" Reason codes: "+firmwareReasonGuide+".",
 		firmwareOrgProps(mergeProps(map[string]interface{}{
 			"track": stringEnumProperty("Only devices in this track, or unmanaged ones", models.FirmwareAssignTracks),
@@ -439,7 +441,7 @@ func (s *Server) registerFirmwareTools() {
 		"Show a device's firmware ledger, newest first: every finished step with its action (enroll, advance, unenroll), "+
 			"outcome, reason, target, the releases it moved between (from_version, to_version) and whether it applied "+
 			"anything. kind is minor (an ordinary update) or major (a major upgrade; target is then the series); it is absent "+
-			"from an NDManager that predates major upgrades. A failed step an operator cleared carries cleared_at and "+
+			"from a server that predates major upgrades. A failed step an operator cleared carries cleared_at and "+
 			"cleared_by. revision (when present) is the revision of the target release the step was sealed with (what the track "+
 			"approved); reported_revision (when present) is the one the device's answer reported, and differs from revision on a "+
 			"held_revision_mismatch hold or when the release was rewritten during the step. "+firmwareOutcomeGuide+" The reason codes are the ones ndcli.firmware.status lists.",
@@ -471,7 +473,7 @@ func (s *Server) registerFirmwareTools() {
 			"kind=major); and agent_repo {configured, channel, trees: [{abi, ok, checked_at}]}, the control plane's check of "+
 			"NetDefense's own package repository for the FreeBSD versions an upgrade crosses (a missing tree fails every "+
 			"OPNsense check of an upgraded device; configured=false means the check is not running; trees is empty when "+
-			"nothing was checked lately). majors, major_failures and agent_repo are absent from an NDManager that predates "+
+			"nothing was checked lately). majors, major_failures and agent_repo are absent from a server that predates "+
 			"major upgrades.",
 		firmwareOrgProps(nil), nil,
 		firmwareHandler(s, orgOnly, s.firmwareRollout))
@@ -619,7 +621,7 @@ func (s *Server) firmwareConfigDisable(ctx context.Context, in *firmwareOrgInput
 
 func (s *Server) firmwareConfigDelete(ctx context.Context, in *firmwareOrgInput, org string) (*mcp.CallToolResult, error) {
 	if !in.Confirm {
-		return s.previewResultWithData("delete the firmware configuration (tracks, schedules and approvals)", org,
+		return s.previewResultWithData("delete the firmware configuration (its tracks, their windows on the schedules and the approvals; the schedules stay)", org,
 			map[string]interface{}{"organization": org})
 	}
 	apiCtx, cancel := contextWithTimeout()

@@ -37,15 +37,26 @@ func NewTunnel(localPort int, serviceName string, manager *StreamManager) *Tunne
 	}
 }
 
-// Start begins listening for connections on the local port
-// If localPort is 0, an available port is automatically assigned
-func (t *Tunnel) Start() error {
-	addr := fmt.Sprintf("127.0.0.1:%d", t.localPort)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
-	}
+// NewTunnelOn creates a tunnel that serves on a listener already bound.
+func NewTunnelOn(listener net.Listener, serviceName string, manager *StreamManager) *Tunnel {
+	t := NewTunnel(0, serviceName, manager)
 	t.listener = listener
+	return t
+}
+
+// Start begins listening for connections on the local port, or on the
+// listener NewTunnelOn was given. If localPort is 0, an available port is
+// automatically assigned
+func (t *Tunnel) Start() error {
+	if t.listener == nil {
+		addr := fmt.Sprintf("127.0.0.1:%d", t.localPort)
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		}
+		t.listener = listener
+	}
+	listener := t.listener
 
 	// Get the actual port (useful when localPort was 0)
 	t.actualPort = listener.Addr().(*net.TCPAddr).Port

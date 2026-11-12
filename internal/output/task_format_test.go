@@ -111,7 +111,7 @@ func tableHeaderLine(out string) string {
 func TestTaskTableShowsSourceAndDuration(t *testing.T) {
 	inDisplayTimezone(t, "UTC")
 	tasks := outTasks(t, outTaskManual1100, outTaskScheduled199, outTaskWindow1100, outTaskEnroll1100, outTaskDeleted1100)
-	out := render(t, "table", "FormatTasks", tasks, len(tasks))
+	out := render(t, "table", "FormatTasks", models.TaskList{Tasks: tasks, Total: len(tasks)})
 
 	header := tableHeaderLine(out)
 	for _, want := range []string{"ID", "Type", "Status", "Device", "Source", "Created", "Duration"} {
@@ -138,7 +138,7 @@ func TestTaskTableShowsSourceAndDuration(t *testing.T) {
 }
 
 func TestTaskTableFromAnOlderNDManagerKeepsItsColumns(t *testing.T) {
-	out := render(t, "table", "FormatTasks", outTasks(t, outTaskBefore199), 1)
+	out := render(t, "table", "FormatTasks", models.TaskList{Tasks: outTasks(t, outTaskBefore199), Total: 1})
 	header := tableHeaderLine(out)
 	for _, not := range []string{"Source", "Duration"} {
 		if strings.Contains(header, not) {
@@ -148,14 +148,14 @@ func TestTaskTableFromAnOlderNDManagerKeepsItsColumns(t *testing.T) {
 	mustContain(t, "table", out, "Ab12Cd34", "fw-branch-01")
 
 	// 1.99 says where tasks came from but not how long they took.
-	header = tableHeaderLine(render(t, "table", "FormatTasks", outTasks(t, outTaskScheduled199, outTaskManual199), 2))
+	header = tableHeaderLine(render(t, "table", "FormatTasks", models.TaskList{Tasks: outTasks(t, outTaskScheduled199, outTaskManual199), Total: 2}))
 	if !strings.Contains(header, "Source") || strings.Contains(header, "Duration") {
 		t.Errorf("1.99 header = %q, want Source and no Duration", header)
 	}
 }
 
 func TestTaskSimpleListAddsSourceAndDuration(t *testing.T) {
-	out := render(t, "simple", "FormatTasks", outTasks(t, outTaskManual1100, outTaskBefore199), 2)
+	out := render(t, "simple", "FormatTasks", models.TaskList{Tasks: outTasks(t, outTaskManual1100, outTaskBefore199), Total: 2})
 	mustContain(t, "simple", out, "• Pq3Lm8Xa - PING [COMPLETED] · ana@acme.com · CLI · took 2m 05s")
 	mustContain(t, "simple", out, "• Ab12Cd34 - PING [COMPLETED]\n")
 }
@@ -236,7 +236,7 @@ func TestTaskDescribeFromAnOlderNDManagerIsUnchanged(t *testing.T) {
 
 func TestTaskDetailedListShowsProvenance(t *testing.T) {
 	inDisplayTimezone(t, "UTC")
-	out := render(t, "detailed", "FormatTasks", outTasks(t, outTaskManual1100, outTaskScheduled199), 2)
+	out := render(t, "detailed", "FormatTasks", models.TaskList{Tasks: outTasks(t, outTaskManual1100, outTaskScheduled199), Total: 2})
 	for _, line := range [][2]string{
 		{"Requested by", "Ana Lima <ana@acme.com>"},
 		{"Run", "R7x2Kp9Q"},
@@ -300,7 +300,7 @@ func TestTaskJSONCarriesTheNewFieldsAndTheDuration(t *testing.T) {
 		t.Errorf("origin is not sent by an older NDManager: %#v", doc["origin"])
 	}
 
-	list := decode(t, render(t, "json", "FormatTasks", outTasks(t, outTaskManual1100, outTaskEnroll1100), 2))
+	list := decode(t, render(t, "json", "FormatTasks", models.TaskList{Tasks: outTasks(t, outTaskManual1100, outTaskEnroll1100), Total: 2}))
 	rows, _ := list["tasks"].([]any)
 	if len(rows) != 2 || list["total"] != float64(2) {
 		t.Fatalf("tasks = %#v", list)
@@ -358,5 +358,31 @@ func TestTaskRequesterWithANameAndNoEmail(t *testing.T) {
 		if out := render(t, format, "FormatTask", task); !hasField(out, "Requested by", "Ana Lima") {
 			t.Errorf("%s: no Requested by line with the name:\n%s", format, out)
 		}
+	}
+}
+
+// task list -f json carries the paging the server answered and the filters it
+// echoed as applied, so a script can page and check what was filtered
+// (#284). A server that echoes no filters gets no filters key.
+func TestTaskListJSONCarriesThePagingAndTheFilters(t *testing.T) {
+	decode := func(out string) map[string]any {
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("not one JSON document: %v\n%s", err, out)
+		}
+		return doc
+	}
+	list := models.TaskList{Tasks: []models.Task{}, Total: 45, Page: 2, PerPage: 30,
+		Filters: map[string]any{"status": []any{"FAILED"}}}
+	got := decode(render(t, "json", "FormatTasks", list))
+	if got["total"] != float64(45) || got["page"] != float64(2) || got["per_page"] != float64(30) {
+		t.Errorf("paging = %v", got)
+	}
+	if f, ok := got["filters"].(map[string]any); !ok || f["status"] == nil {
+		t.Errorf("filters = %v, want the echo", got["filters"])
+	}
+	list.Filters = nil
+	if got := decode(render(t, "json", "FormatTasks", list)); got["filters"] != nil {
+		t.Errorf("filters = %v with no echo, want absent", got["filters"])
 	}
 }

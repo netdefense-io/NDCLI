@@ -198,7 +198,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 		"organization name (overrides config)")
 	_ = rootCmd.RegisterFlagCompletionFunc("org", completeOrganizationFlag)
 	rootCmd.PersistentFlags().StringVarP(&outputFmt, "format", "f", "",
-		"output format: table, simple, detailed, json")
+		"output format: table, simple, detailed, json (default: the configured one, else detailed)")
 
 	// Add subcommands
 	rootCmd.AddCommand(authCmd)

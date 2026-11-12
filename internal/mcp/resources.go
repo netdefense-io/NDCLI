@@ -2,14 +2,13 @@ package mcp
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/config"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
 // registerResources registers all MCP resources
@@ -40,7 +39,7 @@ func (s *Server) registerResources() {
 	s.mcpServer.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "ndcli://org/{name}/devices",
 		Name:        "Organization Devices",
-		Description: "List devices in a specific organization",
+		Description: "List devices in a specific organization. " + deviceOnlineDescription,
 		MIMEType:    "application/json",
 	}, s.handleOrgDevicesResource)
 }
@@ -136,13 +135,8 @@ func (s *Server) handleOrgResource(ctx context.Context, req *mcp.ReadResourceReq
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	resp, err := s.apiClient.Get(apiCtx, fmt.Sprintf("/api/v1/organizations/%s", orgName), nil)
+	org, err := s.svc.OrgGet(apiCtx, orgName)
 	if err != nil {
-		return nil, err
-	}
-
-	var org models.Organization
-	if err := api.ParseResponse(resp, &org); err != nil {
 		return nil, err
 	}
 
@@ -186,30 +180,20 @@ func (s *Server) handleOrgDevicesResource(ctx context.Context, req *mcp.ReadReso
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	params := map[string]string{
-		"per_page": "100",
-	}
-
-	resp, err := s.apiClient.Get(apiCtx, fmt.Sprintf("/api/v1/organizations/%s/devices", orgName), params)
+	result, err := s.svc.DeviceList(apiCtx, orgName, service.DeviceListOpts{PerPage: 100})
 	if err != nil {
 		return nil, err
 	}
 
-	var result models.DeviceListResponse
-	if err := api.ParseResponse(resp, &result); err != nil {
-		return nil, err
-	}
-
-	devices := result.GetItems()
-
-	deviceList := make([]map[string]interface{}, 0, len(devices))
-	for _, d := range devices {
+	deviceList := make([]map[string]interface{}, 0, len(result.Devices))
+	for _, d := range result.Devices {
 		deviceList = append(deviceList, map[string]interface{}{
 			"name":                 d.Name,
 			"uuid":                 d.UUID,
 			"status":               d.Status,
 			"organizational_units": d.OrganizationalUnits,
 			"heartbeat":            d.Heartbeat,
+			"online":               d.Online,
 		})
 	}
 
