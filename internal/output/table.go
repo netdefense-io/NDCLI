@@ -443,6 +443,9 @@ func (f *TableFormatter) FormatOrganization(org *models.Organization) error {
 	if defaultOU != "" {
 		fmt.Printf("Default OU:   %s\n", defaultOU)
 	}
+	if org.AllowUnverifiedRepos != nil {
+		fmt.Printf("Unverified repositories: %s\n", unverifiedReposValue(*org.AllowUnverifiedRepos))
+	}
 	fmt.Printf("Created:      %s\n", FormatTimestamp(org.CreatedAt.Time))
 	fmt.Printf("Updated:      %s\n", FormatTimestamp(org.UpdatedAt.Time))
 
@@ -881,8 +884,8 @@ func (f *TableFormatter) FormatSyncStatus(items []models.SyncStatusItem, total i
 		}
 
 		var statusDisplay string
-		if item.Error != nil && *item.Error != "" {
-			statusDisplay = ColorError.Sprint("●") + " " + ColorError.Sprint("ERROR")
+		if item.HasError() {
+			statusDisplay = ColorError.Sprint("●") + " " + ColorError.Sprint(WithCode(item.ErrorCode(), "ERROR"))
 		} else if item.IsSynced() {
 			statusDisplay = ColorSuccess.Sprint("●") + " " + ColorSuccess.Sprint("SYNCED")
 		} else {
@@ -1496,7 +1499,6 @@ func (f *TableFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) error {
 func (f *TableFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
-		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 

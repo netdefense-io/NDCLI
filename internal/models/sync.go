@@ -12,7 +12,24 @@ type SyncStatusItem struct {
 	SyncedHash   *string       `json:"synced_hash,omitempty"`
 	CurrentHash  *string       `json:"current_hash,omitempty"`
 	InSync       bool          `json:"in_sync"`
-	Error        *string       `json:"error,omitempty"`
+	// Error is why the server could not build the device's sync payload, and
+	// Code its machine-readable code (UNDEFINED_VARIABLES, VARIABLE_CONFLICT,
+	// AUTH_BUILD_INVALID, …), absent from a server that predates it.
+	Error *string `json:"error,omitempty"`
+	Code  *string `json:"code,omitempty"`
+}
+
+// HasError reports whether the server could not build the device's payload.
+func (s *SyncStatusItem) HasError() bool {
+	return s.Error != nil && *s.Error != ""
+}
+
+// ErrorCode is Code, or "" when the server sent none.
+func (s *SyncStatusItem) ErrorCode() string {
+	if s.Code == nil {
+		return ""
+	}
+	return *s.Code
 }
 
 // IsSynced returns true if the device is in sync
@@ -118,6 +135,13 @@ type SyncApplyResponse struct {
 // are not refusals: a sync that only skipped succeeded.
 func (r *SyncApplyResponse) AllRefused() bool {
 	return r != nil && len(r.Errors) > 0 && r.DevicesAffected == 0
+}
+
+// PartlyRefused reports a sync that triggered some devices and refused others
+// (NDManager answers it with a 207). It reads the body, as AllRefused does, so
+// it holds whatever the status.
+func (r *SyncApplyResponse) PartlyRefused() bool {
+	return r != nil && len(r.Errors) > 0 && r.DevicesAffected > 0
 }
 
 // DriftStatusMeaning is what a device's drift status says, on every surface

@@ -63,9 +63,9 @@ Major upgrades. A track can also move its devices to the next OPNsense series
 (for example 26.1 to 26.7) at its update windows. It is off for every track
 until an operator turns it on with 'ndcli firmware track set <track>
 --auto-apply-major=true': an upgrade takes the device offline, reboots it three
-times and has no automatic rollback. A series moves down the tracks like a
-release does; the halt, promote and failure commands take --major to address a
-series, and 'ndcli firmware rollout' shows where each one stands.`,
+times, sometimes four, and has no automatic rollback. A series moves down the
+tracks like a release does; the halt, promote and failure commands take --major
+to address a series, and 'ndcli firmware rollout' shows where each one stands.`,
 }
 
 // firmwareCLIVocabulary is how the CLI names the way forward from a firmware
@@ -313,16 +313,16 @@ track, so it takes 0 only.
 Releases the track has already approved stay approved; the new values apply to
 the decisions still to come.
 
---auto-apply-major=true makes the track's update windows move its devices to
-the next OPNsense series (a major upgrade, for example 26.1 to 26.7) once the
-series is approved for the track; off, the series is approved but no device is
-asked to upgrade. It is off for every track, and turning it on asks for a
-confirmation (--force skips the prompt, and is required when stdin is not a TTY)
-because an upgrade takes the device offline, reboots it three times and has no
-automatic rollback. --auto-apply-major=false cancels the upgrade steps that were
-queued for the track's devices and not yet dispatched; one already running goes
-on. It is changed on its own, not with --soak-days or --min-success. Turning it
-on needs a plan that includes firmware tracks.`,
+--auto-apply-major=true makes the track's update windows move its devices to the
+next OPNsense series (a major upgrade, for example 26.1 to 26.7) once the series
+is approved for the track; off, the series is approved but no device is asked to
+upgrade. It is off for every track, and turning it on asks for a confirmation
+(--force skips the prompt, and is required when stdin is not a TTY) because an
+upgrade takes the device offline, reboots it three times, sometimes four, and
+has no automatic rollback. --auto-apply-major=false cancels the upgrade steps
+that were queued for the track's devices and not yet dispatched; one already
+running goes on. It is changed on its own, not with --soak-days or
+--min-success. Turning it on needs a plan that includes firmware tracks.`,
 	Example: `  ndcli firmware track set regular --soak-days 7 --min-success 2
   ndcli firmware track set stable --soak-days 14
   ndcli firmware track set fast --auto-apply-major=true
@@ -625,9 +625,10 @@ argument is the target series of a major upgrade (for example 26.7).
 
 Lifting the halt on a major upgrade lets a track with major upgrades on that has
 approved the series upgrade every device that passes the gates at its next
-window: offline for the length of the upgrade, three reboots, no automatic
-rollback. So it asks for a confirmation (--force skips the prompt, and is
-required when stdin is not a TTY). Lifting the halt on a release asks nothing.`,
+window: offline for the length of the upgrade, three reboots, sometimes four, no
+automatic rollback. So it asks for a confirmation (--force skips the prompt, and
+is required when stdin is not a TTY). Lifting the halt on a release asks
+nothing.`,
 	Example:           `  ndcli firmware version unhalt 26.7 --major`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeFirmwareHaltedVersions,
@@ -651,7 +652,7 @@ func runFirmwareVersionUnhalt(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
 		ok, err := helpers.ConfirmOrForce(fmt.Sprintf("Lift the halt on the major upgrade to %s? "+
 			"A track with major upgrades on that has approved it will then upgrade its eligible devices at its next window: "+
-			"offline, three reboots, no automatic rollback.", name), force)
+			"offline, three reboots, sometimes four, no automatic rollback.", name), force)
 		if err != nil {
 			return err
 		}
@@ -677,9 +678,9 @@ window. It is idempotent. The release must be one the control plane knows and
 must not be halted; the configuration must be enabled.
 
 With --major the argument is the target series of a major upgrade (for example
-26.7). Approving it starts no upgrade by itself, but a track with major
-upgrades on then upgrades every device that passes the gates at its next
-window: offline for the length of the upgrade, three reboots, no automatic
+26.7). Approving it starts no upgrade by itself, but a track with major upgrades
+on then upgrades every device that passes the gates at its next window: offline
+for the length of the upgrade, three reboots, sometimes four, no automatic
 rollback. The series must be the target of a supported upgrade, must not be
 halted, and OPNsense's upgrade path for it must be open
 (FIRMWARE_UPGRADE_NOT_OPEN otherwise).`,
@@ -717,7 +718,7 @@ func runFirmwareVersionPromote(cmd *cobra.Command, args []string) error {
 	if kind == models.FirmwareKindMajor {
 		question = fmt.Sprintf("Approve the major upgrade to %s in %s now, without waiting for its soak? "+
 			"A track with major upgrades on will then upgrade its eligible devices at its next window: "+
-			"offline, three reboots, no automatic rollback.", name, scope)
+			"offline, three reboots, sometimes four, no automatic rollback.", name, scope)
 	}
 	ok, err := helpers.ConfirmOrForce(question, force)
 	if err != nil {
@@ -781,7 +782,8 @@ var firmwareFailureClearCmd = &cobra.Command{
 	Long: `A failed update step blocks the release it was moving a device to from reaching
 the next track, until the same device later reaches it or an operator clears the
 failure. Clearing lets the release move on; the records stay in the history.
-Limit it to one track with --track, or clear every track.
+Limit it to one track with --track, or clear every track. It asks first;
+--force skips the question, and is required when stdin is not a terminal.
 
 With --major the argument is the target series of a major upgrade (for example
 26.7): a failed upgrade, or one that never answered, blocks the series in the
@@ -798,6 +800,36 @@ func runFirmwareFailureClear(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 	track, _ := cmd.Flags().GetString("track")
 	revision, _ := cmd.Flags().GetInt("revision")
+	force, _ := cmd.Flags().GetBool("force")
+
+	// Refuse a request that cannot run before asking anyone anything.
+	kind, name, err := service.CheckFirmwareTarget(firmwareKindOf(cmd), args[0])
+	if err != nil {
+		return err
+	}
+	if err := service.CheckFirmwareRevision(kind, name, revision); err != nil {
+		return err
+	}
+	scope := "every track"
+	if strings.TrimSpace(track) != "" {
+		normalized, err := service.NormalizeFirmwareChoice("track", track, models.FirmwareTracks)
+		if err != nil {
+			return err
+		}
+		scope = "the " + normalized + " track"
+	}
+	target := "release " + name
+	if kind == models.FirmwareKindMajor {
+		target = "the major upgrade to " + name
+	}
+	ok, err := helpers.ConfirmOrForce(fmt.Sprintf("Clear the failures that block %s in %s? It can then move on to the next track.", target, scope), force)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(os.Stderr, "Cancelled")
+		return nil
+	}
 	result, err := svc.FirmwareFailuresClear(context.Background(), org, firmwareKindOf(cmd), args[0], track, revision)
 	if err != nil {
 		return firmwareAdvice(err)
@@ -898,7 +930,7 @@ func init() {
 
 	firmwareTrackSetCmd.Flags().Int("soak-days", 0, "Days a release soaks before the track takes it")
 	firmwareTrackSetCmd.Flags().Int("min-success", 0, "Distinct devices of the previous track that must have reached a release first (0 for the fast track)")
-	addExplicitBoolFlag(firmwareTrackSetCmd, "auto-apply-major", "Whether the track's windows move its devices to the next OPNsense series: --auto-apply-major=true (asks first; offline, three reboots, no automatic rollback) or =false (cancels the queued upgrade steps)")
+	addExplicitBoolFlag(firmwareTrackSetCmd, "auto-apply-major", "Whether the track's windows move its devices to the next OPNsense series: --auto-apply-major=true (asks first; offline, three reboots, sometimes four, no automatic rollback) or =false (cancels the queued upgrade steps)")
 	firmwareTrackSetCmd.Flags().Bool("force", false, "Skip the confirmation prompt of --auto-apply-major=true (required when stdin is not a TTY)")
 	firmwareTrackSetCmd.MarkFlagsOneRequired("soak-days", "min-success", "auto-apply-major")
 	firmwareTrackSetCmd.MarkFlagsMutuallyExclusive("auto-apply-major", "soak-days")
@@ -947,6 +979,7 @@ func init() {
 	firmwareVersionHaltsCmd.Flags().Int("page", 1, "Page number")
 	firmwareVersionHaltsCmd.Flags().Int("per-page", 50, "Items per page (1-200)")
 
+	firmwareFailureClearCmd.Flags().Bool("force", false, "Skip the confirmation prompt (required when stdin is not a TTY)")
 	firmwareFailureClearCmd.Flags().String("track", "", "Limit to one track: "+strings.Join(models.FirmwareTracks, ", ")+" (default: every track)")
 	_ = firmwareFailureClearCmd.RegisterFlagCompletionFunc("track", completeFirmwareFlag(models.FirmwareTracks))
 

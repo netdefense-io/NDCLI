@@ -8,9 +8,21 @@ import "regexp"
 // stricter of the two for a name the CLI puts into a command line.
 var OrganizationNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// UnverifiedReposText is the setting as the human formats show it.
+func UnverifiedReposText(allow bool) string {
+	if allow {
+		return "allowed"
+	}
+	return "forbidden"
+}
+
+// AgentTokenWarning goes with the agent token org create returns, in the
+// CLI's -f json and ndcli.org.create's result alike.
+const AgentTokenWarning = "Single-issue agent token — surface to operator once and do not log."
+
 // Organization represents a NetDefense organization
 type Organization struct {
-	ID          FlexibleID   `json:"id"`
+	ID          FlexibleID   `json:"id,omitempty"`
 	Name        string       `json:"name"`
 	DisplayName string       `json:"display_name,omitempty"`
 	Description string       `json:"description,omitempty"`
@@ -32,6 +44,10 @@ type Organization struct {
 	MemberCount          int            `json:"member_count,omitempty"`
 	MemberCountsByRole   map[string]int `json:"member_counts_by_role,omitempty"`
 	MemberCountsByStatus map[string]int `json:"member_counts_by_status,omitempty"`
+
+	// AllowUnverifiedRepos is read from its own route by the describe views
+	// (Service.OrgDescribe); nil when it was not read.
+	AllowUnverifiedRepos *bool `json:"allow_unverified_repos,omitempty"`
 }
 
 // GetPlan returns the plan name, defaulting to "free" when not set

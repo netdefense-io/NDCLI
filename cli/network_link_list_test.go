@@ -75,7 +75,7 @@ func TestNetworkLinkListHumanSummaryIsUnchanged(t *testing.T) {
 			want  string
 		}{
 			"connections": {false, "\n2 connections (2 automatic, 1 override)\n"},
-			"none":        {true, "ℹ No VPN connections found\n\n0 connections ()\n"},
+			"none":        {true, "ℹ No VPN connections found\n"},
 		} {
 			t.Run(format+"/"+name, func(t *testing.T) {
 				stdout, _ := runStreams(t, linkListServer(t, tc.empty), format, "", func() error {

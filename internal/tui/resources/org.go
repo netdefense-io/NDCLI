@@ -127,9 +127,13 @@ func (orgResource) FormOptions(ctx context.Context, svc *service.Service, org, i
 
 // Describe implements registry.Describer.
 func (orgResource) Describe(ctx context.Context, svc *service.Service, org, id string) ([]registry.Section, error) {
-	o, err := svc.OrgGet(ctx, id)
+	o, err := svc.OrgDescribe(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	unverified := "—"
+	if o.AllowUnverifiedRepos != nil {
+		unverified = models.UnverifiedReposText(*o.AllowUnverifiedRepos)
 	}
 	fields := []registry.Field{
 		{Label: "Name", Value: o.Name},
@@ -138,6 +142,7 @@ func (orgResource) Describe(ctx context.Context, svc *service.Service, org, id s
 		{Label: "Your role", Value: uihelp.Default(o.GetRole(), "—")},
 		{Label: "Status", Value: uihelp.Default(o.Status, "—")},
 		{Label: "Default OU", Value: uihelp.Default(o.GetDefaultOU(), "—")},
+		{Label: "Unverified repos", Value: unverified},
 		{Label: "Devices", Value: fmt.Sprintf("%d", o.DeviceCount)},
 		{Label: "Members", Value: fmt.Sprintf("%d", o.MemberCount)},
 		{Label: "Created", Value: fullTime(o.CreatedAt)},

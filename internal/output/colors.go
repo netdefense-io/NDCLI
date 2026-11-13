@@ -11,10 +11,11 @@ import (
 // Color definitions for consistent styling
 var (
 	// Status colors
-	ColorSuccess = color.New(color.FgGreen)
-	ColorError   = color.New(color.FgRed)
-	ColorWarning = color.New(color.FgYellow)
-	ColorInfo    = color.New(color.FgBlue)
+	ColorSuccess  = color.New(color.FgGreen)
+	ColorError    = color.New(color.FgRed)
+	ColorWarning  = color.New(color.FgYellow)
+	ColorInfo     = color.New(color.FgBlue)
+	ColorNoChange = color.New(color.FgCyan)
 
 	// Status indicators
 	ColorEnabled    = color.New(color.FgGreen)
@@ -256,4 +257,14 @@ func VpnConnectionExplanation(c *models.EffectiveConnection) string {
 // VpnConnectionLine returns the Connection label value, e.g. "ed-209 (HUB) ↔ murphy01 (SPOKE)"
 func VpnConnectionLine(c *models.EffectiveConnection) string {
 	return fmt.Sprintf("%s (%s) ↔ %s (%s)", c.DeviceA, c.RoleA, c.DeviceB, c.RoleB)
+}
+
+// unverifiedReposValue is the unverified repositories setting, "allowed" in
+// the warning colour: it lets software policies install from unsigned or
+// non-https repositories.
+func unverifiedReposValue(allow bool) string {
+	if allow {
+		return ColorWarning.Sprint(models.UnverifiedReposText(true))
+	}
+	return models.UnverifiedReposText(false)
 }

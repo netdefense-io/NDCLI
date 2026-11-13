@@ -177,6 +177,11 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	progress := progressNotifier(ctx, req)
 	connResult, connErr := s.svc.ConsoleConnectWithProgress(apiCtx, org, input.Device, connectTimeout, progress)
 	if connErr != nil {
+		var rl *pathfinder.RateLimitedError
+		var busy *pathfinder.RelayBusyError
+		if errors.As(connErr, &rl) || errors.As(connErr, &busy) {
+			return s.relayConnectErrorResult(connErr)
+		}
 		return s.errorResult(service.ConnectAdvice(connErr, consoleAgentTooOldHint))
 	}
 

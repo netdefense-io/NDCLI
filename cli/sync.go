@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
@@ -148,9 +147,8 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 		if filter.Schedule != "" {
 			prompt = fmt.Sprintf("Register a recurring sync spec on schedule %q for %d device(s)?", filter.Schedule, len(status.Items))
 		}
-		if !helpers.Confirm(prompt) {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+			return err
 		}
 	}
 
@@ -170,5 +168,16 @@ func runSyncApply(cmd *cobra.Command, args []string) error {
 	if err := formatter.FormatSyncApply(applied.Response); err != nil {
 		return err
 	}
-	return service.SyncApplyRefusal(applied)
+	if err := service.SyncApplyRefusal(applied); err != nil {
+		return err
+	}
+	if r := applied.Response; r.PartlyRefused() {
+		// Skipped devices (already in sync) are neither.
+		refused := map[string]bool{}
+		for _, e := range r.Errors {
+			refused[e.DeviceName] = true
+		}
+		return &partialFailure{failed: len(refused), total: len(refused) + r.DevicesAffected, what: "devices"}
+	}
+	return nil
 }

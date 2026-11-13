@@ -146,7 +146,7 @@ func (s *dashboardScreen) View() string {
 	row := lipgloss.JoinHorizontal(lipgloss.Top,
 		dev, " ", syncB, " ", tasks, " ",
 		versionPanelW("Agent versions", agentItems(d.AgentVersions), agentW), " ",
-		versionPanelW("OPNsense versions", opnsenseItems(d.Compact), remaining-agentW),
+		versionPanelW(opnsensePanelTitle(d), opnsenseItems(d), remaining-agentW),
 	)
 	top := lipgloss.JoinVertical(lipgloss.Left, row, "")
 
@@ -212,10 +212,29 @@ func agentItems(versions []models.DashboardAgentVersion) []countItem {
 	return out
 }
 
-// opnsenseItems aggregates the per-device OPNsense versions into a histogram.
-func opnsenseItems(rows []models.DashboardCompactRow) []countItem {
+// opnsensePanelTitle names the newest OPNsense release beside the histogram
+// when the control plane knows it.
+func opnsensePanelTitle(d *models.DashboardResponse) string {
+	if d.LatestOPNsenseVersion == "" {
+		return "OPNsense versions"
+	}
+	return "OPNsense · latest " + d.LatestOPNsenseVersion
+}
+
+// opnsenseItems is the histogram of the installed OPNsense releases: the
+// control plane's, newest first, which also counts devices silent past the
+// snapshot TTL; or, from a control plane that predates it, the rows' own
+// versions, most common first.
+func opnsenseItems(d *models.DashboardResponse) []countItem {
+	if len(d.OPNsenseVersions) > 0 {
+		out := make([]countItem, 0, len(d.OPNsenseVersions))
+		for _, v := range d.OPNsenseVersions {
+			out = append(out, countItem{label: v.Version, count: v.Count})
+		}
+		return out
+	}
 	counts := map[string]int{}
-	for _, r := range rows {
+	for _, r := range d.Compact {
 		if r.OPNsenseVersion != "" {
 			counts[r.OPNsenseVersion]++
 		}

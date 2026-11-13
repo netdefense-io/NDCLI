@@ -276,7 +276,7 @@ func TestAuthTokenRevokePromptStaysOffStdout(t *testing.T) {
 	stdout, stderr = runStreams(t, handler, "json", "n\n", func() error {
 		return runAuthTokenRevoke(cmd, []string{"ci"})
 	})
-	if stdout != "" || !strings.HasSuffix(stderr, "Aborted.\n") {
+	if stdout != "" || !strings.HasSuffix(stderr, "Cancelled\n") {
 		t.Errorf("an aborted revoke: stdout %q, stderr %q", stdout, stderr)
 	}
 }

@@ -237,7 +237,7 @@ type mcpSeen struct {
 func firmwareClient(t *testing.T, status int, body string) (*mcp.ClientSession, *mcpSeen) {
 	t.Helper()
 	seen := &mcpSeen{}
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen.hits++
 		seen.method, seen.path, seen.query, seen.body = r.Method, r.URL.EscapedPath(), r.URL.Query(), nil
 		if raw, _ := io.ReadAll(r.Body); len(raw) > 0 {
@@ -246,7 +246,15 @@ func firmwareClient(t *testing.T, status int, body string) (*mcp.ClientSession, 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
-	}))
+	})
+	return handlerClient(t, handler), seen
+}
+
+// handlerClient connects an MCP client to a server whose API is handler, with
+// a static token and acme as the organization.
+func handlerClient(t *testing.T, handler http.Handler) *mcp.ClientSession {
+	t.Helper()
+	api := httptest.NewServer(handler)
 	t.Cleanup(api.Close)
 
 	s := newStaticAuthTestServerWithAPI(t, api, "acme")
@@ -265,7 +273,7 @@ func firmwareClient(t *testing.T, status int, body string) (*mcp.ClientSession, 
 		t.Fatalf("client connect: %v", err)
 	}
 	t.Cleanup(func() { cs.Close() })
-	return cs, seen
+	return cs
 }
 
 func callTool(t *testing.T, cs *mcp.ClientSession, name, args string) ToolResponse {
@@ -983,7 +991,7 @@ func TestFirmwareMajorSwitchPreviewCarriesTheConsequences(t *testing.T) {
 		"Preview: Would turn major upgrades on for firmware track 'fast'.",
 		"Show the operator these consequences and ask for their go-ahead:",
 		"With major upgrades on, the track's update windows move its devices to the next OPNsense series. Each such upgrade:",
-		"takes the device offline for the length of the upgrade and reboots it three times;",
+		"takes the device offline for the length of the upgrade and reboots it three times, sometimes four;",
 		"has no automatic rollback;",
 		"a recovery path from the console only",
 		"after a manual rollback, needs the device rebound",
@@ -1071,7 +1079,7 @@ func TestFirmwareUnhaltOfAMajorUpgradeSaysWhatFollows(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Preview: Would lift the halt on firmware major upgrade to series '26.7'.",
-		"A track with auto_apply_major on that has approved it will then upgrade its eligible devices at its next window: offline for the length of the upgrade, three reboots, no automatic rollback.",
+		"A track with auto_apply_major on that has approved it will then upgrade its eligible devices at its next window: offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback.",
 		"Set confirm=true to execute.",
 	} {
 		if !strings.Contains(preview.Message, want) {
@@ -1177,7 +1185,7 @@ func TestFirmwareMajorToolsPreviewThenRun(t *testing.T) {
 		preview := callTool(t, cs, "ndcli.firmware.version_promote", `{"version":"26.7","kind":"major","track":"all"}`)
 		for _, want := range []string{
 			"A track with auto_apply_major on will then upgrade its eligible devices at its next window:",
-			"offline for the length of the upgrade, three reboots, no automatic rollback.",
+			"offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback.",
 		} {
 			if !strings.Contains(preview.Message, want) {
 				t.Errorf("preview message is missing %q:\n%s", want, preview.Message)
@@ -1369,7 +1377,7 @@ func TestFirmwareMajorToolDescriptions(t *testing.T) {
 	}
 
 	has("track_set",
-		"A major upgrade moves a device to the next OPNsense series (for example 26.1 to 26.7): it takes the device offline for the length of the upgrade, reboots it three times and has no automatic rollback.",
+		"A major upgrade moves a device to the next OPNsense series (for example 26.1 to 26.7): it takes the device offline for the length of the upgrade, reboots it three times, sometimes four, and has no automatic rollback.",
 		"Turning it on is the operator's explicit decision: the preview carries the consequences",
 		"call again with confirm=true only on their go-ahead",
 		"auto_apply_major=false cancels the major-upgrade steps queued for the track's devices and not yet dispatched (cancelled_tasks); an upgrade already running goes on.",
@@ -1418,7 +1426,7 @@ func TestFirmwareMajorToolDescriptions(t *testing.T) {
 	has("version_halt", "devices already upgrading are left alone")
 	has("version_unhalt",
 		"Lifting the halt on a major upgrade lets a track with auto_apply_major on that has approved the series upgrade every device that passes the gates at its next window.",
-		"A major upgrade moves a device to the next OPNsense series (for example 26.1 to 26.7): it takes the device offline for the length of the upgrade, reboots it three times and has no automatic rollback.")
+		"A major upgrade moves a device to the next OPNsense series (for example 26.1 to 26.7): it takes the device offline for the length of the upgrade, reboots it three times, sometimes four, and has no automatic rollback.")
 	has("failure_clear", "after a manual rollback of a device, clear the failures it caused once the device is rebound")
 
 	// The reason is for a release or a major upgrade.

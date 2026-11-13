@@ -143,8 +143,10 @@ that does not exist yet.
 Signature configuration is required when adding a repository. It is
 inferred from the flags you pass (--fingerprint implies fingerprints,
 --pubkey-file implies pubkey); an unverified repository must be
-requested explicitly with --signature-type none, and the organization
-must have unverified repositories enabled for the server to accept it.`,
+requested explicitly with --signature-type none, and the server accepts
+it, or a non-https --url, only when the organization allows unverified
+repositories ('ndcli org unverified-repos allow', a superuser's choice;
+'ndcli org describe' shows it).`,
 	Example: `  ndcli software add-repo baseline --name mimugmail \
     --url 'https://opn-repo.routerperformance.net/repo/${ABI}' \
     --priority 5 --fingerprint sha256:<64-hex>`,
@@ -215,8 +217,10 @@ func init() {
 	softwareCmd.AddCommand(softwareWaivePackageCmd)
 	softwareCmd.AddCommand(softwareAddRepoCmd)
 	softwareCmd.AddCommand(softwareRemoveRepoCmd)
+	addYesFlag(softwareRemoveRepoCmd)
 	softwareCmd.AddCommand(softwareAddExternalCmd)
 	softwareCmd.AddCommand(softwareRemoveExternalCmd)
+	addYesFlag(softwareRemoveExternalCmd)
 
 	softwareListCmd.Flags().String("name", "", "Filter by name (regex pattern)")
 	softwareListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction (name, created_at, updated_at)")
@@ -285,17 +289,19 @@ func runSoftwareCreate(cmd *cobra.Command, args []string) error {
 		emptyDefault = true
 	}
 
-	if _, err := svc.SoftwarePolicyCreate(context.Background(), org, service.SoftwarePolicyCreateOpts{
+	policy, err := svc.SoftwarePolicyCreate(context.Background(), org, service.SoftwarePolicyCreateOpts{
 		Name:    name,
 		Content: content,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Software policy created: %s", name)
+	result := &models.ActionResult{Resource: "software_policy", Name: name, Value: policy, Action: "created",
+		Message: fmt.Sprintf("✓ Software policy created: %s", name)}
 	if emptyDefault {
-		fmt.Printf("  Use 'ndcli software require-package %s <pkg>' or 'block-package %s <pkg>' to populate it.\n", name, name)
+		result.Notes = []string{fmt.Sprintf("  Use 'ndcli software require-package %s <pkg>' or 'block-package %s <pkg>' to populate it.", name, name)}
 	}
-	return nil
+	return formatter.FormatActionResult(result)
 }
 
 func runSoftwareDescribe(cmd *cobra.Command, args []string) error {
@@ -357,9 +363,10 @@ func runSoftwareUpdateContent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	color.Green("✓ Software policy content updated: %s", name)
-	renderPolicyWarnings(warnings)
-	return nil
+	result := &models.ActionResult{Resource: "software_policy", Name: name, Action: "updated",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Software policy content updated: %s", name)}
+	addPolicyWarnings(result, warnings)
+	return formatter.FormatActionResult(result)
 }
 
 func runSoftwareRename(cmd *cobra.Command, args []string) error {
@@ -370,8 +377,8 @@ func runSoftwareRename(cmd *cobra.Command, args []string) error {
 	if err := svc.SoftwarePolicyRename(context.Background(), org, name, newName); err != nil {
 		return err
 	}
-	color.Green("✓ Software policy renamed: %s -> %s", name, newName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "software_policy", Name: name, Action: "renamed",
+		Details: map[string]interface{}{"name": name, "new_name": newName}, Message: fmt.Sprintf("✓ Software policy renamed: %s -> %s", name, newName)})
 }
 
 func runSoftwareDelete(cmd *cobra.Command, args []string) error {
@@ -379,15 +386,14 @@ func runSoftwareDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete software policy '%s'?", name)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete software policy '%s'?", name)); !ok {
+		return err
 	}
 	if err := svc.SoftwarePolicyDelete(context.Background(), org, name); err != nil {
 		return err
 	}
-	color.Green("✓ Software policy deleted: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "software_policy", Name: name, Action: "deleted",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Software policy deleted: %s", name)})
 }
 
 func runSoftwareRequirePackage(cmd *cobra.Command, args []string) error {
@@ -437,60 +443,7 @@ func runSoftwareMutate(cmd *cobra.Command, args []string, op string) error {
 		// change landed when it didn't.
 		return err
 	}
-	renderPackageOutcomes(outcomes)
-	renderPolicyWarnings(warnings)
-	return nil
-}
-
-// renderPackageOutcomes prints one line per outcome plus a trailing
-// summary. Output is deliberately stable so it's easy to scan in a
-// transcript and to grep in a script.
-func renderPackageOutcomes(outcomes []models.PackageActionOutcome) {
-	changed, moved, noop := 0, 0, 0
-	for _, o := range outcomes {
-		switch o.Action {
-		case "required":
-			color.Green("✓ Required: %s", o.Package)
-			changed++
-		case "blocked":
-			color.Green("✓ Blocked: %s", o.Package)
-			changed++
-		case "waived":
-			color.Green("✓ Waived: %s (was: %s)", o.Package, o.From)
-			changed++
-		case "moved":
-			// Marshal "moved" as the new state in the verb, with a
-			// trailing arrow to the prior state. Reads naturally.
-			//   ↻ Required: bash (was: blocked)
-			//   ↻ Blocked: nano (was: required)
-			newState := "Required"
-			if o.From == models.PackageStateRequired {
-				newState = "Blocked"
-			}
-			color.Yellow("↻ %s: %s (was: %s)", newState, o.Package, o.From)
-			moved++
-		case "no-change":
-			if o.From != "" {
-				color.Cyan("ℹ %s: already %s (no change)", o.Package, o.From)
-			} else {
-				color.Cyan("ℹ %s: not specified (no change)", o.Package)
-			}
-			noop++
-		}
-	}
-	total := changed + moved + noop
-	if total == 0 {
-		return
-	}
-	if changed+moved == 0 {
-		fmt.Println("No changes.")
-		return
-	}
-	fmt.Printf("Applied %d change(s)", changed+moved)
-	if noop > 0 {
-		fmt.Printf(" (%d no-op)", noop)
-	}
-	fmt.Println(".")
+	return formatter.FormatPackageEdit(&models.PackageEditResult{Policy: policy, Op: op, Outcomes: outcomes, Warnings: warnings})
 }
 
 func runSoftwareAddRepo(cmd *cobra.Command, args []string) error {
@@ -527,9 +480,7 @@ func runSoftwareAddRepo(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	renderEntryOutcome(outcome, "Repository")
-	renderPolicyWarnings(warnings)
-	return nil
+	return formatter.FormatEntryEdit(&models.EntryEditResult{Policy: policy, Kind: "repository", Outcome: outcome, Warnings: warnings})
 }
 
 // buildRepositorySignature turns the signature flags into the wire
@@ -593,13 +544,14 @@ func runSoftwareRemoveRepo(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove repository '%s' from software policy '%s'?", args[1], args[0])); !ok {
+		return err
+	}
 	outcome, warnings, err := svc.SoftwarePolicyRemoveRepository(context.Background(), org, args[0], args[1])
 	if err != nil {
 		return err
 	}
-	renderEntryOutcome(outcome, "Repository")
-	renderPolicyWarnings(warnings)
-	return nil
+	return formatter.FormatEntryEdit(&models.EntryEditResult{Policy: args[0], Kind: "repository", Outcome: outcome, Warnings: warnings})
 }
 
 func runSoftwareAddExternal(cmd *cobra.Command, args []string) error {
@@ -625,51 +577,45 @@ func runSoftwareAddExternal(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	renderEntryOutcome(outcome, "External package")
-	renderPolicyWarnings(warnings)
-	return nil
+	return formatter.FormatEntryEdit(&models.EntryEditResult{Policy: args[0], Kind: "external", Outcome: outcome, Warnings: warnings})
 }
 
 func runSoftwareRemoveExternal(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove external package '%s' from software policy '%s'?", args[1], args[0])); !ok {
+		return err
+	}
 	outcome, warnings, err := svc.SoftwarePolicyRemoveExternal(context.Background(), org, args[0], args[1])
 	if err != nil {
 		return err
 	}
-	renderEntryOutcome(outcome, "External package")
-	renderPolicyWarnings(warnings)
-	return nil
+	return formatter.FormatEntryEdit(&models.EntryEditResult{Policy: args[0], Kind: "external", Outcome: outcome, Warnings: warnings})
 }
 
-// renderEntryOutcome prints one line for a repository / external-package
-// mutation, in the same shape renderPackageOutcomes uses.
-func renderEntryOutcome(o models.EntryActionOutcome, kind string) {
-	switch o.Action {
-	case "added":
-		color.Green("✓ %s added: %s", kind, o.Name)
-	case "updated":
-		color.Green("✓ %s updated: %s", kind, o.Name)
-	case "removed":
-		color.Green("✓ %s removed: %s", kind, o.Name)
-	default:
-		color.Cyan("ℹ %s %s: no change", kind, o.Name)
+// addPolicyWarnings gives a result the server's conflict notices: their lines
+// (output.PolicyWarningLines), and a "warnings" key for -f json, as the MCP
+// tools return them.
+func addPolicyWarnings(r *models.ActionResult, warnings []string) {
+	if len(warnings) == 0 {
+		return
 	}
+	if r.Details == nil {
+		r.Details = map[string]interface{}{}
+	}
+	r.Details["warnings"] = warnings
+	r.Warnings = append(r.Warnings, output.PolicyWarningLines(warnings)...)
 }
 
-// renderPolicyWarnings surfaces the server's advisory conflict notices.
-// The write already succeeded — these say that this policy and another
-// one landing on the same device disagree, which will hard-fail at sync
-// time. Yellow, not red, and never an error return: the operator asked
-// for a write and got one.
+// renderPolicyWarnings prints the conflict notices after software edit, which
+// opens an editor and prints its own lines.
 func renderPolicyWarnings(warnings []string) {
 	if len(warnings) == 0 {
 		return
 	}
 	fmt.Println()
-	color.Yellow("⚠ %d conflict warning(s) — the change was saved, but sync will fail until they are resolved:", len(warnings))
-	for _, w := range warnings {
-		color.Yellow("  • %s", w)
+	for _, line := range output.PolicyWarningLines(warnings) {
+		color.Yellow("%s", line)
 	}
 }

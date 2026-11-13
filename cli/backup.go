@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"syscall"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -93,6 +92,7 @@ func init() {
 
 	backupEncryptionKeyCmd.AddCommand(backupEncryptionKeySetCmd)
 	backupEncryptionKeyCmd.AddCommand(backupEncryptionKeyRemoveCmd)
+	addYesFlag(backupEncryptionKeyRemoveCmd)
 
 	backupCmd.AddCommand(backupConfigCmd)
 	backupCmd.AddCommand(backupStatusCmd)
@@ -108,6 +108,7 @@ func init() {
 	backupConfigSetCmd.Flags().String("s3-folder", "", "S3 folder path (prefix) within the bucket")
 	backupConfigSetCmd.Flags().String("schedule", "", "Attach to a named Schedule (use 'ndcli schedule create' first). Pass an empty string or --no-schedule to detach.")
 	backupConfigSetCmd.Flags().Bool("no-schedule", false, "Detach the backup from any attached schedule")
+	backupConfigSetCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt of a detach")
 	backupConfigSetCmd.Flags().String("encryption-key", "", "Encryption key (prompts if not provided)")
 	backupConfigSetCmd.MarkFlagsMutuallyExclusive("schedule", "no-schedule")
 
@@ -125,9 +126,9 @@ func warnPlaintextSecretFlag(w io.Writer, flagName string) {
 
 // promptSecret reads a single line of secret input from the terminal.
 func promptSecret(prompt string) (string, error) {
-	fmt.Print(prompt)
-	bytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println()
+	fmt.Fprint(os.Stderr, prompt)
+	bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", err
 	}
@@ -172,6 +173,7 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
+	var result *models.ActionResult
 
 	// ── S3 / key config (create or update) ───────────────────────────────────
 
@@ -183,7 +185,7 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 
 	if s3FlagsSet || !scheduleChanged {
 		// Decide create vs update by probing for an existing config.
-		_, err := svc.BackupConfigGet(ctx, org)
+		existing, err := svc.BackupConfigGet(ctx, org)
 		isCreate := false
 		if err != nil {
 			var apiErr *api.APIError
@@ -212,17 +214,18 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 				}
 				encryptionKey = k
 			}
-			if _, err := svc.BackupConfigCreate(ctx, org, service.BackupConfigCreateOpts{
+			cfg, err := svc.BackupConfigCreate(ctx, org, service.BackupConfigCreateOpts{
 				S3Endpoint:    s3Endpoint,
 				S3Bucket:      s3Bucket,
 				S3KeyID:       s3KeyID,
 				S3AccessKey:   s3AccessKey,
 				S3Folder:      s3Folder,
 				EncryptionKey: encryptionKey,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
-			color.Green("Backup configuration created")
+			result = &models.ActionResult{Resource: "config", Name: org, Value: cfg, Action: "created", Message: "Backup configuration created"}
 		} else {
 			opts := service.BackupConfigUpdateOpts{
 				S3Endpoint:    s3Endpoint,
@@ -245,11 +248,17 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 				opts.S3AccessKey == "" && opts.S3Folder == "" && opts.EncryptionKey == "" {
 				// No S3 fields changed; only schedule is being modified — skip
 				// the update call entirely.
+				if !scheduleChanged {
+					// Nothing to change: the human formats print nothing, as
+					// they always have, and -f json still gets its document.
+					return formatter.FormatActionResult(&models.ActionResult{Resource: "config", Name: org, Value: existing, Action: "unchanged"})
+				}
 			} else {
-				if _, err := svc.BackupConfigUpdate(ctx, org, opts); err != nil {
+				cfg, err := svc.BackupConfigUpdate(ctx, org, opts)
+				if err != nil {
 					return err
 				}
-				color.Green("Backup configuration updated")
+				result = &models.ActionResult{Resource: "config", Name: org, Value: cfg, Action: "updated", Message: "Backup configuration updated"}
 			}
 		}
 	}
@@ -257,45 +266,74 @@ func runBackupConfigSet(cmd *cobra.Command, args []string) error {
 	// ── Schedule attachment / detachment ──────────────────────────────────────
 
 	if !scheduleChanged {
-		return nil
+		return formatter.FormatActionResult(result)
+	}
+
+	// A create or update that already happened is reported even when the
+	// schedule step is cancelled or fails.
+	reportFirst := func(err error) error {
+		if result != nil {
+			if ferr := formatter.FormatActionResult(result); ferr != nil {
+				return ferr
+			}
+		}
+		return err
 	}
 
 	// When detaching, warn the user that backups will stop running.
 	if targetSchedule == "" {
-		color.Yellow("⚠  Detaching the schedule stops scheduled backups.")
-		color.Yellow("   The backup config stays configured but won't run until re-attached.")
-		if !helpers.Confirm("Detach backup from its schedule?") {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		warn := color.New(color.FgYellow)
+		_, _ = warn.Fprintln(os.Stderr, "⚠  Detaching the schedule stops scheduled backups.")
+		_, _ = warn.Fprintln(os.Stderr, "   The backup config stays configured but won't run until re-attached.")
+		if ok, err := confirmUnlessYes(cmd, "Detach backup from its schedule?"); !ok {
+			return reportFirst(err)
 		}
 	}
 
-	result, err := svc.BackupConfigSetSchedule(ctx, org, targetSchedule)
+	sched, err := svc.BackupConfigSetSchedule(ctx, org, targetSchedule)
 	if err != nil {
-		return err
+		return reportFirst(err)
 	}
+	return formatter.FormatActionResult(withScheduleResult(result, sched))
+}
 
-	if result.Attached != nil {
-		a := result.Attached
-		color.Green("Backup attached to schedule %q — spec code: %s", a.ScheduleName, a.Code)
+// withScheduleResult adds the schedule step to config set's result. Alone it
+// is ndcli.backup.config_set_schedule's result; after a create or update it
+// goes under "schedule", and its line under the config's.
+func withScheduleResult(r *models.ActionResult, sched *service.BackupScheduleResult) *models.ActionResult {
+	step := &models.ActionResult{Resource: "organization_name", Action: "detached"}
+	if a := sched.Attached; a != nil {
+		step.Resource, step.Name, step.Action = "schedule_name", a.ScheduleName, "attached"
+		step.Details = map[string]interface{}{"code": a.Code, "kind": a.Kind, "enabled": a.Enabled, "created_by": a.CreatedBy, "created_at": a.CreatedAt}
+		step.Message = fmt.Sprintf("Backup attached to schedule %q — spec code: %s", a.ScheduleName, a.Code)
 	} else {
-		color.Green("Backup detached from schedule (org: %s)", result.Detached.OrganizationName)
+		d := sched.Detached
+		step.Name = d.OrganizationName
+		step.Details = map[string]interface{}{"detached": d.Detached}
+		step.Message = fmt.Sprintf("Backup detached from schedule (org: %s)", d.OrganizationName)
 	}
-	return nil
+	if r == nil {
+		return step
+	}
+	if r.Details == nil {
+		r.Details = map[string]interface{}{}
+	}
+	r.Details["schedule"] = step
+	r.Message += "\n" + step.Message
+	return r
 }
 
 func runBackupConfigDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-	if !confirmUnlessYes(cmd, "Delete backup configuration? This will also disable backup for all devices.") {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, "Delete backup configuration? This will also disable backup for all devices."); !ok {
+		return err
 	}
 	if err := svc.BackupConfigDelete(context.Background(), org); err != nil {
 		return err
 	}
-	color.Green("Backup configuration deleted")
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "deleted",
+		Message: "Backup configuration deleted"})
 }
 
 func runBackupConfigEnable(cmd *cobra.Command, args []string) error {
@@ -304,8 +342,8 @@ func runBackupConfigEnable(cmd *cobra.Command, args []string) error {
 	if err := svc.BackupConfigSetStatus(context.Background(), org, true); err != nil {
 		return err
 	}
-	color.Green("Backup configuration enabled")
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "enabled",
+		Details: map[string]interface{}{"status": "ENABLED"}, Message: "Backup configuration enabled"})
 }
 
 func runBackupConfigDisable(cmd *cobra.Command, args []string) error {
@@ -314,8 +352,8 @@ func runBackupConfigDisable(cmd *cobra.Command, args []string) error {
 	if err := svc.BackupConfigSetStatus(context.Background(), org, false); err != nil {
 		return err
 	}
-	color.Green("Backup configuration disabled")
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "disabled",
+		Details: map[string]interface{}{"status": "DISABLED"}, Message: "Backup configuration disabled"})
 }
 
 func runBackupConfigTest(cmd *cobra.Command, args []string) error {
@@ -365,8 +403,8 @@ func runBackupEnable(cmd *cobra.Command, args []string) error {
 	if err := svc.BackupSetEnabled(context.Background(), org, args[0], true); err != nil {
 		return err
 	}
-	color.Green("Backup enabled for device: %s", args[0])
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: args[0], Action: "enabled",
+		Details: map[string]interface{}{"enabled": true}, Message: fmt.Sprintf("Backup enabled for device: %s", args[0])})
 }
 
 func runBackupDisable(cmd *cobra.Command, args []string) error {
@@ -375,8 +413,8 @@ func runBackupDisable(cmd *cobra.Command, args []string) error {
 	if err := svc.BackupSetEnabled(context.Background(), org, args[0], false); err != nil {
 		return err
 	}
-	color.Green("Backup disabled for device: %s", args[0])
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: args[0], Action: "disabled",
+		Details: map[string]interface{}{"enabled": false}, Message: fmt.Sprintf("Backup disabled for device: %s", args[0])})
 }
 
 func runBackupEncryptionKeySet(cmd *cobra.Command, args []string) error {
@@ -391,17 +429,20 @@ func runBackupEncryptionKeySet(cmd *cobra.Command, args []string) error {
 	if err := svc.BackupEncryptionKeySet(context.Background(), org, deviceName, key); err != nil {
 		return err
 	}
-	color.Green("Encryption key set for device: %s", deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: deviceName, Action: "encryption_key_set",
+		Message: fmt.Sprintf("Encryption key set for device: %s", deviceName)})
 }
 
 func runBackupEncryptionKeyRemove(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	deviceName := args[0]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove the encryption key override of device '%s'? Its backups will use the organization default.", deviceName)); !ok {
+		return err
+	}
 	if err := svc.BackupEncryptionKeyRemove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-	color.Green("Encryption key override removed for device: %s (will use organization default)", deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: deviceName, Action: "encryption_key_removed",
+		Message: fmt.Sprintf("Encryption key override removed for device: %s (will use organization default)", deviceName)})
 }

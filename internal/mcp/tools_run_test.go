@@ -640,8 +640,8 @@ func TestFirmwareUpgradeRebootParameter(t *testing.T) {
 }
 
 // TestFirmwareUpgradeCheckFirstParameter: from ndagent 1.27.0 a major upgrade
-// runs its own firmware check whatever check_first says, and it reboots up to
-// three times. check_first was described as skipping the check for either mode.
+// runs its own firmware check whatever check_first says, and it reboots three
+// times, sometimes four. check_first was described as skipping the check for either mode.
 func TestFirmwareUpgradeCheckFirstParameter(t *testing.T) {
 	schema := registeredToolSchema(t, "ndcli.run.firmware_upgrade")
 
@@ -658,7 +658,7 @@ func TestFirmwareUpgradeCheckFirstParameter(t *testing.T) {
 	}
 
 	if desc := registeredToolDescription(t, "ndcli.run.firmware_upgrade"); !strings.Contains(desc,
-		"mode=major upgrades the full series and always reboots, up to three times.") {
-		t.Errorf("the description does not say a major reboots up to three times:\n%s", desc)
+		"mode=major upgrades the full series and always reboots, three times, sometimes four.") {
+		t.Errorf("the description does not say a major reboots three times, sometimes four:\n%s", desc)
 	}
 }

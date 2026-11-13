@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
@@ -152,22 +149,23 @@ func runNetworkLinkCreate(cmd *cobra.Command, args []string) error {
 		opts.GeneratePSK = &v
 	}
 
-	if _, err := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, opts); err != nil {
+	link, err := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, opts)
+	if err != nil {
 		return err
 	}
 
 	if source == "implicit" {
-		color.Green("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType))
+		result := linkResult(vpnName, deviceA, deviceB, link, "created", true,
+			fmt.Sprintf("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType)))
 		if cmd.Flags().Changed("enabled") {
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			if !enabled {
-				fmt.Println("  This override disables the automatic connection between these devices")
+			if enabled, _ := cmd.Flags().GetBool("enabled"); !enabled {
+				result.Notes = []string{linkOverrideDisablesNote}
 			}
 		}
-	} else {
-		color.Green("✓ Link created: %s ↔ %s in %s", deviceA, deviceB, vpnName)
+		return formatter.FormatActionResult(result)
 	}
-	return nil
+	return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, link, "created", false,
+		fmt.Sprintf("✓ Link created: %s ↔ %s in %s", deviceA, deviceB, vpnName)))
 }
 
 func runNetworkLinkDescribe(cmd *cobra.Command, args []string) error {
@@ -260,7 +258,7 @@ func runNetworkLinkUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	_, err := svc.NetworkLinkUpdate(ctx, org, vpnName, deviceA, deviceB, opts)
+	link, err := svc.NetworkLinkUpdate(ctx, org, vpnName, deviceA, deviceB, opts)
 	if err != nil {
 		// 404 — auto-create override for implicit pairs.
 		var apiErr *api.APIError
@@ -275,14 +273,16 @@ func runNetworkLinkUpdate(cmd *cobra.Command, args []string) error {
 					if opts.RegeneratePSK != nil {
 						createOpts.GeneratePSK = opts.RegeneratePSK
 					}
-					if _, cErr := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, createOpts); cErr != nil {
+					created, cErr := svc.NetworkLinkCreate(ctx, org, vpnName, deviceA, deviceB, createOpts)
+					if cErr != nil {
 						return cErr
 					}
-					color.Green("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType))
+					result := linkResult(vpnName, deviceA, deviceB, created, "created", true,
+						fmt.Sprintf("✓ Link override created: %s ↔ %s in %s (%s)", deviceA, deviceB, vpnName, output.VpnPairTypeDisplay(pairType)))
 					if opts.Enabled != nil && !*opts.Enabled {
-						fmt.Println("  This override disables the automatic connection between these devices")
+						result.Notes = []string{linkOverrideDisablesNote}
 					}
-					return nil
+					return formatter.FormatActionResult(result)
 				}
 			}
 		}
@@ -294,20 +294,39 @@ func runNetworkLinkUpdate(cmd *cobra.Command, args []string) error {
 	memberB, errB := svc.NetworkMemberGet(ctx, org, vpnName, deviceB)
 	network, errN := svc.NetworkGet(ctx, org, vpnName)
 	if errA != nil || errB != nil || errN != nil {
-		color.Green("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
-		return nil
+		return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, link, "updated", false,
+			fmt.Sprintf("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)))
 	}
 	_, source := vpn.ClassifyPair(memberA.Role, memberB.Role, network.AutoConnectHubs)
 	if source == "implicit" {
 		if opts.Enabled != nil && !*opts.Enabled {
-			color.Green("✓ Link override updated: %s ↔ %s in %s (automatic connection disabled)", deviceA, deviceB, vpnName)
-			return nil
+			return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, link, "updated", true,
+				fmt.Sprintf("✓ Link override updated: %s ↔ %s in %s (automatic connection disabled)", deviceA, deviceB, vpnName)))
 		}
-		color.Green("✓ Link override updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
-	} else {
-		color.Green("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)
+		return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, link, "updated", true,
+			fmt.Sprintf("✓ Link override updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)))
 	}
-	return nil
+	return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, link, "updated", false,
+		fmt.Sprintf("✓ Link updated: %s ↔ %s in %s", deviceA, deviceB, vpnName)))
+}
+
+// linkOverrideDisablesNote follows an override created with --enabled=false.
+const linkOverrideDisablesNote = "  This override disables the automatic connection between these devices"
+
+// linkResult is a link command's result, shaped as ndcli.network.link_*: the
+// link the server returned under "link" (a delete has none and names the
+// network), the two devices, and whether the link overrides an automatic
+// connection.
+func linkResult(vpnName, deviceA, deviceB string, link *models.VpnLink, action string, override bool, message string) *models.ActionResult {
+	r := &models.ActionResult{Resource: "link", Name: deviceA + " ↔ " + deviceB, Action: action,
+		Details: map[string]interface{}{"network": vpnName, "device_a": deviceA, "device_b": deviceB, "override": override}, Message: message}
+	if link != nil {
+		r.Value = link
+	} else {
+		r.Resource, r.Name = "network", vpnName
+		delete(r.Details, "network")
+	}
+	return r
 }
 
 func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
@@ -344,9 +363,8 @@ func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
 			prompt = fmt.Sprintf("Delete link '%s ↔ %s' in '%s'? This will disconnect these devices.",
 				deviceA, deviceB, vpnName)
 		}
-		if !helpers.Confirm(prompt) {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+			return err
 		}
 	}
 
@@ -354,9 +372,9 @@ func runNetworkLinkDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if source == "implicit" {
-		color.Green("✓ Link override removed: %s ↔ %s in %s (automatic connection remains active)", deviceA, deviceB, vpnName)
-	} else {
-		color.Green("✓ Link deleted: %s ↔ %s in %s (devices disconnected)", deviceA, deviceB, vpnName)
+		return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, nil, "deleted", true,
+			fmt.Sprintf("✓ Link override removed: %s ↔ %s in %s (automatic connection remains active)", deviceA, deviceB, vpnName)))
 	}
-	return nil
+	return formatter.FormatActionResult(linkResult(vpnName, deviceA, deviceB, nil, "deleted", false,
+		fmt.Sprintf("✓ Link deleted: %s ↔ %s in %s (devices disconnected)", deviceA, deviceB, vpnName)))
 }

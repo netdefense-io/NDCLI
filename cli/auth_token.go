@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,7 +64,7 @@ func init() {
 	authTokenCreateCmd.MarkFlagRequired("scope")
 
 	// Revoke flags
-	authTokenRevokeCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	addYesFlag(authTokenRevokeCmd)
 }
 
 func runAuthTokenCreate(cmd *cobra.Command, args []string) error {
@@ -118,13 +116,8 @@ func runAuthTokenRevoke(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 	if !skipConfirm {
-		fmt.Fprintf(os.Stderr, "Revoke token %q? This cannot be undone. [y/N]: ", name)
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			fmt.Fprintln(os.Stderr, "Aborted.")
-			return nil
+		if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Revoke token %q? This cannot be undone.", name)); !ok {
+			return err
 		}
 	}
 

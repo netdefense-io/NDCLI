@@ -31,6 +31,20 @@ type orgCreateInput struct {
 	Description string `json:"description,omitempty"`
 }
 
+type orgSetUnverifiedReposInput struct {
+	Organization string `json:"organization,omitempty"`
+	Allow        *bool  `json:"allow"`
+	Confirm      bool   `json:"confirm"`
+}
+
+// unverifiedReposDescription is what ndcli.org.set_unverified_repos does, who
+// may call it, and what follows each way.
+const unverifiedReposDescription = "Allow or forbid the organization's software policies to declare package repositories " +
+	"with signature type none or a non-https URL (allow_unverified_repos). Allowing it lets a policy install anything " +
+	"on every device it reaches; forbidding it makes devices stop installing from such repositories at their next sync. " +
+	"Only a superuser of the organization may change it, from an interactive login: a personal access token is refused. " +
+	"Returns a preview unless confirm=true. ndcli.org.describe shows the current value."
+
 type orgSetDefaultOUInput struct {
 	Organization string `json:"organization,omitempty"`
 	OU           string `json:"ou"`
@@ -94,8 +108,10 @@ func (s *Server) registerOrgTools() {
 	}, s.handleOrgList)
 
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.org.describe",
-		Description: "Get full details for a single organization, including device/member counts and the agent token.",
+		Name: "ndcli.org.describe",
+		Description: "Get full details for a single organization, including device/member counts and the agent token. " +
+			"allow_unverified_repos says whether its software policies may declare unsigned or non-https repositories " +
+			"(ndcli.org.set_unverified_repos); null when it could not be read.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -160,6 +176,20 @@ func (s *Server) registerOrgTools() {
 			"required": []string{"ou"},
 		},
 	}, s.handleOrgSetDefaultOU)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name:        "ndcli.org.set_unverified_repos",
+		Description: unverifiedReposDescription,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"allow":        boolProperty("true to allow unsigned or non-https repositories, false to forbid them"),
+				"confirm":      confirmProperty(),
+			},
+			"required": []string{"allow"},
+		},
+	}, s.handleOrgSetUnverifiedRepos)
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.org.invite_send",
@@ -324,13 +354,56 @@ func (s *Server) handleOrgDescribe(ctx context.Context, req *mcp.CallToolRequest
 	apiCtx, cancel := contextWithTimeout()
 	defer cancel()
 
-	org, err := s.svc.OrgGet(apiCtx, input.Name)
+	org, err := s.svc.OrgDescribe(apiCtx, input.Name)
 	if err != nil {
 		return s.errorResult(err)
 	}
+	full := orgFull(org)
+	full["allow_unverified_repos"] = org.AllowUnverifiedRepos
 	return s.successResult(map[string]interface{}{
-		"organization": orgFull(org),
+		"organization": full,
 	}, "")
+}
+
+func (s *Server) handleOrgSetUnverifiedRepos(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[orgSetUnverifiedReposInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if input.Allow == nil {
+		return s.errorResult(&service.Error{Code: service.CodeInvalidInput, Message: "allow is required: true to allow unverified repositories, false to forbid them"})
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	allow := *input.Allow
+	verb, action := "forbid", "forbidden"
+	note := "Devices then stop installing from unsigned or non-https repositories at their next sync."
+	if allow {
+		verb, action = "allow", "allowed"
+		note = "Its software policies may then install from unsigned or non-https repositories on every device they reach."
+	}
+	if !input.Confirm {
+		return s.previewResultWithNote(verb+" unverified repositories in", org, note,
+			map[string]interface{}{"allow_unverified_repos": allow})
+	}
+
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+
+	if err := s.svc.OrgSetUnverifiedRepos(apiCtx, org, allow); err != nil {
+		return s.errorResult(err)
+	}
+	return s.successResult(map[string]interface{}{
+		"organization":           org,
+		"allow_unverified_repos": allow,
+		"action":                 action,
+	}, fmt.Sprintf("Unverified repositories %s in '%s'", action, org))
 }
 
 func (s *Server) handleOrgCreate(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -354,7 +427,7 @@ func (s *Server) handleOrgCreate(ctx context.Context, req *mcp.CallToolRequest) 
 		"organization":  orgFull(org),
 		"action":        "created",
 		"agent_token":   org.Token,
-		"token_warning": "Single-issue agent token — surface to operator once and do not log.",
+		"token_warning": models.AgentTokenWarning,
 	}, fmt.Sprintf("Organization '%s' created", input.Name))
 }
 
@@ -447,6 +520,10 @@ func (s *Server) handleOrgInviteSend(ctx context.Context, req *mcp.CallToolReque
 	role := input.Role
 	if role == "" {
 		role = "RO"
+	}
+	// Report the role the service sends, not the spelling given.
+	if canonical, err := service.NormalizeRole(role); err == nil {
+		role = canonical
 	}
 
 	apiCtx, cancel := contextWithTimeout()

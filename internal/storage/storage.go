@@ -420,11 +420,6 @@ func MigrateToKeyring() (string, error) {
 	return credentialKey, nil
 }
 
-// GetFileStoragePath returns the path to the file storage
-func GetFileStoragePath() string {
-	return config.GetAuthFilePath()
-}
-
 // DeleteFileStorage removes the file storage file
 func DeleteFileStorage() error {
 	fs := NewFileStorage("")

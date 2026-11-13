@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -14,66 +13,84 @@ import (
 // accept a --force / --yes flag.
 //
 //   - force == true  → proceed immediately (scripting / CI path).
-//   - stdin is a TTY → show the prompt from Confirm; proceed only on y/yes.
+//   - stdin is a TTY → show the prompt from ConfirmAnswer; proceed only on y/yes.
 //   - stdin is NOT a TTY and force is false → return an error asking for
 //     --force so the command never hangs waiting on piped input.
 func ConfirmOrForce(message string, force bool) (bool, error) {
 	if force {
 		return true, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !StdinIsTerminal() {
 		return false, fmt.Errorf("stdin is not a terminal — pass --force to confirm non-interactively")
 	}
-	return Confirm(message), nil
+	yes, _ := ConfirmAnswer(message)
+	return yes, nil
 }
 
-// Confirm prompts the user for a yes/no confirmation. The prompt goes to
-// stderr, so stdout carries only the command's output.
-func Confirm(message string) bool {
-	reader := bufio.NewReader(os.Stdin)
-
-	color.New(color.FgYellow).Fprintf(os.Stderr, "%s [y/N]: ", message)
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false
-	}
-
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
+// ConfirmAnswer is AskYesNo with no for its default: [y/N].
+func ConfirmAnswer(message string) (yes, answered bool) {
+	return AskYesNo(message, false)
 }
 
-// Prompt asks the user for input
-func Prompt(message string) string {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Printf("%s: ", message)
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return ""
+// AskYesNo asks a yes/no question on stderr, so stdout carries only the
+// command's output, and reads the answer from stdin. An empty line is an
+// answer, the default: yes when defaultYes ([Y/n]), else no ([y/N]).
+// answered is false, and yes with it, when stdin ended before a line was
+// typed: an empty pipe or file, or Ctrl-D at a terminal.
+func AskYesNo(message string, defaultYes bool) (yes, answered bool) {
+	choices := "[y/N]"
+	if defaultYes {
+		choices = "[Y/n]"
 	}
-
-	return strings.TrimSpace(response)
+	_, _ = color.New(color.FgYellow).Fprintf(os.Stderr, "%s %s: ", message, choices)
+	response, answered := ReadAnswer()
+	if !answered {
+		return false, false
+	}
+	switch strings.ToLower(response) {
+	case "y", "yes":
+		return true, true
+	case "":
+		return defaultYes, true
+	}
+	return false, true
 }
 
-// PromptDefault asks the user for input with a default value
-func PromptDefault(message, defaultValue string) string {
-	reader := bufio.NewReader(os.Stdin)
+// maxAnswerBytes bounds what ReadAnswer keeps of a line; the rest of the line
+// is read and dropped.
+const maxAnswerBytes = 1024
 
-	fmt.Printf("%s [%s]: ", message, defaultValue)
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return defaultValue
+// ReadAnswer reads one line of stdin, trimmed. answered is false when stdin
+// ended before anything was read. It reads a byte at a time, so a command
+// that asks twice finds its second answer on the next line of a pipe: a
+// buffered reader would have taken it with the first.
+func ReadAnswer() (answer string, answered bool) {
+	var line []byte
+	b := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(b)
+		if n == 0 && err == nil {
+			break
+		}
+		if n == 1 {
+			answered = true
+			if b[0] == '\n' {
+				break
+			}
+			if len(line) < maxAnswerBytes {
+				line = append(line, b[0])
+			}
+		}
+		if err != nil {
+			break
+		}
 	}
+	return strings.TrimSpace(string(line)), answered
+}
 
-	response = strings.TrimSpace(response)
-	if response == "" {
-		return defaultValue
-	}
-
-	return response
+// StdinIsTerminal reports whether stdin is a terminal.
+func StdinIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 // ValidateInput validates input length

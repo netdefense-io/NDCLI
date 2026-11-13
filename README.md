@@ -8,7 +8,7 @@
 
 ## Give an AI agent your firewall fleet
 
-The second binary in this repo, `netdefense-mcp`, exposes **179 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, firmware tracks, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
+The second binary in this repo, `netdefense-mcp`, exposes **180 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, firmware tracks, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
 
 **Start with the sharp edge, because it's the one that matters.** `ndcli.device.console_exec` runs arbitrary shell commands on a device, with administrative privilege, and takes no confirmation flag. It is gated on the caller's role — a read-only token is refused before a stream ever opens — but an agent holding a write-scoped token has a shell. Scope the token you hand an agent accordingly, and if you want a hard limit that no token can cross, set the device-side remote-access policy on the firewall itself (Services → NetDefense → Settings), which caps what any session may be regardless of who asks.
 
@@ -32,6 +32,8 @@ Point any MCP-compatible agent at the `netdefense-mcp` binary (config shape vari
   }
 }
 ```
+
+The server uses ndcli's default config. To point it at another one, add `"args": ["--conf", "/path/to/config.yaml"]` with an absolute path; the file must exist. `netdefense-mcp --help` lists its flags and exits.
 
 Full tool list and setup: https://netdefense.io/docs/mcp/
 
@@ -68,16 +70,18 @@ make build build-mcp
 
 ```bash
 ndcli auth login                              # interactive login, opens a browser
-ndcli config set organization acme-corp
+ndcli config set org acme-corp
 
 ndcli device list                             # see the fleet
 ndcli device approve edge-fw-03               # bring a newly-registered device under management
 ndcli run ping --device edge-fw-03 --host 1.1.1.1
-ndcli sync apply --ou branch-offices base-policy
+ndcli sync apply --ou branch-offices
 ndcli device health edge-fw-03 -f detailed
 ```
 
 Every command supports `-f table|simple|detailed|json`. Run `ndcli --help` for the full surface.
+
+Exit status: 0 on success, 1 when a command fails, and 3 when a bulk command (`device approve-all`, `sync apply`) succeeded for some devices and failed for others.
 
 ## Security model
 

@@ -430,15 +430,19 @@ func runSnippetCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--content, --file or --example is required")
 	}
 
-	if _, err := svc.SnippetCreate(context.Background(), org, service.SnippetCreateOpts{
+	snippet, err := svc.SnippetCreate(context.Background(), org, service.SnippetCreateOpts{
 		Name:     name,
 		Type:     snippetType,
 		Content:  content,
 		Priority: priority,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Snippet created: %s", name)
+	if err := formatter.FormatActionResult(&models.ActionResult{Resource: "snippet", Name: name, Value: snippet, Action: "created",
+		Message: fmt.Sprintf("✓ Snippet created: %s", name)}); err != nil {
+		return err
+	}
 	if needs != "" {
 		fmt.Fprintln(os.Stderr, needs)
 	}
@@ -527,8 +531,8 @@ func runSnippetUpdateContent(cmd *cobra.Command, args []string) error {
 	if err := svc.SnippetUpdateContent(context.Background(), org, name, string(data)); err != nil {
 		return err
 	}
-	color.Green("✓ Snippet content updated: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "snippet", Name: name, Action: "updated",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Snippet content updated: %s", name)})
 }
 
 func runSnippetRename(cmd *cobra.Command, args []string) error {
@@ -540,8 +544,8 @@ func runSnippetRename(cmd *cobra.Command, args []string) error {
 	if err := svc.SnippetRename(context.Background(), org, name, newName); err != nil {
 		return err
 	}
-	color.Green("✓ Snippet renamed: %s -> %s", name, newName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "snippet", Name: name, Action: "renamed",
+		Details: map[string]interface{}{"name": name, "new_name": newName}, Message: fmt.Sprintf("✓ Snippet renamed: %s -> %s", name, newName)})
 }
 
 func runSnippetSetPriority(cmd *cobra.Command, args []string) error {
@@ -557,8 +561,8 @@ func runSnippetSetPriority(cmd *cobra.Command, args []string) error {
 	if err := svc.SnippetSetPriority(context.Background(), org, name, priority); err != nil {
 		return err
 	}
-	color.Green("✓ Priority set to %d for: %s", priority, name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "snippet", Name: name, Action: "priority_set",
+		Details: map[string]interface{}{"name": name, "priority": priority}, Message: fmt.Sprintf("✓ Priority set to %d for: %s", priority, name)})
 }
 
 func runSnippetDelete(cmd *cobra.Command, args []string) error {
@@ -566,15 +570,14 @@ func runSnippetDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete snippet '%s'?", name)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete snippet '%s'?", name)); !ok {
+		return err
 	}
 	if err := svc.SnippetDelete(context.Background(), org, name); err != nil {
 		return err
 	}
-	color.Green("✓ Snippet deleted: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "snippet", Name: name, Action: "deleted",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Snippet deleted: %s", name)})
 }
 
 func runSnippetPull(cmd *cobra.Command, args []string) error {

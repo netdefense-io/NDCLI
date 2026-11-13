@@ -3,13 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
@@ -149,7 +146,9 @@ func runNetworkMemberAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	color.Green("✓ Member added to %s: %s (%s, %s)", vpnName, deviceName, member.Role, member.OverlayIPv4)
+	result := &models.ActionResult{Resource: "member", Name: deviceName, Value: member, Action: "added",
+		Details: map[string]interface{}{"network": vpnName},
+		Message: fmt.Sprintf("✓ Member added to %s: %s (%s, %s)", vpnName, deviceName, member.Role, member.OverlayIPv4)}
 
 	// Show connectivity info — requires a follow-up fetch.
 	network, errN := svc.NetworkGet(ctx, org, vpnName)
@@ -158,20 +157,20 @@ func runNetworkMemberAdd(cmd *cobra.Command, args []string) error {
 		hubCount, spokeCount := countMemberRoles(memberList.Members)
 		role := strings.ToUpper(member.Role)
 		if role == "SPOKE" {
-			fmt.Printf("  Auto-connected to %d hub(s)\n", hubCount)
+			result.Notes = []string{fmt.Sprintf("  Auto-connected to %d hub(s)", hubCount)}
 		} else if role == "HUB" {
 			if network.AutoConnectHubs {
 				otherHubs := hubCount - 1
 				if otherHubs < 0 {
 					otherHubs = 0
 				}
-				fmt.Printf("  Auto-connected to %d spoke(s) and %d hub(s)\n", spokeCount, otherHubs)
+				result.Notes = []string{fmt.Sprintf("  Auto-connected to %d spoke(s) and %d hub(s)", spokeCount, otherHubs)}
 			} else {
-				fmt.Printf("  Auto-connected to %d spoke(s)\n", spokeCount)
+				result.Notes = []string{fmt.Sprintf("  Auto-connected to %d spoke(s)", spokeCount)}
 			}
 		}
 	}
-	return nil
+	return formatter.FormatActionResult(result)
 }
 
 func runNetworkMemberDescribe(cmd *cobra.Command, args []string) error {
@@ -239,11 +238,12 @@ func runNetworkMemberUpdate(cmd *cobra.Command, args []string) error {
 		opts.RegenerateKeys = &v
 	}
 
-	if _, err := svc.NetworkMemberUpdate(context.Background(), org, vpnName, deviceName, opts); err != nil {
+	member, err := svc.NetworkMemberUpdate(context.Background(), org, vpnName, deviceName, opts)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Member updated: %s in %s", deviceName, vpnName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "member", Name: deviceName, Value: member, Action: "updated",
+		Details: map[string]interface{}{"network": vpnName}, Message: fmt.Sprintf("✓ Member updated: %s in %s", deviceName, vpnName)})
 }
 
 func runNetworkMemberRemove(cmd *cobra.Command, args []string) error {
@@ -256,38 +256,27 @@ func runNetworkMemberRemove(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
+		prompt := fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)
 		// Hub removal warns about disconnected spokes.
 		member, errM := svc.NetworkMemberGet(ctx, org, vpnName, deviceName)
 		if errM == nil && strings.EqualFold(member.Role, "HUB") {
-			members, errAll := svc.NetworkMemberList(ctx, org, vpnName, 1, 500)
-			if errAll == nil {
-				_, spokeCount := countMemberRoles(members.Members)
-				if spokeCount > 0 {
-					prompt := fmt.Sprintf("Remove hub '%s' from VPN '%s'?\n  %d spoke(s) will lose their connection to this hub.",
-						deviceName, vpnName, spokeCount)
-					if !helpers.Confirm(prompt) {
-						fmt.Fprintln(os.Stderr, "Cancelled")
-						return nil
-					}
-				} else if !helpers.Confirm(fmt.Sprintf("Remove hub '%s' from VPN '%s'?", deviceName, vpnName)) {
-					fmt.Fprintln(os.Stderr, "Cancelled")
-					return nil
+			if members, errAll := svc.NetworkMemberList(ctx, org, vpnName, 1, 500); errAll == nil {
+				prompt = fmt.Sprintf("Remove hub '%s' from VPN '%s'?", deviceName, vpnName)
+				if _, spokeCount := countMemberRoles(members.Members); spokeCount > 0 {
+					prompt += fmt.Sprintf("\n  %d spoke(s) will lose their connection to this hub.", spokeCount)
 				}
-			} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
-				fmt.Fprintln(os.Stderr, "Cancelled")
-				return nil
 			}
-		} else if !helpers.Confirm(fmt.Sprintf("Remove '%s' from VPN '%s'?", deviceName, vpnName)) {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		}
+		if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+			return err
 		}
 	}
 
 	if err := svc.NetworkMemberRemove(ctx, org, vpnName, deviceName); err != nil {
 		return err
 	}
-	color.Green("✓ Member removed from %s: %s", vpnName, deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "network", Name: vpnName, Action: "removed",
+		Details: map[string]interface{}{"device": deviceName}, Message: fmt.Sprintf("✓ Member removed from %s: %s", vpnName, deviceName)})
 }
 
 func countMemberRoles(members []models.VpnMember) (hubCount, spokeCount int) {

@@ -132,7 +132,7 @@ func (s *healthScreen) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		d, err := ctx.Svc.DeviceHealth(c, ctx.Org, device)
+		d, err := ctx.Svc.DeviceHealth(c, ctx.Org, device, service.DeviceHealthOpts{})
 		if err != nil {
 			return errMsg{context: "health:" + device, err: err}
 		}
@@ -255,6 +255,9 @@ func (s *healthScreen) summary() string {
 		l2 += mutedStyle.Render(" · " + uihelp.HumanDuration(*d.Sync.AgeSec) + " ago")
 	}
 	out := l1 + "\n" + l2
+	if text := d.OPNsenseText(); text != "" {
+		out += "\n" + mutedStyle.Render("OPNsense "+text)
+	}
 	if s.assoc != nil {
 		for _, line := range uihelp.KeyMismatchLines(s.assoc.device) {
 			out += "\n" + errStyle.Render(line)

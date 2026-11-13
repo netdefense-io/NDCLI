@@ -29,10 +29,20 @@ func (s *Service) Dashboard(ctx context.Context, org string) (*models.DashboardR
 	return &result, nil
 }
 
+// DeviceHealthOpts selects what DeviceHealth asks for.
+type DeviceHealthOpts struct {
+	// Retained asks for the last-known telemetry, kept for days, where the
+	// live one is missing: an expired snapshot is replaced by the last-known
+	// one, marked stale, and each heavy block carries its age. It never
+	// changes online. Off, the answer is live-only, as it always was. A server
+	// that predates it is SERVER_TOO_OLD.
+	Retained bool
+}
+
 // DeviceHealth returns the per-device telemetry drill-down. 404 maps to
 // the API error path; the dashboard endpoint and this one share the
 // same Redis snapshot reader on NDManager's side.
-func (s *Service) DeviceHealth(ctx context.Context, org, device string) (*models.DeviceTelemetryResponse, error) {
+func (s *Service) DeviceHealth(ctx context.Context, org, device string, opts DeviceHealthOpts) (*models.DeviceTelemetryResponse, error) {
 	if org == "" {
 		return nil, &Error{Code: CodeInvalidInput, Message: "organization is required"}
 	}
@@ -44,13 +54,23 @@ func (s *Service) DeviceHealth(ctx context.Context, org, device string) (*models
 		url.PathEscape(org),
 		url.PathEscape(device),
 	)
-	resp, err := s.api.Get(ctx, path, nil)
+	var params map[string]string
+	if opts.Retained {
+		params = map[string]string{"retained": "true"}
+	}
+	resp, err := s.api.Get(ctx, path, params)
 	if err != nil {
 		return nil, wrapAPI("%v", err)
 	}
 	var result models.DeviceTelemetryResponse
 	if err := api.ParseResponse(resp, &result); err != nil {
 		return nil, wrapAPI("%v", err)
+	}
+	// A server that predates retained telemetry ignores the parameter and
+	// answers live-only, with no stale key; the answer is refused rather than
+	// shown as what was asked for.
+	if opts.Retained && result.Stale == nil {
+		return nil, &Error{Code: CodeServerTooOld, Message: "this server predates retained telemetry: it answered with live telemetry only"}
 	}
 	return &result, nil
 }

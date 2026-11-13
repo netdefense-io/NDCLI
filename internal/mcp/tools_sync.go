@@ -30,8 +30,9 @@ type syncApplyInput struct {
 func (s *Server) registerSyncTools() {
 	// ndcli.sync.status
 	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "ndcli.sync.status",
-		Description: "Show synchronization status for devices matching the filter. device and template are regex patterns; organization and ou are exact names. Organization defaults to the configured org.",
+		Name: "ndcli.sync.status",
+		Description: "Show synchronization status for devices matching the filter. device and template are regex patterns; organization and ou are exact names. Organization defaults to the configured org. " +
+			"A device whose sync payload the server cannot build carries error (why) and code (UNDEFINED_VARIABLES, VARIABLE_CONFLICT, …); both are null otherwise.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -224,5 +225,6 @@ func syncStatusItem(it *models.SyncStatusItem) map[string]interface{} {
 		"current_hash": it.CurrentHash,
 		"in_sync":      it.InSync,
 		"error":        it.Error,
+		"code":         it.Code,
 	}
 }

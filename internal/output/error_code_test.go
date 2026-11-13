@@ -37,7 +37,9 @@ func TestSyncApplyFormatters_ShowTheDeviceErrorCode(t *testing.T) {
 			DeviceName: "e2e-a",
 			Error: "More than one snippet on this device carries the same uuid: " +
 				"221f3268-aaaa-4aaa-8aaa-aaaaaaaaaaaa (snippets: corp-web, corp-web-copy; templates: edge). " +
-				"Keep one snippet per uuid: delete the others and create them again without a uuid",
+				"Keep one snippet per uuid: edit each extra snippet and give it a new managed uuid " +
+				"(221f3268-xxxx-4xxx-yxxx-xxxxxxxxxxxx in lowercase hex, y one of 8, 9, a or b); " +
+				"its templates and priority stay as they are",
 			Code: "SNIPPET_UUID_CONFLICT",
 		},
 		{

@@ -285,12 +285,12 @@ func TestFirmwareVocabulariesShowAnUnknownStringAsItself(t *testing.T) {
 // constants the CLI prompt and the MCP preview are built from: a test that
 // sourced the sentences from the implementation would agree with it by
 // construction. The text says the upgrade is offline,
-// takes three reboots and has no rollback.
+// takes three reboots, sometimes four, and has no rollback.
 func TestFirmwareMajorSwitchWarningStatesTheConsequences(t *testing.T) {
 	warning := FirmwareMajorSwitchWarning()
 	for _, want := range []string{
 		"With major upgrades on, the track's update windows move its devices to the next OPNsense series.",
-		"takes the device offline for the length of the upgrade and reboots it three times;",
+		"takes the device offline for the length of the upgrade and reboots it three times, sometimes four;",
 		"has no automatic rollback;",
 		"leaves a device that loses power during the base or package install in a state that needs the console or a VM snapshot to recover;",
 		"needs a link of about 3 Mbit/s or better, so the download finishes inside the step;",
@@ -413,7 +413,8 @@ const (
     {"kind": "major", "series": "26.7", "track": "fast", "devices": ["fw-b"], "count": 1, "last_at": "2026-10-08T12:00:00Z"}
   ],
   "agent_repo": {"configured": true, "channel": "https://repo.netdefense.io/dev/opnsense",
-                 "trees": [{"abi": "FreeBSD:15:amd64", "ok": false, "checked_at": "2026-10-12T12:00:00Z"}]}
+                 "trees": [{"abi": "FreeBSD:15:amd64", "ok": false, "checked_at": "2026-10-12T12:00:00Z"}]},
+  "series_in_use": [{"series": "25.7", "devices": 2, "end_of_life": true}, {"series": "26.1", "devices": 5, "end_of_life": false}]
 }`
 	// FirmwareHaltListResponse with kind=all: a halt of a release has a version,
 	// one of a major upgrade (FirmwareSeriesHaltItem) its series and no version.
@@ -633,7 +634,7 @@ func TestFirmwareMajorFieldsAreAbsentOrNullWithoutBeingZeroValuesThatLie(t *test
 		t.Fatal(err)
 	}
 	out, _ = json.Marshal(board)
-	for _, key := range []string{"majors", "major_failures", "agent_repo"} {
+	for _, key := range []string{"majors", "major_failures", "agent_repo", "series_in_use"} {
 		if strings.Contains(string(out), key) {
 			t.Errorf("a board from a control plane that predates major upgrades must stay as it was; it grew %q: %s", key, out)
 		}

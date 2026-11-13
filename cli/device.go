@@ -16,7 +16,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/pathfinder"
@@ -144,11 +143,17 @@ var deviceHealthCmd = &cobra.Command{
 Returns the full agent telemetry: uptime, load averages, mem/swap, disk
 usage per mountpoint, OPNsense service states, pending OS/plugin
 updates, and certificate expiries. No history — this is "right now".
+It also shows the installed OPNsense release and what is available: a
+newer release of its series (a minor update), or only a newer series (a
+major upgrade).
 
 The snapshot updates on every 60s heartbeat; heavy fields (services,
 updates, certs) refresh every 15min on the agent and ride every
 subsequent heartbeat. Snapshot age is rendered against the broker's
-wallclock so the freshness is honest.`,
+wallclock so the freshness is honest. A device that has stopped sending
+heartbeats for a few minutes has no snapshot; --retained shows its last-known
+one instead, marked stale, with the age of each block. Online stays what it
+is either way.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
 	RunE:              runDeviceHealth,
@@ -162,7 +167,9 @@ func init() {
 	addYesFlag(deviceRemoveCmd)
 	deviceCmd.AddCommand(deviceDescribeCmd)
 	deviceCmd.AddCommand(deviceHealthCmd)
+	deviceHealthCmd.Flags().Bool("retained", false, "Show the last-known telemetry, marked stale, when the live one has expired")
 	deviceCmd.AddCommand(deviceApproveAllCmd)
+	addYesFlag(deviceApproveAllCmd)
 	deviceCmd.AddCommand(deviceConnectCmd)
 	deviceCmd.AddCommand(deviceRebindTokenCmd)
 
@@ -231,8 +238,8 @@ func runDeviceApprove(cmd *cobra.Command, args []string) error {
 	if err := svc.DeviceApprove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-	color.Green("✓ Device approved: %s", deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: deviceName, Action: "approved",
+		Details: map[string]interface{}{"status": models.DeviceStatusEnabled}, Message: fmt.Sprintf("✓ Device approved: %s", deviceName)})
 }
 
 func runDeviceRename(cmd *cobra.Command, args []string) error {
@@ -244,8 +251,8 @@ func runDeviceRename(cmd *cobra.Command, args []string) error {
 	if err := svc.DeviceRename(context.Background(), org, deviceName, newName); err != nil {
 		return err
 	}
-	color.Green("✓ Device renamed: %s → %s", deviceName, newName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: deviceName, Action: "renamed",
+		Details: map[string]interface{}{"new_name": newName}, Message: fmt.Sprintf("✓ Device renamed: %s → %s", deviceName, newName)})
 }
 
 // deviceRemoveWarningLines is the pre-confirmation warning for a removal. It
@@ -267,15 +274,14 @@ func runDeviceRemove(cmd *cobra.Command, args []string) error {
 	for _, line := range deviceRemoveWarningLines(deviceName) {
 		_, _ = color.New(color.FgRed).Fprintln(os.Stderr, line)
 	}
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Remove device '%s'?", deviceName)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove device '%s'?", deviceName)); !ok {
+		return err
 	}
 	if err := svc.DeviceRemove(context.Background(), org, deviceName); err != nil {
 		return err
 	}
-	color.Green("✓ Device removed: %s", deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "device", Name: deviceName, Action: "removed",
+		Details: map[string]interface{}{"consequence": service.DeviceRemoveConsequence}, Message: fmt.Sprintf("✓ Device removed: %s", deviceName)})
 }
 
 func runDeviceDescribe(cmd *cobra.Command, args []string) error {
@@ -293,11 +299,31 @@ func runDeviceHealth(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 
-	result, err := svc.DeviceHealth(context.Background(), org, args[0])
+	retained, _ := cmd.Flags().GetBool("retained")
+	result, err := svc.DeviceHealth(context.Background(), org, args[0], service.DeviceHealthOpts{Retained: retained})
 	if err != nil {
 		return err
 	}
 	return formatter.FormatDeviceHealth(result)
+}
+
+// everyApprovalFailed is approve-all's error when no approval went through.
+// When every refusal carries the same server code (TOKEN_READ_ONLY,
+// ACCESS_DENIED, a plan limit), the error wraps the first one so the code
+// survives into [CODE] and -f json; refusals for different reasons share none.
+func everyApprovalFailed(refusals []error) error {
+	msg := fmt.Sprintf("every approval failed (%d devices)", len(refusals))
+	code := service.ErrorCode(refusals[0])
+	for _, err := range refusals[1:] {
+		if service.ErrorCode(err) != code {
+			code = ""
+			break
+		}
+	}
+	if code == "" {
+		return errors.New(msg)
+	}
+	return &service.Error{Code: service.CodeAPIError, Message: msg, Err: refusals[0]}
 }
 
 func runDeviceApproveAll(cmd *cobra.Command, args []string) error {
@@ -315,26 +341,32 @@ func runDeviceApproveAll(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if len(listing.Devices) == 0 {
-		fmt.Println("No pending devices found")
-		return nil
+		return formatter.FormatApproveAll(&models.ApproveAllResult{})
 	}
-	if !helpers.Confirm(fmt.Sprintf("Approve all %d pending devices?", len(listing.Devices))) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Approve all %d pending devices?", len(listing.Devices))); !ok {
+		return err
 	}
 
-	approved, failed := 0, 0
+	result := &models.ApproveAllResult{}
+	var refusals []error
 	for _, d := range listing.Devices {
+		outcome := models.ApproveOutcome{Device: d.Name}
 		if err := svc.DeviceApprove(ctx, org, d.Name); err != nil {
-			color.Red("✗ Failed to approve %s: %s", d.Name, errorText(err))
-			failed++
-			continue
+			outcome.Failed, outcome.Code, outcome.Error = true, service.ErrorCode(err), err.Error()
+			refusals = append(refusals, err)
 		}
-		color.Green("✓ Approved: %s", d.Name)
-		approved++
+		result.Results = append(result.Results, outcome)
 	}
-	fmt.Println()
-	fmt.Printf("Approved: %d, Failed: %d\n", approved, failed)
+	if err := formatter.FormatApproveAll(result); err != nil {
+		return err
+	}
+	approved, failed := result.Counts()
+	switch {
+	case failed > 0 && approved == 0:
+		return everyApprovalFailed(refusals)
+	case failed > 0:
+		return &partialFailure{failed: failed, total: failed + approved, what: "approvals"}
+	}
 	return nil
 }
 

@@ -125,11 +125,16 @@ var scheduleEnableCmd = &cobra.Command{
 func runScheduleEnable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-	if _, err := svc.ScheduleSetEnabled(context.Background(), org, args[0], true); err != nil {
+	sch, err := svc.ScheduleSetEnabled(context.Background(), org, args[0], true)
+	if err != nil {
 		return err
 	}
-	color.Green("Schedule %q enabled", args[0])
-	return nil
+	fields, err := objectFields(sch, "name")
+	if err != nil {
+		return err
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "name", Name: args[0], Action: "enabled",
+		Details: fields, Message: fmt.Sprintf("Schedule %q enabled", args[0])})
 }
 
 // ── disable ──────────────────────────────────────────────────────────────────
@@ -145,11 +150,16 @@ var scheduleDisableCmd = &cobra.Command{
 func runScheduleDisable(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
-	if _, err := svc.ScheduleSetEnabled(context.Background(), org, args[0], false); err != nil {
+	sch, err := svc.ScheduleSetEnabled(context.Background(), org, args[0], false)
+	if err != nil {
 		return err
 	}
-	color.Green("Schedule %q disabled", args[0])
-	return nil
+	fields, err := objectFields(sch, "name")
+	if err != nil {
+		return err
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "name", Name: args[0], Action: "disabled",
+		Details: fields, Message: fmt.Sprintf("Schedule %q disabled", args[0])})
 }
 
 // ── delete ───────────────────────────────────────────────────────────────────
@@ -192,8 +202,8 @@ func runScheduleDelete(cmd *cobra.Command, args []string) error {
 	if err := svc.ScheduleDelete(context.Background(), org, name); err != nil {
 		return firmwareAdvice(err)
 	}
-	color.Green("Schedule %q deleted", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "name", Name: name, Action: "deleted",
+		Details: map[string]interface{}{"deleted": true}, Message: fmt.Sprintf("Schedule %q deleted", name)})
 }
 
 // ── tasks subgroup ────────────────────────────────────────────────────────────
@@ -247,8 +257,12 @@ func runScheduleTasksEnable(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return firmwareAdvice(err)
 	}
-	color.Green("Spec %s (schedule %q) enabled", code, spec.ScheduleName)
-	return nil
+	fields, err := objectFields(spec, "code")
+	if err != nil {
+		return err
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "code", Name: code, Action: "enabled",
+		Details: fields, Message: fmt.Sprintf("Spec %s (schedule %q) enabled", code, spec.ScheduleName)})
 }
 
 var scheduleTasksDisableCmd = &cobra.Command{
@@ -266,8 +280,12 @@ func runScheduleTasksDisable(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return firmwareAdvice(err)
 	}
-	color.Green("Spec %s (schedule %q) disabled", code, spec.ScheduleName)
-	return nil
+	fields, err := objectFields(spec, "code")
+	if err != nil {
+		return err
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "code", Name: code, Action: "disabled",
+		Details: fields, Message: fmt.Sprintf("Spec %s (schedule %q) disabled", code, spec.ScheduleName)})
 }
 
 var scheduleTasksRemoveCmd = &cobra.Command{
@@ -300,8 +318,9 @@ func runScheduleTasksRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if spec != nil && spec.Kind == models.ScheduledTaskKindBackup {
-		color.Yellow("⚠  This is the org's BACKUP spec — removing it stops scheduled backups.")
-		color.Yellow("   The backup config stays configured but won't run until re-attached to a schedule.")
+		warn := color.New(color.FgYellow)
+		_, _ = warn.Fprintln(os.Stderr, "⚠  This is the org's BACKUP spec — removing it stops scheduled backups.")
+		_, _ = warn.Fprintln(os.Stderr, "   The backup config stays configured but won't run until re-attached to a schedule.")
 		prompt = fmt.Sprintf("Remove BACKUP spec %s?", code)
 	}
 
@@ -318,8 +337,8 @@ func runScheduleTasksRemove(cmd *cobra.Command, args []string) error {
 	if err := svc.ScheduledTaskRemoveByCode(ctx, org, code); err != nil {
 		return firmwareAdvice(err)
 	}
-	color.Green("Spec %s removed", code)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "code", Name: code, Action: "removed",
+		Details: map[string]interface{}{"removed": true}, Message: fmt.Sprintf("Spec %s removed", code)})
 }
 
 // ── wiring ───────────────────────────────────────────────────────────────────

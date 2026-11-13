@@ -3,13 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -168,11 +166,12 @@ func runNetworkCreate(cmd *cobra.Command, args []string) error {
 		opts.KeepaliveDefault = &v
 	}
 
-	if _, err := svc.NetworkCreate(context.Background(), org, opts); err != nil {
+	n, err := svc.NetworkCreate(context.Background(), org, opts)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ VPN network created: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "network", Name: name, Value: n, Action: "created",
+		Message: fmt.Sprintf("✓ VPN network created: %s", name)})
 }
 
 func runNetworkDescribe(cmd *cobra.Command, args []string) error {
@@ -250,9 +249,8 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 					} else {
 						prompt = "Disable auto-connect-hubs? Hub-to-hub connections without manual links will be lost."
 					}
-					if !helpers.Confirm(prompt) {
-						fmt.Fprintln(os.Stderr, "Cancelled")
-						return nil
+					if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+						return err
 					}
 				}
 			}
@@ -263,8 +261,8 @@ func runNetworkUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	color.Green("✓ VPN network updated: %s", n.Name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "network", Name: n.Name, Value: n, Action: "updated",
+		Message: fmt.Sprintf("✓ VPN network updated: %s", n.Name)})
 }
 
 func runNetworkDelete(cmd *cobra.Command, args []string) error {
@@ -274,14 +272,13 @@ func runNetworkDelete(cmd *cobra.Command, args []string) error {
 	vpnName := args[0]
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
-		if !helpers.Confirm(fmt.Sprintf("Delete VPN network '%s'?", vpnName)) {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete VPN network '%s'?", vpnName)); !ok {
+			return err
 		}
 	}
 	if err := svc.NetworkDelete(context.Background(), org, vpnName); err != nil {
 		return err
 	}
-	color.Green("✓ VPN network deleted: %s", vpnName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "network", Name: vpnName, Action: "deleted",
+		Message: fmt.Sprintf("✓ VPN network deleted: %s", vpnName)})
 }

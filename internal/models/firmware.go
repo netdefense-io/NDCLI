@@ -414,7 +414,7 @@ func FirmwareBootEnvironmentLastText(last string) string {
 const FirmwareMajorSwitchLead = "With major upgrades on, the track's update windows move its devices to the next OPNsense series. Each such upgrade:"
 
 var FirmwareMajorConsequences = []string{
-	"takes the device offline for the length of the upgrade and reboots it three times;",
+	"takes the device offline for the length of the upgrade and reboots it three times, sometimes four;",
 	"has no automatic rollback;",
 	"leaves a device that loses power during the base or package install in a state that needs the console or a VM snapshot to recover;",
 	"needs a link of about 3 Mbit/s or better, so the download finishes inside the step;",
@@ -884,6 +884,18 @@ type FirmwareRollout struct {
 	// MajorFailures are the unresolved failures of major upgrades.
 	MajorFailures []FirmwareMajorFailure `json:"major_failures,omitzero"`
 	AgentRepo     *FirmwareAgentRepo     `json:"agent_repo,omitempty"`
+	// SeriesInUse are the OPNsense series the organization's devices run,
+	// oldest first; absent from a control plane that predates it.
+	SeriesInUse []FirmwareSeriesInUse `json:"series_in_use,omitzero"`
+}
+
+// FirmwareSeriesInUse is one OPNsense series the organization's devices run,
+// by the release each agent reports, in a track or not: how many devices, and
+// whether OPNsense still gives it updates.
+type FirmwareSeriesInUse struct {
+	Series    string `json:"series"`
+	Devices   int    `json:"devices"`
+	EndOfLife bool   `json:"end_of_life"`
 }
 
 // FirmwareHaltList is a page of halts, newest first. Without a kind it holds the

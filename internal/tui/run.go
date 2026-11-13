@@ -55,7 +55,7 @@ func Run(args []string, version string) error {
 	cfg := config.Get()
 	org := firstNonEmpty(orgFlag, orgShort, cfg.Organization.Name)
 	if org == "" {
-		return fmt.Errorf("no organization set — pass --org, set organization.name in config, or set NDCLI_ORGANIZATION_NAME")
+		return fmt.Errorf("no organization set — pass --org, set a default with 'ndcli config set org <name>', or set NDCLI_ORGANIZATION_NAME")
 	}
 
 	refresh := defaultRefresh

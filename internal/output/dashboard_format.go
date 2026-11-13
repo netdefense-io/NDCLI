@@ -97,8 +97,11 @@ func (f *TableFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse) e
 	fmt.Fprintf(w, "Device: %s\n", d.Name)
 	fmt.Fprintf(w, "  status:   %s (%s)\n", d.Status, onlineLabel(d.Online))
 	fmt.Fprintf(w, "  agent:    %s\n", defaultStr(d.AgentVersion, "—"))
+	if text := d.OPNsenseText(); text != "" {
+		fmt.Fprintf(w, "  opnsense: %s\n", text)
+	}
 	fmt.Fprintf(w, "  hb age:   %s\n", humanDurationPtr(d.HeartbeatAgeSec))
-	fmt.Fprintf(w, "  snap age: %s\n", humanDurationPtr(d.SnapshotAgeSec))
+	fmt.Fprintf(w, "  snap age: %s\n", snapshotAgeText(d))
 	if len(d.OUs) > 0 {
 		fmt.Fprintf(w, "  ous:      %s\n", strings.Join(d.OUs, ", "))
 	}
@@ -110,7 +113,7 @@ func (f *TableFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse) e
 	fmt.Fprintln(w)
 
 	if d.Snapshot == nil {
-		fmt.Fprintln(w, "No recent telemetry.")
+		fmt.Fprintln(w, noTelemetryText(d))
 		return nil
 	}
 	s := d.Snapshot
@@ -132,17 +135,17 @@ func (f *TableFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse) e
 	}
 
 	if s.Heavy != nil {
-		writeHeavyTable(w, s.Heavy)
+		writeHeavyTable(w, s.Heavy, heavyAges(d))
 	}
 	return nil
 }
 
-func writeHeavyTable(w writer, h *models.TelemetryHeavy) {
+func writeHeavyTable(w writer, h *models.TelemetryHeavy, ages models.TelemetryHeavyAges) {
 	if h.Services != nil {
 		items := h.Services.Items
 		running, down := splitServices(items)
-		fmt.Fprintf(w, "SERVICES (%d running / %d down of %d)\n",
-			len(running), len(down), len(items))
+		fmt.Fprintf(w, "SERVICES (%d running / %d down of %d)%s\n",
+			len(running), len(down), len(items), blockAge(ages.Services))
 		if len(down) > 0 {
 			fmt.Fprintln(w, "  not running:")
 			for _, s := range down {
@@ -153,7 +156,7 @@ func writeHeavyTable(w writer, h *models.TelemetryHeavy) {
 	}
 	if h.Updates != nil {
 		u := h.Updates
-		fmt.Fprintln(w, "UPDATES")
+		fmt.Fprintf(w, "UPDATES%s\n", blockAge(ages.Updates))
 		fmt.Fprintf(w, "  status:       %s\n", u.Status)
 		if u.LastCheck != "" {
 			fmt.Fprintf(w, "  last check:   %s\n", u.LastCheck)
@@ -172,7 +175,7 @@ func writeHeavyTable(w writer, h *models.TelemetryHeavy) {
 		fmt.Fprintln(w)
 	}
 	if h.Certs != nil {
-		fmt.Fprintln(w, "CERTIFICATES")
+		fmt.Fprintf(w, "CERTIFICATES%s\n", blockAge(ages.Certs))
 		for _, c := range h.Certs.Items {
 			tag := fmt.Sprintf("%d d", c.DaysLeft)
 			if c.DaysLeft <= 0 {
@@ -234,15 +237,18 @@ func (f *SimpleFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse) 
 	w := f.Writer
 	fmt.Fprintf(w, "Device %s · %s · %s\n", d.Name, d.Status, onlineLabel(d.Online))
 	fmt.Fprintf(w, "  agent: %s\n", defaultStr(d.AgentVersion, "—"))
+	if text := d.OPNsenseText(); text != "" {
+		fmt.Fprintf(w, "  opnsense: %s\n", text)
+	}
 	fmt.Fprintf(w, "  heartbeat: %s ago\n", humanDurationPtr(d.HeartbeatAgeSec))
-	fmt.Fprintf(w, "  snapshot:  %s ago\n", humanDurationPtr(d.SnapshotAgeSec))
+	fmt.Fprintf(w, "  snapshot:  %s\n", snapshotAgoText(d))
 	fmt.Fprintf(w, "  sync: %s", d.Sync.State)
 	if d.Sync.AgeSec != nil {
 		fmt.Fprintf(w, " (%s ago)", humanDuration(*d.Sync.AgeSec))
 	}
 	fmt.Fprintln(w)
 	if d.Snapshot == nil {
-		fmt.Fprintln(w, "  telemetry: none")
+		fmt.Fprintln(w, "  telemetry: "+noTelemetryText(d))
 		return nil
 	}
 	s := d.Snapshot
@@ -255,16 +261,19 @@ func (f *SimpleFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse) 
 	if s.Heavy != nil {
 		if s.Heavy.Services != nil {
 			run, down := splitServices(s.Heavy.Services.Items)
-			fmt.Fprintf(w, "  services: %d running, %d down\n", len(run), len(down))
+			fmt.Fprintf(w, "  services: %d running, %d down%s\n", len(run), len(down), blockAge(heavyAges(d).Services))
 			for _, ds := range down {
 				fmt.Fprintf(w, "    - %s\n", ds.Name)
 			}
 		}
 		if s.Heavy.Updates != nil {
 			u := s.Heavy.Updates
-			fmt.Fprintf(w, "  updates: %s (%d pending; reboot=%t)\n", u.Status, u.UpgradeCount+u.NewCount, u.NeedsReboot)
+			fmt.Fprintf(w, "  updates: %s (%d pending; reboot=%t)%s\n", u.Status, u.UpgradeCount+u.NewCount, u.NeedsReboot, blockAge(heavyAges(d).Updates))
 		}
 		if s.Heavy.Certs != nil {
+			if age := blockAge(heavyAges(d).Certs); age != "" {
+				fmt.Fprintf(w, "  certs%s\n", age)
+			}
 			for _, c := range s.Heavy.Certs.Items {
 				fmt.Fprintf(w, "  cert: %s — %d days left\n", c.Description, c.DaysLeft)
 			}
@@ -337,8 +346,11 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 	fmt.Fprintf(w, "╭─ Device %s\n", d.Name)
 	fmt.Fprintf(w, "│ status:    %s  ·  %s\n", d.Status, onlineLabel(d.Online))
 	fmt.Fprintf(w, "│ agent:     %s\n", defaultStr(d.AgentVersion, "—"))
+	if text := d.OPNsenseText(); text != "" {
+		fmt.Fprintf(w, "│ opnsense:  %s\n", text)
+	}
 	fmt.Fprintf(w, "│ heartbeat: %s ago\n", humanDurationPtr(d.HeartbeatAgeSec))
-	fmt.Fprintf(w, "│ snapshot:  %s ago\n", humanDurationPtr(d.SnapshotAgeSec))
+	fmt.Fprintf(w, "│ snapshot:  %s\n", snapshotAgoText(d))
 	if len(d.OUs) > 0 {
 		fmt.Fprintf(w, "│ ous:       %s\n", strings.Join(d.OUs, ", "))
 	}
@@ -350,7 +362,7 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 
 	if d.Snapshot == nil {
 		fmt.Fprintln(w, "│")
-		fmt.Fprintln(w, "│ No recent telemetry.")
+		fmt.Fprintln(w, "│ "+noTelemetryText(d))
 		fmt.Fprintln(w, "╰─")
 		return nil
 	}
@@ -380,7 +392,7 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 		if h.Services != nil {
 			run, down := splitServices(h.Services.Items)
 			fmt.Fprintln(w, "│")
-			fmt.Fprintf(w, "├─ Services  %d running / %d down\n", len(run), len(down))
+			fmt.Fprintf(w, "├─ Services  %d running / %d down%s\n", len(run), len(down), blockAge(heavyAges(d).Services))
 			if len(down) > 0 {
 				for _, ds := range down {
 					fmt.Fprintf(w, "│   ✗ %-20s %s\n", ds.Name, ds.Description)
@@ -392,7 +404,7 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 		if h.Updates != nil {
 			u := h.Updates
 			fmt.Fprintln(w, "│")
-			fmt.Fprintln(w, "├─ Updates")
+			fmt.Fprintf(w, "├─ Updates%s\n", blockAge(heavyAges(d).Updates))
 			fmt.Fprintf(w, "│   status:   %s\n", u.Status)
 			if u.LastCheck != "" {
 				fmt.Fprintf(w, "│   checked:  %s\n", u.LastCheck)
@@ -411,7 +423,7 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 		}
 		if h.Certs != nil {
 			fmt.Fprintln(w, "│")
-			fmt.Fprintln(w, "├─ Certificates")
+			fmt.Fprintf(w, "├─ Certificates%s\n", blockAge(heavyAges(d).Certs))
 			for _, c := range h.Certs.Items {
 				tag := fmt.Sprintf("%d d", c.DaysLeft)
 				if c.DaysLeft <= 0 {
@@ -434,6 +446,55 @@ func (f *DetailedFormatter) FormatDeviceHealth(d *models.DeviceTelemetryResponse
 // --------------------------------------------------------------------
 // Shared helpers — kept package-private so the formatters share them
 // --------------------------------------------------------------------
+
+// snapshotAgeText is the snapshot's age, and says so when it is a last-known
+// snapshot served in place of an expired one.
+func snapshotAgeText(d *models.DeviceTelemetryResponse) string {
+	text := humanDurationPtr(d.SnapshotAgeSec)
+	if d.IsStale() {
+		text += " (last known, stale)"
+	}
+	return text
+}
+
+// snapshotAgoText is snapshotAgeText for "<age> ago".
+func snapshotAgoText(d *models.DeviceTelemetryResponse) string {
+	text := "—"
+	if d.SnapshotAgeSec != nil {
+		text = humanDuration(*d.SnapshotAgeSec) + " ago"
+	}
+	if d.IsStale() {
+		text += " (last known, stale)"
+	}
+	return text
+}
+
+// noTelemetryText says there is no snapshot, and how to see the last-known
+// one when it was not asked for (an answer to --retained carries stale; a
+// server that predates it was refused before this).
+func noTelemetryText(d *models.DeviceTelemetryResponse) string {
+	if d.Stale == nil {
+		return "No recent telemetry; --retained shows the last-known snapshot."
+	}
+	return "No telemetry, recent or last known."
+}
+
+// heavyAges is the server's age of each heavy block, none when it sent none
+// (it does with retained telemetry only).
+func heavyAges(d *models.DeviceTelemetryResponse) models.TelemetryHeavyAges {
+	if d.HeavyAgeSec == nil {
+		return models.TelemetryHeavyAges{}
+	}
+	return *d.HeavyAgeSec
+}
+
+// blockAge is " · 6m old" for a heavy block whose age the server gave; "" otherwise.
+func blockAge(age *int64) string {
+	if age == nil {
+		return ""
+	}
+	return " · " + humanDuration(*age) + " old"
+}
 
 type writer interface {
 	Write(p []byte) (int, error)

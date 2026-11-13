@@ -12,6 +12,7 @@ import (
 
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -57,6 +58,25 @@ var orgSetDefaultOUCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeOUs,
 	RunE:              runOrgSetDefaultOU,
+}
+
+var orgUnverifiedReposCmd = &cobra.Command{
+	Use:   "unverified-repos <allow|forbid>",
+	Short: "Allow or forbid unsigned and non-https repositories in software policies",
+	Long: `Allow or forbid the organization's software policies (-o) to declare package
+repositories with signature type none or a non-https URL.
+
+  allow    policies may declare unsigned or non-https repositories, which can
+           install anything on every device the policy reaches
+  forbid   every repository must be signed and use https; devices stop
+           installing from the others at their next sync
+
+Only a superuser of the organization may change it, from an interactive login:
+the server refuses a personal access token. Both ask first; -y skips the
+question. 'ndcli org describe <org>' shows the current setting.`,
+	Args:      cobra.ExactArgs(1),
+	ValidArgs: []string{"allow", "forbid"},
+	RunE:      runOrgUnverifiedRepos,
 }
 
 var orgInviteCmd = &cobra.Command{
@@ -158,6 +178,8 @@ func init() {
 	addYesFlag(orgDeleteCmd)
 	orgCmd.AddCommand(orgDescribeCmd)
 	orgCmd.AddCommand(orgSetDefaultOUCmd)
+	orgCmd.AddCommand(orgUnverifiedReposCmd)
+	addYesFlag(orgUnverifiedReposCmd)
 	orgCmd.AddCommand(orgQuotaCmd)
 	orgCmd.AddCommand(orgInviteCmd)
 	orgCmd.AddCommand(orgAccountCmd)
@@ -167,6 +189,7 @@ func init() {
 	orgInviteCmd.AddCommand(orgInviteAcceptCmd)
 	orgInviteCmd.AddCommand(orgInviteDeclineCmd)
 	orgInviteCmd.AddCommand(orgInviteRevokeCmd)
+	addYesFlag(orgInviteRevokeCmd)
 
 	orgAccountCmd.AddCommand(orgAccountListCmd)
 	orgAccountCmd.AddCommand(orgAccountDisableCmd)
@@ -247,45 +270,54 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	madeDefault := false
 	if shouldAutoSetDefault {
 		if err := config.UpdateValue("organization.name", name); err != nil {
-			color.Yellow("⚠ Could not set as default organization: %v\n", err)
+			_, _ = color.New(color.FgYellow).Fprintf(os.Stderr, "⚠ Could not set as default organization: %v\n", err)
 		} else {
-			color.Green("✓ Organization created and set as default: %s\n", name)
-			fmt.Printf("  Token: %s\n", org.Token)
-			fmt.Printf("\nUse this token to register devices with the NetDefense agent.\n")
-			fmt.Printf("To retrieve the token later: ndcli org describe %s\n", name)
-			return nil
+			madeDefault = true
 		}
 	}
+	return formatter.FormatActionResult(orgCreatedResult(name, org, madeDefault))
+}
 
-	color.Green("✓ Organization created: %s\n", name)
-	fmt.Printf("  Token: %s\n", org.Token)
-	fmt.Printf("\nUse this token to register devices with the NetDefense agent.\n")
-	fmt.Printf("To retrieve the token later: ndcli org describe %s\n", name)
-	fmt.Printf("\nTo set this organization as your default:\n")
-	fmt.Printf("  ndcli config set org %s\n", name)
-	return nil
+// orgCreatedResult is org create's report: the organization and its agent
+// token, and the hint to make it the default unless the command just did.
+func orgCreatedResult(name string, org *models.Organization, madeDefault bool) *models.ActionResult {
+	result := &models.ActionResult{Resource: "organization", Name: name, Value: org, Action: "created",
+		Details: map[string]interface{}{"agent_token": org.Token, "token_warning": models.AgentTokenWarning, "default": madeDefault},
+		Message: fmt.Sprintf("✓ Organization created: %s", name),
+		Notes: []string{
+			"  Token: " + org.Token,
+			"",
+			"Use this token to register devices with the NetDefense agent.",
+			"To retrieve the token later: ndcli org describe " + name,
+		}}
+	if madeDefault {
+		result.Message = fmt.Sprintf("✓ Organization created and set as default: %s", name)
+		return result
+	}
+	result.Notes = append(result.Notes, "", "To set this organization as your default:", "  ndcli config set org "+name)
+	return result
 }
 
 func runOrgDelete(cmd *cobra.Command, args []string) error {
 	requireAuth()
 
 	name := args[0]
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete organization '%s'? This action cannot be undone.", name)); !ok {
+		return err
 	}
 	if err := svc.OrgDelete(context.Background(), name); err != nil {
 		return err
 	}
-	color.Green("✓ Organization deleted: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: name, Action: "deleted",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Organization deleted: %s", name)})
 }
 
 func runOrgDescribe(cmd *cobra.Command, args []string) error {
 	requireAuth()
-	org, err := svc.OrgGet(context.Background(), args[0])
+	org, err := svc.OrgDescribe(context.Background(), args[0])
 	if err != nil {
 		return err
 	}
@@ -308,8 +340,36 @@ func runOrgSetDefaultOU(cmd *cobra.Command, args []string) error {
 	if err := svc.OrgSetDefaultOU(context.Background(), org, ouName); err != nil {
 		return err
 	}
-	color.Green("✓ Default OU set to: %s", ouName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "default_ou_set",
+		Details: map[string]interface{}{"default_ou": ouName}, Message: fmt.Sprintf("✓ Default OU set to: %s", ouName)})
+}
+
+func runOrgUnverifiedRepos(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+	var allow bool
+	var prompt string
+	switch args[0] {
+	case "allow":
+		allow, prompt = true, fmt.Sprintf("Let software policies in '%s' install from unsigned or non-https repositories?", org)
+	case "forbid":
+		prompt = fmt.Sprintf("Stop devices in '%s' from installing from unsigned or non-https repositories?", org)
+	default:
+		return &service.Error{Code: service.CodeInvalidInput, Message: fmt.Sprintf("%q is neither allow nor forbid", args[0])}
+	}
+	if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+		return err
+	}
+	if err := svc.OrgSetUnverifiedRepos(context.Background(), org, allow); err != nil {
+		return err
+	}
+	action := "forbidden"
+	if allow {
+		action = "allowed"
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: action,
+		Details: map[string]interface{}{"allow_unverified_repos": allow},
+		Message: fmt.Sprintf("✓ Unverified repositories %s in %s", action, org)})
 }
 
 func runOrgInviteSend(cmd *cobra.Command, args []string) error {
@@ -320,8 +380,10 @@ func runOrgInviteSend(cmd *cobra.Command, args []string) error {
 	if err := svc.OrgInviteSend(context.Background(), org, email, role); err != nil {
 		return err
 	}
-	color.Green("✓ Invitation sent to: %s", email)
-	return nil
+	// Echo the role the service sent, not the spelling typed.
+	canonical, _ := service.NormalizeRole(role)
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "invited",
+		Details: map[string]interface{}{"email": email, "role": canonical}, Message: fmt.Sprintf("✓ Invitation sent to: %s", email)})
 }
 
 func runOrgInviteList(cmd *cobra.Command, args []string) error {
@@ -339,8 +401,8 @@ func runOrgInviteAccept(cmd *cobra.Command, args []string) error {
 	if err := svc.OrgInviteAccept(context.Background(), orgName); err != nil {
 		return err
 	}
-	color.Green("✓ Invitation to %s accepted", orgName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: orgName, Action: "accepted",
+		Message: fmt.Sprintf("✓ Invitation to %s accepted", orgName)})
 }
 
 func runOrgInviteDecline(cmd *cobra.Command, args []string) error {
@@ -349,19 +411,22 @@ func runOrgInviteDecline(cmd *cobra.Command, args []string) error {
 	if err := svc.OrgInviteDecline(context.Background(), orgName); err != nil {
 		return err
 	}
-	color.Green("✓ Invitation to %s declined", orgName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: orgName, Action: "declined",
+		Message: fmt.Sprintf("✓ Invitation to %s declined", orgName)})
 }
 
 func runOrgInviteRevoke(cmd *cobra.Command, args []string) error {
 	requireAuth()
 	org := requireOrganization()
 	email := args[0]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Revoke the invitation for '%s'?", email)); !ok {
+		return err
+	}
 	if err := svc.OrgInviteRevoke(context.Background(), org, email); err != nil {
 		return err
 	}
-	color.Green("✓ Invitation revoked for: %s", email)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "revoked",
+		Details: map[string]interface{}{"email": email}, Message: fmt.Sprintf("✓ Invitation revoked for: %s", email)})
 }
 
 func runOrgAccountList(cmd *cobra.Command, args []string) error {
@@ -387,9 +452,8 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 	} else {
 		confirmMsg = fmt.Sprintf("Disable account '%s'?", email)
 	}
-	if !confirmUnlessYes(cmd, confirmMsg) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, confirmMsg); !ok {
+		return err
 	}
 
 	if err := svc.OrgAccountDisable(context.Background(), org, email, remove); err != nil {
@@ -404,12 +468,12 @@ func runOrgAccountDisable(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+	result := &models.ActionResult{Resource: "organization", Name: org, Action: "disabled",
+		Details: map[string]interface{}{"email": email}, Message: fmt.Sprintf("✓ Account disabled: %s", email)}
 	if remove {
-		color.Green("✓ Account removed from organization: %s", email)
-	} else {
-		color.Green("✓ Account disabled: %s", email)
+		result.Action, result.Message = "removed", fmt.Sprintf("✓ Account removed from organization: %s", email)
 	}
-	return nil
+	return formatter.FormatActionResult(result)
 }
 
 func runOrgAccountEnable(cmd *cobra.Command, args []string) error {
@@ -428,8 +492,8 @@ func runOrgAccountEnable(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	color.Green("✓ Account enabled: %s", email)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "enabled",
+		Details: map[string]interface{}{"email": email}, Message: fmt.Sprintf("✓ Account enabled: %s", email)})
 }
 
 func runOrgAccountRole(cmd *cobra.Command, args []string) error {
@@ -442,6 +506,6 @@ func runOrgAccountRole(cmd *cobra.Command, args []string) error {
 	}
 	// Echo the canonical form (service has already normalised it).
 	canonical, _ := service.NormalizeRole(args[1])
-	color.Green("✓ Role set to %s for: %s", canonical, email)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "role_set",
+		Details: map[string]interface{}{"email": email, "role": canonical}, Message: fmt.Sprintf("✓ Role set to %s for: %s", canonical, email)})
 }

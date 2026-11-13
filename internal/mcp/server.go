@@ -27,13 +27,14 @@ type Server struct {
 	consoleSessions *ConsoleSessionManager
 }
 
-// NewServer creates a new MCP server
-func NewServer() (*Server, error) {
+// NewServer creates a new MCP server on the config file at configPath, or on
+// the default config when it is empty.
+func NewServer(configPath string) (*Server, error) {
 	// Set up logging to stderr (stdout is used for MCP protocol)
 	logger := log.New(os.Stderr, "[netdefense-mcp] ", log.LstdFlags)
 
 	// Load configuration
-	if err := config.Load(""); err != nil {
+	if err := config.Load(configPath); err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
@@ -199,20 +200,6 @@ func (s *Server) requireInteractiveAuth() error {
 		}
 	}
 	return nil
-}
-
-// getOrganization returns the organization from input or config
-func (s *Server) getOrganization(inputOrg string) (string, error) {
-	if inputOrg != "" {
-		return inputOrg, nil
-	}
-	if s.config.Organization.Name != "" {
-		return s.config.Organization.Name, nil
-	}
-	return "", &ToolError{
-		Code:    "ORG_REQUIRED",
-		Message: "Organization is required. Provide 'organization' parameter or set default via 'ndcli config set organization.name <org>'.",
-	}
 }
 
 // ToolError represents a tool execution error

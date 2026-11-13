@@ -40,7 +40,7 @@ func (syncResource) Fetch(ctx context.Context, svc *service.Service, org string,
 		if s.InSync {
 			status = "in-sync"
 		}
-		if s.Error != nil && *s.Error != "" {
+		if s.HasError() {
 			status = "error"
 		}
 		rows = append(rows, registry.Row{

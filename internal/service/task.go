@@ -536,11 +536,11 @@ func ResolveScheduledAt(at string, loc *time.Location, label string) (*Scheduled
 // input differently depending on which host the MCP server runs on. An offset
 // the user wrote is reported as that offset, always.
 func scheduledZoneName(input string, t time.Time, loc *time.Location) string {
-	switch {
-	case helpers.IsRelativeOffset(input):
+	switch helpers.ClassifyAtInput(input) {
+	case helpers.AtRelative:
 		// Anchored to now, resolved in UTC; the location is not involved.
 		return "UTC"
-	case helpers.HasExplicitZone(input):
+	case helpers.AtExplicitZone:
 		if _, offset := t.Zone(); offset == 0 {
 			return "UTC"
 		}

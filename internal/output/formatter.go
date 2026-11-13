@@ -229,6 +229,13 @@ type Formatter interface {
 	FormatPersonalAccessTokens(tokens []models.PersonalAccessToken) error
 	FormatTokenCreated(resp models.TokenCreateResponse) error
 	FormatTokenRevoked(name string) error
+	FormatActionResult(r *models.ActionResult) error
+	FormatApproveAll(r *models.ApproveAllResult) error
+	FormatPackageEdit(r *models.PackageEditResult) error
+	FormatEntryEdit(r *models.EntryEditResult) error
+	FormatAuthShow(a *models.AuthShow) error
+	FormatConfigView(c *models.ConfigView) error
+	FormatVersion(v *models.VersionInfo) error
 
 	// Task cancel
 	FormatTaskCancelled(r *models.TaskCancelResult) error

@@ -13,6 +13,7 @@ import (
 
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
 
@@ -332,8 +333,8 @@ func TestRefreshSession_SurfacesTheFailure(t *testing.T) {
 // used to panic under NDCLI_TOKEN: the global authManager is nil there, and
 // auth show, auth logout, auth login and config show all reached through it.
 func TestStaticTokenModeNeverDereferencesTheAuthManager(t *testing.T) {
-	origSvc, origClient, origManager := svc, apiClient, authManager
-	t.Cleanup(func() { svc, apiClient, authManager = origSvc, origClient, origManager })
+	origSvc, origClient, origManager, origFormatter := svc, apiClient, authManager, formatter
+	t.Cleanup(func() { svc, apiClient, authManager, formatter = origSvc, origClient, origManager, origFormatter })
 	authManager = nil
 	initStaticAuth(auth.NewStaticTokenProvider("ndpat_test123"))
 
@@ -346,6 +347,7 @@ func TestStaticTokenModeNeverDereferencesTheAuthManager(t *testing.T) {
 
 	t.Run("auth show", func(t *testing.T) {
 		out := captureStdout(t, func() {
+			formatter = output.NewTableFormatter()
 			if err := runAuthShow(authShowCmd, nil); err != nil {
 				t.Errorf("auth show: %v", err)
 			}
@@ -394,6 +396,7 @@ func TestStaticTokenModeNeverDereferencesTheAuthManager(t *testing.T) {
 
 	t.Run("config show", func(t *testing.T) {
 		out := captureStdout(t, func() {
+			formatter = output.NewTableFormatter()
 			if err := runConfigShow(configShowCmd, nil); err != nil {
 				t.Errorf("config show: %v", err)
 			}

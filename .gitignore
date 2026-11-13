@@ -47,4 +47,3 @@ local-only/
 /dist/
 *.mcpb
 *.mcpb.sha256
-*.mcpb.smithery-payload.json

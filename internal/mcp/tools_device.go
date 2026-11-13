@@ -327,9 +327,10 @@ func (s *Server) handleDeviceApproveAll(ctx context.Context, req *mcp.CallToolRe
 	}
 	if len(listing.Devices) == 0 {
 		return s.successResult(map[string]interface{}{
-			"approved": 0,
-			"failed":   0,
-			"devices":  []string{},
+			"approved":       0,
+			"approved_names": []string{},
+			"failed_count":   0,
+			"failed":         []map[string]string{},
 		}, "No pending devices found")
 	}
 	if !input.Confirm {
@@ -354,7 +355,7 @@ func (s *Server) handleDeviceApproveAll(ctx context.Context, req *mcp.CallToolRe
 				"device": r.Name,
 				"error":  r.Err.Error(),
 			}
-			if code := api.GetErrorCode(r.Err); code != "" {
+			if code := service.ErrorCode(r.Err); code != "" {
 				entry["code"] = code
 			}
 			failed = append(failed, entry)

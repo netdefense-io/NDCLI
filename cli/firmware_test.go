@@ -148,7 +148,7 @@ var firmwareInvocations = map[string][]string{
 	"firmware version unhalt":  {"26.7.5"},
 	"firmware version promote": {"26.7.5", "--track", "all", "--force"},
 	"firmware version halts":   nil,
-	"firmware failure clear":   {"26.7.5"},
+	"firmware failure clear":   {"26.7.5", "--force"},
 }
 
 // A plan without the feature can refuse any of the routes (every one when the
@@ -418,10 +418,10 @@ func TestFirmwareCommands(t *testing.T) {
 		{"version promote", []string{"version", "promote"}, []string{"26.7.5", "--track", "all", "--force"}, fwPromote, "POST",
 			"/api/v1/organizations/acme/firmware/promote", nil, map[string]interface{}{"version": "26.7.5", "track": "all"},
 			[]string{"Release 26.7.5 approved in fast, regular", "already approved"}, "results"},
-		{"failure clear", []string{"failure", "clear"}, []string{"26.7.5", "--track", "fast"}, fwCleared, "POST",
+		{"failure clear", []string{"failure", "clear"}, []string{"26.7.5", "--track", "fast", "--force"}, fwCleared, "POST",
 			"/api/v1/organizations/acme/firmware/failures/clear", nil, map[string]interface{}{"version": "26.7.5", "track": "fast"},
 			[]string{"Cleared 2 failures blocking release 26.7.5 in the fast track"}, "cleared"},
-		{"failure clear (every track)", []string{"failure", "clear"}, []string{"26.7.5"}, fwCleared, "POST",
+		{"failure clear (every track)", []string{"failure", "clear"}, []string{"26.7.5", "--force"}, fwCleared, "POST",
 			"/api/v1/organizations/acme/firmware/failures/clear", nil, map[string]interface{}{"version": "26.7.5"},
 			[]string{"in every track"}, "cleared"},
 	} {
@@ -478,6 +478,8 @@ func TestFirmwareConfirmations(t *testing.T) {
 		{"version promote of a major upgrade", []string{"version", "promote"}, []string{"26.7", "--major", "--track", "fast"}},
 		{"version unhalt of a major upgrade", []string{"version", "unhalt"}, []string{"26.7", "--major"}},
 		{"track set turning major upgrades on", []string{"track", "set"}, []string{"fast", "--auto-apply-major=true"}},
+		{"failure clear", []string{"failure", "clear"}, []string{"26.7.5"}},
+		{"failure clear of a major upgrade", []string{"failure", "clear"}, []string{"26.7", "--major", "--track", "fast"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, _, seen, err := runFirmware(t, http.StatusOK, `{}`, "table", tc.path, tc.args...)
@@ -518,6 +520,9 @@ func TestFirmwareRefusesBadInputBeforeSending(t *testing.T) {
 		{"promote to unmanaged is refused before the prompt", []string{"version", "promote"}, []string{"26.7.5", "--track", "unmanaged"}, `unknown track "unmanaged"`},
 		{"promote of a blank release is refused before the prompt", []string{"version", "promote"}, []string{" ", "--track", "fast"}, "version is required"},
 		{"promote of a blank series is refused before the prompt", []string{"version", "promote"}, []string{" ", "--major", "--track", "fast"}, "series is required"},
+		{"failure clear of an unknown track is refused before the prompt", []string{"failure", "clear"}, []string{"26.7.5", "--track", "unmanaged"}, `unknown track "unmanaged"`},
+		{"failure clear of a blank release is refused before the prompt", []string{"failure", "clear"}, []string{" "}, "version is required"},
+		{"failure clear of a revision with --major is refused before the prompt", []string{"failure", "clear"}, []string{"26.7", "--major", "--revision", "2"}, "revision"},
 		{"halt without a reason", []string{"version", "halt"}, []string{"26.7.5"}, "reason is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1001,7 +1006,7 @@ func TestFirmwareMajorCommands(t *testing.T) {
 		{"version promote, a major upgrade", []string{"version", "promote"}, []string{"26.7", "--major", "--track", "fast", "--force"}, fwSeriesPromote, "POST",
 			base + "/promote", nil, map[string]interface{}{"series": "26.7", "track": "fast"},
 			[]string{"Major upgrade to 26.7 approved in fast", "next window", "Series"}, "results"},
-		{"failure clear, a major upgrade", []string{"failure", "clear"}, []string{"26.7", "--major", "--track", "fast"}, fwSeriesCleared, "POST",
+		{"failure clear, a major upgrade", []string{"failure", "clear"}, []string{"26.7", "--major", "--track", "fast", "--force"}, fwSeriesCleared, "POST",
 			base + "/failures/clear", nil, map[string]interface{}{"series": "26.7", "track": "fast"},
 			[]string{"Cleared 1 failure blocking the major upgrade to 26.7 in the fast track"}, "cleared"},
 		{"version halts, both kinds", []string{"version", "halts"}, []string{"--kind", "all"}, fwSeriesHalts, "GET",
@@ -1101,7 +1106,7 @@ func TestFirmwareTurningMajorUpgradesOnAsksAndSaysWhatItMeans(t *testing.T) {
 		// built from.
 		for _, want := range []string{
 			"With major upgrades on, the track's update windows move its devices to the next OPNsense series. Each such upgrade:",
-			"takes the device offline for the length of the upgrade and reboots it three times;",
+			"takes the device offline for the length of the upgrade and reboots it three times, sometimes four;",
 			"has no automatic rollback;",
 			"leaves a device that loses power during the base or package install in a state that needs the console or a VM snapshot to recover;",
 			"needs a link of about 3 Mbit/s or better",
@@ -1131,7 +1136,7 @@ func TestFirmwareTurningMajorUpgradesOnAsksAndSaysWhatItMeans(t *testing.T) {
 	})
 	t.Run("promoting a major upgrade says what follows", func(t *testing.T) {
 		cmd := firmwareCommand(t, "version", "promote")
-		if long := strings.Join(strings.Fields(cmd.Long), " "); !strings.Contains(long, "a track with major upgrades on then upgrades every device that passes the gates at its next window: offline for the length of the upgrade, three reboots, no automatic rollback") {
+		if long := strings.Join(strings.Fields(cmd.Long), " "); !strings.Contains(long, "a track with major upgrades on then upgrades every device that passes the gates at its next window: offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback") {
 			t.Errorf("promote --help:\n%s", long)
 		}
 	})
@@ -1139,7 +1144,7 @@ func TestFirmwareTurningMajorUpgradesOnAsksAndSaysWhatItMeans(t *testing.T) {
 		cmd := firmwareCommand(t, "version", "unhalt")
 		long := strings.Join(strings.Fields(cmd.Long), " ")
 		for _, want := range []string{
-			"Lifting the halt on a major upgrade lets a track with major upgrades on that has approved the series upgrade every device that passes the gates at its next window: offline for the length of the upgrade, three reboots, no automatic rollback.",
+			"Lifting the halt on a major upgrade lets a track with major upgrades on that has approved the series upgrade every device that passes the gates at its next window: offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback.",
 			"So it asks for a confirmation (--force skips the prompt, and is required when stdin is not a TTY). Lifting the halt on a release asks nothing.",
 		} {
 			if !strings.Contains(long, want) {
@@ -1163,7 +1168,7 @@ func TestFirmwareTurningMajorUpgradesOnAsksAndSaysWhatItMeans(t *testing.T) {
 	t.Run("the help of the switch says it too", func(t *testing.T) {
 		long := strings.Join(strings.Fields(firmwareCommand(t, "track", "set").Long), " ")
 		for _, want := range []string{
-			"an upgrade takes the device offline, reboots it three times and has no automatic rollback",
+			"an upgrade takes the device offline, reboots it three times, sometimes four, and has no automatic rollback",
 			"--force skips the prompt, and is required when stdin is not a TTY",
 			"It is changed on its own, not with --soak-days or --min-success.",
 			"--auto-apply-major=false cancels the upgrade steps that were queued for the track's devices and not yet dispatched; one already running goes on.",
@@ -1229,7 +1234,7 @@ func TestFirmwareMajorFormsAnswerNotAvailableAsSent(t *testing.T) {
 		"version halt --major":               {[]string{"version", "halt"}, []string{"26.7", "--major", "--reason", "r"}},
 		"version unhalt --major":             {[]string{"version", "unhalt"}, []string{"26.7", "--major", "--force"}},
 		"version promote --major":            {[]string{"version", "promote"}, []string{"26.7", "--major", "--track", "all", "--force"}},
-		"failure clear --major":              {[]string{"failure", "clear"}, []string{"26.7", "--major"}},
+		"failure clear --major":              {[]string{"failure", "clear"}, []string{"26.7", "--major", "--force"}},
 		"version halts --kind all":           {[]string{"version", "halts"}, []string{"--kind", "all"}},
 	} {
 		t.Run(name, func(t *testing.T) {

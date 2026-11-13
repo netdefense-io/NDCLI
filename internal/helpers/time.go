@@ -32,33 +32,49 @@ var bareTimestampLayouts = []string{
 // configured timezone.
 var tzSuffix = regexp.MustCompile(`(?:Z|[+\-]\d{2}:\d{2})$`)
 
-// IsBareTimestamp reports whether input is a timestamp carrying no timezone
-// information of its own — neither a relative offset (which is anchored to
-// "now") nor an explicit `Z`/`±HH:MM` suffix. Such an input is ambiguous
-// without a location: the MCP surface refuses it unless the caller names one.
-func IsBareTimestamp(input string) bool {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return false
+// AtInputKind is what an --at-style input is, by its shape alone.
+type AtInputKind int
+
+const (
+	// AtEmpty is a blank input.
+	AtEmpty AtInputKind = iota
+	// AtRelative is an offset from now (30m, 2h), resolved in UTC.
+	AtRelative
+	// AtExplicitZone ends in its own zone designator, Z or ±HH:MM.
+	AtExplicitZone
+	// AtBare is a timestamp with no zone of its own: ambiguous without a
+	// location, so the MCP surface refuses it unless the caller names one.
+	AtBare
+)
+
+// ClassifyAtInput is the one place an --at-style input is classified;
+// IsBareTimestamp, HasExplicitZone and IsRelativeOffset read it, so the three
+// cannot drift apart.
+func ClassifyAtInput(input string) AtInputKind {
+	in := strings.TrimSpace(input)
+	switch {
+	case in == "":
+		return AtEmpty
+	case relativeFuturePattern.MatchString(strings.ToLower(in)):
+		return AtRelative
+	case tzSuffix.MatchString(in):
+		return AtExplicitZone
 	}
-	if relativeFuturePattern.MatchString(strings.ToLower(input)) {
-		return false
-	}
-	return !tzSuffix.MatchString(input)
+	return AtBare
 }
 
-// HasExplicitZone reports whether input carries a zone designator of its own —
-// a trailing `Z` or `±HH:MM`. Callers use it to name the zone from the input
-// rather than from whatever location the parse happened to attach.
-func HasExplicitZone(input string) bool {
-	return tzSuffix.MatchString(strings.TrimSpace(input))
-}
+// IsBareTimestamp reports whether input is a timestamp carrying no timezone of
+// its own (AtBare).
+func IsBareTimestamp(input string) bool { return ClassifyAtInput(input) == AtBare }
 
-// IsRelativeOffset reports whether input is a relative offset (`30m`, `2h`),
+// HasExplicitZone reports whether input carries a zone designator of its own
+// (AtExplicitZone). Callers use it to name the zone from the input rather than
+// from whatever location the parse happened to attach.
+func HasExplicitZone(input string) bool { return ClassifyAtInput(input) == AtExplicitZone }
+
+// IsRelativeOffset reports whether input is a relative offset (AtRelative),
 // which is anchored to "now" and therefore always resolves in UTC.
-func IsRelativeOffset(input string) bool {
-	return relativeFuturePattern.MatchString(strings.ToLower(strings.TrimSpace(input)))
-}
+func IsRelativeOffset(input string) bool { return ClassifyAtInput(input) == AtRelative }
 
 // ParseFutureTimeZoned parses an --at-style input into an absolute instant.
 // Accepted forms:

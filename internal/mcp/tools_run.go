@@ -52,9 +52,9 @@ func (in *runInput) allDevices() bool { return in.All || in.Org }
 const deprecatedOrgParam = "Deprecated: same as all, kept for existing callers. Use all."
 
 // atParamDescription and timezoneParamDescription are the single source of
-// truth for how the scheduling parameters are advertised: the MCPB manifest
-// and the Smithery server card are both generated from the live tool registry
-// (scripts/gen-mcpb-manifest.py), so this text is what every catalog shows.
+// truth for how the scheduling parameters are advertised: the MCPB manifest is
+// generated from the live tool registry (scripts/gen-mcpb-manifest.py), so this
+// text is what every catalog shows.
 //
 // The wording is deliberately insistent about asking the user. An agent that
 // guesses a timezone schedules a firewall reboot at the wrong hour and nothing
@@ -326,7 +326,7 @@ func (s *Server) registerRunTools() {
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name: "ndcli.run.firmware_upgrade",
 		Description: "Upgrade OPNsense firmware on one or more devices. " +
-			"mode=minor applies a point release; mode=major upgrades the full series and always reboots, up to three times. " +
+			"mode=minor applies a point release; mode=major upgrades the full series and always reboots, three times, sometimes four. " +
 			"DESTRUCTIVE: triggers an upgrade and (by default) reboots the firewall. " +
 			"major+reboot=false is rejected by the server (422). " +
 			"A device in a firmware track is refused with FIRMWARE_DEVICE_MANAGED: its track moves it between " +

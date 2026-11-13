@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/models"
 )
 
 var configCmd = &cobra.Command{
@@ -87,6 +88,7 @@ var configSetTimezoneCmd = &cobra.Command{
 func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configResetCmd)
+	addYesFlag(configResetCmd)
 	configCmd.AddCommand(configSetCmd)
 
 	configSetCmd.AddCommand(configSetOrgCmd)
@@ -95,65 +97,39 @@ func init() {
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) error {
+	return formatter.FormatConfigView(configView())
+}
+
+// configView is what config show reports. The auth backend is the one in use,
+// not just the auth.json path: when keyring is the backend (the common case on
+// macOS/Linux) auth.json does not exist and listing it is misleading. Read it
+// through svc: authManager is nil under NDCLI_TOKEN.
+func configView() *models.ConfigView {
 	cfg := config.Get()
-
-	color.Cyan("Configuration:")
-	fmt.Printf("  Config file:  %s\n", config.GetConfigFilePath())
-
-	// Report the auth backend actually in use, not just the auth.json path —
-	// when keyring is the backend (the common case on macOS/Linux) auth.json
-	// doesn't exist and listing it is misleading. The auth manager picks the
-	// backend via storage.pickStorage, which honors `auth.storage` config
-	// plus runtime keyring availability. Read it through svc: authManager is
-	// nil under NDCLI_TOKEN.
-	storageName := svc.AuthStorageName()
-	fmt.Printf("  Auth storage: %s\n", storageName)
-	if storageName == "file" {
-		fmt.Printf("  Auth file:    %s\n", config.GetAuthFilePath())
+	v := &models.ConfigView{
+		ConfigFile:   config.GetConfigFilePath(),
+		Auth:         models.ConfigViewAuth{Storage: svc.AuthStorageName(), Account: cfg.Auth.Account},
+		Controlplane: models.ConfigViewHost{Host: cfg.Controlplane.Host, SSLVerify: cfg.Controlplane.SSLVerify},
+		Pathfinder:   models.ConfigViewHost{Host: cfg.Pathfinder.Host, SSLVerify: cfg.Pathfinder.SSLVerify},
+		Organization: models.ConfigViewOrg{Name: cfg.Organization.Name},
+		Output:       models.ConfigViewOutput{Format: cfg.Output.Format, Timezone: cfg.Output.Timezone},
 	}
-	if cfg.Auth.Account != "" {
-		fmt.Printf("  Auth account: %s\n", cfg.Auth.Account)
+	if v.Auth.Storage == "file" {
+		v.Auth.File = config.GetAuthFilePath()
 	}
-	fmt.Println()
-
-	color.Cyan("Controlplane:")
-	fmt.Printf("  Host:       %s\n", cfg.Controlplane.Host)
-	fmt.Printf("  SSL Verify: %v\n", cfg.Controlplane.SSLVerify)
-	fmt.Println()
-
-	color.Cyan("Connection relay (pathfinder):")
-	if cfg.Pathfinder.Host != "" {
-		fmt.Printf("  Host:       %s\n", cfg.Pathfinder.Host)
-		fmt.Printf("  SSL Verify: %v\n", cfg.Pathfinder.SSLVerify)
-	} else {
-		fmt.Println("  Host:       (not configured)")
+	if v.Output.Format == "" {
+		v.Output.Format = config.DefaultOutputFormat
 	}
-	fmt.Println()
-
-	color.Cyan("Organization:")
-	if cfg.Organization.Name != "" {
-		fmt.Printf("  Name: %s\n", cfg.Organization.Name)
-	} else {
-		fmt.Println("  Name: (not set)")
+	if v.Output.Timezone == "" {
+		v.Output.Timezone = config.DefaultTimezone
 	}
-	fmt.Println()
-
-	color.Cyan("Output:")
-	outputFormat := cfg.Output.Format
-	if outputFormat == "" {
-		outputFormat = config.DefaultOutputFormat
-	}
-	fmt.Printf("  Format:   %s\n", outputFormat)
-	timezone := cfg.Output.Timezone
-	if timezone == "" {
-		timezone = config.DefaultTimezone
-	}
-	fmt.Printf("  Timezone: %s\n", timezone)
-
-	return nil
+	return v
 }
 
 func runConfigReset(cmd *cobra.Command, args []string) error {
+	if ok, err := confirmUnlessYes(cmd, "Reset the configuration to defaults?"); !ok {
+		return err
+	}
 	if err := config.CreateDefaultConfig(); err != nil {
 		return fmt.Errorf("failed to reset configuration: %w", err)
 	}

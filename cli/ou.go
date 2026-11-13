@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -120,10 +119,12 @@ func init() {
 	ouCmd.AddCommand(ouDeviceListCmd)
 	ouCmd.AddCommand(ouAddDeviceCmd)
 	ouCmd.AddCommand(ouRemoveDeviceCmd)
+	addYesFlag(ouRemoveDeviceCmd)
 	ouCmd.AddCommand(ouTemplateCmd)
 
 	ouTemplateCmd.AddCommand(ouTemplateAddCmd)
 	ouTemplateCmd.AddCommand(ouTemplateRemoveCmd)
+	addYesFlag(ouTemplateRemoveCmd)
 	ouTemplateCmd.AddCommand(ouTemplateListCmd)
 
 	// List flags
@@ -182,11 +183,12 @@ func runOUCreate(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	description, _ := cmd.Flags().GetString("description")
-	if _, err := svc.OUCreate(context.Background(), org, name, description); err != nil {
+	ou, err := svc.OUCreate(context.Background(), org, name, description)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ OU created: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: name, Action: "created",
+		Details: map[string]interface{}{"organizational_unit": ou}, Message: fmt.Sprintf("✓ OU created: %s", name)})
 }
 
 func runOUDelete(cmd *cobra.Command, args []string) error {
@@ -194,9 +196,8 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete OU '%s'?", name)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete OU '%s'?", name)); !ok {
+		return err
 	}
 	if err := svc.OUDelete(context.Background(), org, name); err != nil {
 		var apiErr *api.APIError
@@ -206,8 +207,8 @@ func runOUDelete(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	color.Green("✓ OU deleted: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: name, Action: "deleted",
+		Message: fmt.Sprintf("✓ OU deleted: %s", name)})
 }
 
 func runOURename(cmd *cobra.Command, args []string) error {
@@ -218,8 +219,8 @@ func runOURename(cmd *cobra.Command, args []string) error {
 	if _, err := svc.OURename(context.Background(), org, oldName, newName); err != nil {
 		return err
 	}
-	color.Green("✓ OU renamed: %s → %s", oldName, newName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: oldName, Action: "renamed",
+		Details: map[string]interface{}{"new_name": newName}, Message: fmt.Sprintf("✓ OU renamed: %s → %s", oldName, newName)})
 }
 
 func runOUDeviceList(cmd *cobra.Command, args []string) error {
@@ -241,8 +242,8 @@ func runOUAddDevice(cmd *cobra.Command, args []string) error {
 	if err := svc.OUAddDevice(context.Background(), org, ouName, deviceName); err != nil {
 		return err
 	}
-	color.Green("✓ Device added to %s: %s", ouName, deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: ouName, Action: "added",
+		Details: map[string]interface{}{"device": deviceName}, Message: fmt.Sprintf("✓ Device added to %s: %s", ouName, deviceName)})
 }
 
 func runOURemoveDevice(cmd *cobra.Command, args []string) error {
@@ -250,11 +251,14 @@ func runOURemoveDevice(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	ouName, deviceName := args[0], args[1]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove device '%s' from OU '%s'?", deviceName, ouName)); !ok {
+		return err
+	}
 	if err := svc.OURemoveDevice(context.Background(), org, ouName, deviceName); err != nil {
 		return err
 	}
-	color.Green("✓ Device removed from %s: %s", ouName, deviceName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: ouName, Action: "removed",
+		Details: map[string]interface{}{"device": deviceName}, Message: fmt.Sprintf("✓ Device removed from %s: %s", ouName, deviceName)})
 }
 
 func runOUTemplateAdd(cmd *cobra.Command, args []string) error {
@@ -265,8 +269,8 @@ func runOUTemplateAdd(cmd *cobra.Command, args []string) error {
 	if err := svc.OUTemplateAdd(context.Background(), org, ouName, templateName); err != nil {
 		return err
 	}
-	color.Green("✓ Template added to %s: %s", ouName, templateName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: ouName, Action: "added",
+		Details: map[string]interface{}{"template": templateName}, Message: fmt.Sprintf("✓ Template added to %s: %s", ouName, templateName)})
 }
 
 func runOUTemplateRemove(cmd *cobra.Command, args []string) error {
@@ -274,11 +278,14 @@ func runOUTemplateRemove(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	ouName, templateName := args[0], args[1]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove template '%s' from OU '%s'?", templateName, ouName)); !ok {
+		return err
+	}
 	if err := svc.OUTemplateRemove(context.Background(), org, ouName, templateName); err != nil {
 		return err
 	}
-	color.Green("✓ Template removed from %s: %s", ouName, templateName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "ou", Name: ouName, Action: "removed",
+		Details: map[string]interface{}{"template": templateName}, Message: fmt.Sprintf("✓ Template removed from %s: %s", ouName, templateName)})
 }
 
 func runOUTemplateList(cmd *cobra.Command, args []string) error {

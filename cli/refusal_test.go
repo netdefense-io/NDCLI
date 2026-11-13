@@ -219,8 +219,5 @@ func TestMainHelperProcess(t *testing.T) {
 		t.Fatalf("decode HELPER_ARGS: %v", err)
 	}
 	os.Args = append([]string{"ndcli"}, args...)
-	if err := Execute(); err != nil {
-		os.Exit(1)
-	}
-	os.Exit(0)
+	os.Exit(ExitCode(Execute()))
 }

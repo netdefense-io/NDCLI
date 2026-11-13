@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creack/pty v1.1.24
 	github.com/fatih/color v1.18.0
-	github.com/gorilla/websocket v1.5.1
+	github.com/gorilla/websocket v1.5.1 // stay on v1.5.1, never v1.5.3: it builds the mask key from math/rand (GO-2026-6278)
 	github.com/mdp/qrterminal/v3 v3.2.0
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/spf13/cobra v1.8.1

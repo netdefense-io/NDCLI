@@ -3,11 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
+	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -96,8 +96,10 @@ func init() {
 	addYesFlag(templateDeleteCmd)
 	templateCmd.AddCommand(templateAddSnippetCmd)
 	templateCmd.AddCommand(templateRemoveSnippetCmd)
+	addYesFlag(templateRemoveSnippetCmd)
 	templateCmd.AddCommand(templateAddSoftwareCmd)
 	templateCmd.AddCommand(templateRemoveSoftwareCmd)
+	addYesFlag(templateRemoveSoftwareCmd)
 
 	templateListCmd.Flags().String("sort-by", "name:asc", "Sort field and direction")
 	templateListCmd.Flags().Int("page", 1, "Page number")
@@ -147,15 +149,16 @@ func runTemplateCreate(cmd *cobra.Command, args []string) error {
 	description, _ := cmd.Flags().GetString("description")
 	position, _ := cmd.Flags().GetString("position")
 
-	if _, err := svc.TemplateCreate(context.Background(), org, service.TemplateCreateOpts{
+	t, err := svc.TemplateCreate(context.Background(), org, service.TemplateCreateOpts{
 		Name:        name,
 		Description: description,
 		Position:    position,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Template created: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: name, Value: t, Action: "created",
+		Message: fmt.Sprintf("✓ Template created: %s", name)})
 }
 
 func runTemplateDescribe(cmd *cobra.Command, args []string) error {
@@ -188,17 +191,20 @@ func runTemplateUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var lines []string
 	if opts.NewName != "" {
-		color.Green("✓ Template renamed: %s -> %s", name, opts.NewName)
+		lines = append(lines, fmt.Sprintf("✓ Template renamed: %s -> %s", name, opts.NewName))
 	}
 	if opts.Description != "" && opts.Position != "" {
-		color.Green("✓ Template updated: %s", finalName)
+		lines = append(lines, fmt.Sprintf("✓ Template updated: %s", finalName))
 	} else if opts.Description != "" {
-		color.Green("✓ Template description updated: %s", finalName)
+		lines = append(lines, fmt.Sprintf("✓ Template description updated: %s", finalName))
 	} else if opts.Position != "" {
-		color.Green("✓ Template position updated: %s", finalName)
+		lines = append(lines, fmt.Sprintf("✓ Template position updated: %s", finalName))
 	}
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: name, Action: "updated",
+		Details: map[string]interface{}{"name": finalName, "renamed": opts.NewName != "", "old_name": name},
+		Message: strings.Join(lines, "\n")})
 }
 
 func runTemplateDelete(cmd *cobra.Command, args []string) error {
@@ -206,15 +212,14 @@ func runTemplateDelete(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	name := args[0]
-	if !confirmUnlessYes(cmd, fmt.Sprintf("Delete template '%s'?", name)) {
-		fmt.Fprintln(os.Stderr, "Cancelled")
-		return nil
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Delete template '%s'?", name)); !ok {
+		return err
 	}
 	if err := svc.TemplateDelete(context.Background(), org, name); err != nil {
 		return err
 	}
-	color.Green("✓ Template deleted: %s", name)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: name, Action: "deleted",
+		Details: map[string]interface{}{"name": name}, Message: fmt.Sprintf("✓ Template deleted: %s", name)})
 }
 
 func runTemplateAddSnippet(cmd *cobra.Command, args []string) error {
@@ -225,8 +230,8 @@ func runTemplateAddSnippet(cmd *cobra.Command, args []string) error {
 	if err := svc.TemplateAddSnippet(context.Background(), org, templateName, snippetName); err != nil {
 		return err
 	}
-	color.Green("✓ Snippet added to %s: %s", templateName, snippetName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: templateName, Action: "added",
+		Details: map[string]interface{}{"snippet": snippetName}, Message: fmt.Sprintf("✓ Snippet added to %s: %s", templateName, snippetName)})
 }
 
 func runTemplateRemoveSnippet(cmd *cobra.Command, args []string) error {
@@ -234,11 +239,14 @@ func runTemplateRemoveSnippet(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	templateName, snippetName := args[0], args[1]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove snippet '%s' from template '%s'?", snippetName, templateName)); !ok {
+		return err
+	}
 	if err := svc.TemplateRemoveSnippet(context.Background(), org, templateName, snippetName); err != nil {
 		return err
 	}
-	color.Green("✓ Snippet removed from %s: %s", templateName, snippetName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: templateName, Action: "removed",
+		Details: map[string]interface{}{"snippet": snippetName}, Message: fmt.Sprintf("✓ Snippet removed from %s: %s", templateName, snippetName)})
 }
 
 func runTemplateAddSoftware(cmd *cobra.Command, args []string) error {
@@ -249,8 +257,8 @@ func runTemplateAddSoftware(cmd *cobra.Command, args []string) error {
 	if err := svc.TemplateAddSoftwarePolicy(context.Background(), org, templateName, policyName); err != nil {
 		return err
 	}
-	color.Green("✓ Software policy added to %s: %s", templateName, policyName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: templateName, Action: "attached",
+		Details: map[string]interface{}{"software_policy_name": policyName}, Message: fmt.Sprintf("✓ Software policy added to %s: %s", templateName, policyName)})
 }
 
 func runTemplateRemoveSoftware(cmd *cobra.Command, args []string) error {
@@ -258,9 +266,12 @@ func runTemplateRemoveSoftware(cmd *cobra.Command, args []string) error {
 	org := requireOrganization()
 
 	templateName, policyName := args[0], args[1]
+	if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove software policy '%s' from template '%s'?", policyName, templateName)); !ok {
+		return err
+	}
 	if err := svc.TemplateRemoveSoftwarePolicy(context.Background(), org, templateName, policyName); err != nil {
 		return err
 	}
-	color.Green("✓ Software policy removed from %s: %s", templateName, policyName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "template", Name: templateName, Action: "detached",
+		Details: map[string]interface{}{"software_policy_name": policyName}, Message: fmt.Sprintf("✓ Software policy removed from %s: %s", templateName, policyName)})
 }

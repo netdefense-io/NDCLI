@@ -522,3 +522,63 @@ func TestFirmwareTrackResultLinesOfAMajorUpgrade(t *testing.T) {
 		t.Errorf("lines:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// The rollout lists the series the organization's devices run, with their
+// device counts and which are end of life (#277); a board that predates the
+// field shows nothing for it.
+func TestFirmwareRolloutShowsTheSeriesInUse(t *testing.T) {
+	r := firmwareRolloutMajorSample()
+	r.SeriesInUse = []models.FirmwareSeriesInUse{{Series: "25.7", Devices: 2, EndOfLife: true}, {Series: "26.1", Devices: 1}}
+	for _, format := range []string{"table", "simple"} {
+		mustContain(t, format, render(t, format, "FormatFirmwareRollout", r), "Series in use: 25.7 (2 devices, end of life), 26.1 (1 device)")
+	}
+	detailed := seriesInUseBox(t, render(t, "detailed", "FormatFirmwareRollout", r))
+	for _, row := range []struct{ series, want, not string }{{"25.7", "2 devices, end of life", ""}, {"26.1", "1 device", "end of life"}} {
+		line := lineWith(detailed, row.series)
+		if !strings.Contains(line, row.want) || (row.not != "" && strings.Contains(line, row.not)) {
+			t.Errorf("detailed row for %s = %q, want %q", row.series, line, row.want)
+		}
+	}
+
+	// Without the repository check above it, the line still starts a section of
+	// its own.
+	r.AgentRepo = nil
+	table := render(t, "table", "FormatFirmwareRollout", r)
+	lines := strings.Split(table, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "Series in use:") && (i == 0 || strings.TrimSpace(lines[i-1]) != "") {
+			t.Errorf("no blank line above the series in use:\n%s", table)
+		}
+	}
+
+	r.SeriesInUse = []models.FirmwareSeriesInUse{{Devices: 3}}
+	for _, format := range []string{"table", "simple"} {
+		mustContain(t, format, render(t, format, "FormatFirmwareRollout", r), "Series in use: unknown (3 devices)")
+	}
+	mustContain(t, "detailed", lineWith(seriesInUseBox(t, render(t, "detailed", "FormatFirmwareRollout", r)), "3 devices"), "unknown")
+
+	r.SeriesInUse = nil
+	for _, format := range []string{"table", "simple", "detailed"} {
+		mustNotContain(t, format, render(t, format, "FormatFirmwareRollout", r), "Series in use")
+	}
+}
+
+// seriesInUseBox is the detailed rollout from its "Series in use" box on.
+func seriesInUseBox(t *testing.T, out string) string {
+	t.Helper()
+	i := strings.Index(out, "Series in use")
+	if i < 0 {
+		t.Fatalf("no Series in use box in:\n%s", out)
+	}
+	return out[i:]
+}
+
+// lineWith is the first line of out that holds sub, or "".
+func lineWith(out, sub string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, sub) {
+			return line
+		}
+	}
+	return ""
+}

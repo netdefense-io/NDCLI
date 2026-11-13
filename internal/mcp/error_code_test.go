@@ -157,7 +157,9 @@ func TestSnippetWriteTools_ShowSNIPPET_UUID_IN_USE(t *testing.T) {
 func TestSyncApply_CarriesSNIPPET_UUID_CONFLICT(t *testing.T) {
 	const message = "More than one snippet on this device carries the same uuid: " +
 		"221f3268-aaaa-4aaa-8aaa-aaaaaaaaaaaa (snippets: corp-web, corp-web-copy; templates: edge). " +
-		"Keep one snippet per uuid: delete the others and create them again without a uuid"
+		"Keep one snippet per uuid: edit each extra snippet and give it a new managed uuid " +
+		"(221f3268-xxxx-4xxx-yxxx-xxxxxxxxxxxx in lowercase hex, y one of 8, 9, a or b); " +
+		"its templates and priority stay as they are"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/api/v1/sync" {

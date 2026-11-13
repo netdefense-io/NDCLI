@@ -107,7 +107,7 @@ var (
 
 // firmwareMajorWhat says once what a major upgrade is, for the descriptions.
 const firmwareMajorWhat = "A major upgrade moves a device to the next OPNsense series (for example 26.1 to 26.7): it takes the device " +
-	"offline for the length of the upgrade, reboots it three times and has no automatic rollback."
+	"offline for the length of the upgrade, reboots it three times, sometimes four, and has no automatic rollback."
 
 // firmwareKindProperty is the kind argument of the tools that address a release
 // or a major upgrade.
@@ -473,8 +473,9 @@ func (s *Server) registerFirmwareTools() {
 			"kind=major); and agent_repo {configured, channel, trees: [{abi, ok, checked_at}]}, the control plane's check of "+
 			"NetDefense's own package repository for the FreeBSD versions an upgrade crosses (a missing tree fails every "+
 			"OPNsense check of an upgraded device; configured=false means the check is not running; trees is empty when "+
-			"nothing was checked lately). majors, major_failures and agent_repo are absent from a server that predates "+
-			"major upgrades.",
+			"nothing was checked lately). series_in_use lists the OPNsense series the organization's devices run, oldest "+
+			"first, with devices (the count) and end_of_life. majors, major_failures and agent_repo are absent from a server "+
+			"that predates major upgrades, and series_in_use from one that predates it.",
 		firmwareOrgProps(nil), nil,
 		firmwareHandler(s, orgOnly, s.firmwareRollout))
 
@@ -919,7 +920,7 @@ func (s *Server) firmwareVersionUnhalt(ctx context.Context, in *firmwareVersionT
 		if kind == models.FirmwareKindMajor {
 			return s.previewResultWithNote("lift the halt on firmware major upgrade to series", name,
 				"A track with auto_apply_major on that has approved it will then upgrade its eligible devices at its next window: "+
-					"offline for the length of the upgrade, three reboots, no automatic rollback.",
+					"offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback.",
 				map[string]interface{}{"organization": org, "version": name, "kind": kind})
 		}
 		return s.previewResultWithData("lift the halt on firmware release", name,
@@ -955,7 +956,7 @@ func (s *Server) firmwareVersionPromote(ctx context.Context, in *firmwareVersion
 			return s.previewResultWithNote("promote firmware major upgrade to series without waiting for its soak",
 				fmt.Sprintf("%s → %s", name, scope),
 				"A track with auto_apply_major on will then upgrade its eligible devices at its next window: "+
-					"offline for the length of the upgrade, three reboots, no automatic rollback.",
+					"offline for the length of the upgrade, three reboots, sometimes four, no automatic rollback.",
 				map[string]interface{}{"organization": org, "version": name, "kind": kind, "track": track})
 		}
 		return s.previewResultWithData("promote firmware release without waiting for its soak",

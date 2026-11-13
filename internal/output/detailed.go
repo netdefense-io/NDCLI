@@ -348,6 +348,9 @@ func (f *DetailedFormatter) formatOrganizationRich(o *models.Organization) {
 	if defaultOU := o.GetDefaultOU(); defaultOU != "" {
 		fmt.Fprintf(f.Writer, "  %-12s %s\n", "Default OU", defaultOU)
 	}
+	if o.AllowUnverifiedRepos != nil {
+		fmt.Fprintf(f.Writer, "  Unverified repositories: %s\n", unverifiedReposValue(*o.AllowUnverifiedRepos))
+	}
 	fmt.Fprintln(f.Writer)
 
 	// Members section (if we have member count data)
@@ -811,7 +814,7 @@ func (f *DetailedFormatter) FormatSyncStatus(items []models.SyncStatusItem, tota
 
 		// Status row
 		var status string
-		if item.Error != nil && *item.Error != "" {
+		if item.HasError() {
 			status = "ERROR"
 		} else if item.IsSynced() {
 			status = "SYNCED"
@@ -831,8 +834,8 @@ func (f *DetailedFormatter) FormatSyncStatus(items []models.SyncStatusItem, tota
 		fmt.Fprintf(f.Writer, "%-12s %s\n", "Auto-Sync", autoSync)
 
 		// Error
-		if item.Error != nil && *item.Error != "" {
-			ColorError.Fprintf(f.Writer, "  %-12s %s\n", "Error", *item.Error)
+		if item.HasError() {
+			ColorError.Fprintf(f.Writer, "  %-12s %s\n", "Error", WithCode(item.ErrorCode(), *item.Error))
 		}
 
 		// OUs
@@ -1601,7 +1604,6 @@ func (f *DetailedFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) erro
 func (f *DetailedFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
-		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 

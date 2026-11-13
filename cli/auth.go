@@ -1,13 +1,12 @@
 package cli
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -16,7 +15,9 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth/oauth2"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/helpers"
 	"github.com/netdefense-io/NDCLI/internal/models"
+	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/storage"
 )
@@ -91,6 +92,7 @@ func init() {
 	authCmd.AddCommand(authMeCmd)
 	authCmd.AddCommand(authRefreshCmd)
 	authCmd.AddCommand(authMigrateCmd)
+	addYesFlag(authMigrateCmd)
 	authCmd.AddCommand(authDeleteCmd)
 	authCmd.AddCommand(authTokenCmd)
 
@@ -243,84 +245,16 @@ func logoutSession(w io.Writer, s *service.Service) error {
 // network call and no refresh, because the refresh token rotates and a status
 // command must not race a running TUI, MCP server or another ndcli for it.
 func runAuthShow(cmd *cobra.Command, args []string) error {
-	renderAuthStatus(color.Output, svc.AuthStatus(), config.GetCurrentHost(), svc.AuthStorageName(), time.Now())
-	return nil
+	return formatter.FormatAuthShow(models.NewAuthShow(svc.AuthStatus(), config.GetCurrentHost(), svc.AuthStorageName()))
 }
 
-// renderAuthStatus prints one of the five session states. It is a pure function
-// of its inputs so every state can be tested without a keyring.
+// renderAuthStatus is output.WriteAuthShow for a session status, a pure
+// function of its inputs so every state can be tested without a keyring.
 func renderAuthStatus(w io.Writer, st *models.SessionStatus, host, storageName string, now time.Time) {
-	footer := func() {
-		fmt.Fprintf(w, "  Host:      %s\n", host)
-		fmt.Fprintf(w, "  Storage:   %s\n", storageName)
-	}
-	expired := func() {
-		fmt.Fprintf(w, "  Expired:   %s (%s)\n", st.ExpiresAt.Format(time.RFC3339), agoSince(now, st.ExpiresAt))
-	}
-
-	switch st.State {
-	case models.SessionStatic:
-		color.New(color.FgCyan).Fprintln(w, "Authentication Status:")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  Method:    Personal access token (NDCLI_TOKEN)")
-		footer()
-
-	case models.SessionValid, models.SessionRefreshable:
-		color.New(color.FgCyan).Fprintln(w, "Authentication Status:")
-		fmt.Fprintln(w)
-		if st.Email != "" {
-			fmt.Fprintf(w, "  Email:     %s\n", st.Email)
-		}
-		if st.Name != "" {
-			fmt.Fprintf(w, "  Name:      %s\n", st.Name)
-		}
-		if st.Subject != "" {
-			fmt.Fprintf(w, "  Subject:   %s\n", st.Subject)
-		}
-		if st.State == models.SessionValid {
-			fmt.Fprintf(w, "  Expires:   %s\n", st.ExpiresAt.Format(time.RFC3339))
-			color.New(color.FgGreen).Fprintln(w, "  Status:    Valid")
-		} else {
-			// Yellow, not red: nothing is wrong, the next command renews it.
-			expired()
-			color.New(color.FgYellow).Fprintln(w, "  Status:    Access token expired; it refreshes automatically on the next command")
-		}
-		if st.HasRefresh {
-			fmt.Fprintln(w, "  Refresh:   Available")
-		}
-		footer()
-
-	case models.SessionExpired:
-		color.New(color.FgRed).Fprintln(w, "✗ Session expired")
-		if st.Email != "" {
-			fmt.Fprintf(w, "  Email:     %s\n", st.Email)
-		}
-		expired()
-		footer()
-		fmt.Fprintln(w, "\nRun 'ndcli auth login' to authenticate")
-
-	default:
-		color.New(color.FgRed).Fprintln(w, "✗ Not authenticated")
-		footer()
-		fmt.Fprintln(w, "\nRun 'ndcli auth login' to authenticate")
-	}
+	output.WriteAuthShow(w, models.NewAuthShow(st, host, storageName), now)
 }
 
-// agoSince renders how long before now t was. A token inside the 60 s refresh
-// buffer has not reached its expiry yet and reads as "just now".
-func agoSince(now, t time.Time) string {
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
+func agoSince(now, t time.Time) string { return output.AgoSince(now, t) }
 
 func runAuthMe(cmd *cobra.Command, args []string) error {
 	requireAuth()
@@ -355,6 +289,44 @@ func refreshSession(w io.Writer, s *service.Service) error {
 	return nil
 }
 
+// leftoverAuthFile reports whether the auth file is one a migration left
+// behind: the keyring holds exactly its bytes, as MigrateToKeyring copied them,
+// so deleting it loses nothing. The config alone does not prove that:
+// auth.storage can say keyring by hand or through NDCLI_AUTH_STORAGE, and the
+// keyring can hold an older session or another account's.
+func leftoverAuthFile(loadFile, loadKeyring func() ([]byte, error)) bool {
+	file, err := loadFile()
+	if err != nil || len(file) == 0 {
+		return false
+	}
+	inKeyring, err := loadKeyring()
+	if err != nil || len(inKeyring) == 0 {
+		return false
+	}
+	return bytes.Equal(file, inKeyring)
+}
+
+// deleteOldAuthFile asks whether to delete the auth file the keyring has
+// replaced, and deletes it on a yes.
+func deleteOldAuthFile(cmd *cobra.Command) error {
+	filePath := storage.NewFileStorage("").FilePath()
+	fmt.Fprintln(os.Stderr)
+	deleteFile, err := askUnlessYes(cmd, fmt.Sprintf("Delete old auth file (%s)?", filePath), true)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "  Old file kept at:", filePath)
+		return err
+	}
+	if !deleteFile {
+		fmt.Println("  Old file kept at:", filePath)
+		return nil
+	}
+	if err := storage.DeleteFileStorage(); err != nil {
+		return fmt.Errorf("failed to delete old auth file %s: %w", filePath, err)
+	}
+	color.Green("✓ Old auth file deleted")
+	return nil
+}
+
 func runAuthMigrate(cmd *cobra.Command, args []string) error {
 	// Check if keyring is available
 	if !storage.IsKeyringAvailable() {
@@ -365,6 +337,11 @@ func runAuthMigrate(cmd *cobra.Command, args []string) error {
 	cfg := config.Get()
 	if cfg.Auth.Storage == "keyring" {
 		color.Yellow("Already using keyring storage")
+		// A migration whose last question went unanswered leaves the file
+		// behind; a rerun finishes it.
+		if leftoverAuthFile(storage.NewFileStorage("").Load, storage.NewKeyringStorage().Load) {
+			return deleteOldAuthFile(cmd)
+		}
 		return nil
 	}
 
@@ -378,52 +355,34 @@ func runAuthMigrate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Account: %s\n", email)
 	fmt.Println()
 
-	// Prompt to update config
-	fmt.Print("Update config to use keyring storage? [Y/n]: ")
-	reader := bufio.NewReader(os.Stdin)
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	if response == "" || response == "y" || response == "yes" {
+	updateConfig, err := askUnlessYes(cmd, "Update config to use keyring storage?", true)
+	if err != nil {
+		return err
+	}
+	if updateConfig {
+		// Each failure stops before the old file is offered for deletion,
+		// and exits non-zero: with -y nobody is watching.
 		if err := config.UpdateValue("auth.storage", "keyring"); err != nil {
-			color.Red("Failed to update config: %v", err)
-		} else {
-			color.Green("✓ Config updated to use keyring storage")
+			return fmt.Errorf("failed to update config: %w", err)
 		}
+		color.Green("✓ Config updated to use keyring storage")
 
 		// Verify keyring is working
 		fmt.Println()
 		fmt.Println("Verifying keyring storage...")
-		keyringStorage := storage.NewKeyringStorage()
-		data, err := keyringStorage.Load()
+		data, err := storage.NewKeyringStorage().Load()
 		if err != nil {
-			color.Red("✗ Failed to read from keyring: %v", err)
-			fmt.Println("  You may need to manually revert the config change")
-			return nil
+			return fmt.Errorf("failed to read from keyring: %w (you may need to revert the config change by hand)", err)
 		}
 		if data == nil {
-			color.Red("✗ No data found in keyring")
-			fmt.Println("  You may need to manually revert the config change")
-			return nil
+			return fmt.Errorf("no data found in keyring (you may need to revert the config change by hand)")
+		}
+		if !leftoverAuthFile(storage.NewFileStorage("").Load, storage.NewKeyringStorage().Load) {
+			return fmt.Errorf("the keyring does not hold the session in %s, so it is kept", storage.NewFileStorage("").FilePath())
 		}
 		color.Green("✓ Keyring storage verified")
 
-		// Prompt to delete old file
-		filePath := storage.GetFileStoragePath()
-		fmt.Println()
-		fmt.Printf("Delete old auth file (%s)? [Y/n]: ", filePath)
-		response, _ = reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-
-		if response == "" || response == "y" || response == "yes" {
-			if err := storage.DeleteFileStorage(); err != nil {
-				color.Red("Failed to delete old file: %v", err)
-			} else {
-				color.Green("✓ Old auth file deleted")
-			}
-		} else {
-			fmt.Println("  Old file kept at:", filePath)
-		}
+		return deleteOldAuthFile(cmd)
 	} else {
 		fmt.Println()
 		fmt.Println("To use keyring storage, add this to your config:")
@@ -450,10 +409,11 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprint(os.Stderr, "Type 'DELETE' to confirm: ")
 
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(response)
-
+		response, answered := helpers.ReadAnswer()
+		if !answered && !helpers.StdinIsTerminal() {
+			fmt.Fprintln(os.Stderr)
+			return unansweredPromptError(cmd)
+		}
 		if response != "DELETE" {
 			fmt.Fprintln(os.Stderr, "Aborted.")
 			return nil

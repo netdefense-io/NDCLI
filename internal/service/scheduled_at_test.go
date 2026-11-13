@@ -229,7 +229,11 @@ func TestRunRegisterSpecRejectsAScheduledAt(t *testing.T) {
 // naming the zone from the parsed location would describe identical user input
 // differently on different hosts. The name comes from the offset instead.
 func TestResolveScheduledAt_ZoneNameIsHostIndependent(t *testing.T) {
-	_, hostOffset := time.Now().In(time.Local).Zone()
+	// The offset is the host's at the tested instant: a DST change inside the
+	// next 48 hours would otherwise give the input another offset than the one
+	// the host has then.
+	target := time.Now().Add(48 * time.Hour).In(time.Local)
+	_, hostOffset := target.Zone()
 	sign := "+"
 	if hostOffset < 0 {
 		sign = "-"
@@ -237,7 +241,7 @@ func TestResolveScheduledAt_ZoneNameIsHostIndependent(t *testing.T) {
 	}
 	offset := fmt.Sprintf("%s%02d:%02d", sign, hostOffset/3600, (hostOffset%3600)/60)
 
-	at := time.Now().Add(48*time.Hour).In(time.Local).Format("2006-01-02T15:04:05") + offset
+	at := target.Format("2006-01-02T15:04:05") + offset
 	resolved, err := ResolveScheduledAt(at, time.UTC, "at")
 	if err != nil {
 		t.Fatalf("unexpected error for %q: %v", at, err)

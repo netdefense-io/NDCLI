@@ -193,6 +193,9 @@ func (f *SimpleFormatter) FormatOrganization(org *models.Organization) error {
 	if defaultOU := org.GetDefaultOU(); defaultOU != "" {
 		fmt.Fprintf(f.Writer, "  Default OU: %s\n", defaultOU)
 	}
+	if org.AllowUnverifiedRepos != nil {
+		fmt.Fprintf(f.Writer, "  Unverified repositories: %s\n", unverifiedReposValue(*org.AllowUnverifiedRepos))
+	}
 	if org.DeviceCount > 0 {
 		fmt.Fprintf(f.Writer, "  Devices: %d\n", org.DeviceCount)
 	}
@@ -431,7 +434,7 @@ func (f *SimpleFormatter) FormatSyncStatus(items []models.SyncStatusItem, total 
 
 	for _, item := range items {
 		var status string
-		if item.Error != nil && *item.Error != "" {
+		if item.HasError() {
 			status = ColorError.Sprint("ERROR")
 		} else if item.IsSynced() {
 			status = ColorSuccess.Sprint("SYNCED")
@@ -443,6 +446,9 @@ func (f *SimpleFormatter) FormatSyncStatus(items []models.SyncStatusItem, total 
 			ous = fmt.Sprintf(" (%s)", item.GetOUsDisplay())
 		}
 		fmt.Fprintf(f.Writer, "• %s%s [%s]\n", item.DeviceName, ous, status)
+		if item.HasError() {
+			fmt.Fprintf(f.Writer, "  %s\n", WithCode(item.ErrorCode(), *item.Error))
+		}
 	}
 	fmt.Fprintf(f.Writer, "\nTotal: %d devices\n", total)
 	return nil
@@ -873,7 +879,6 @@ func (f *SimpleFormatter) FormatVpnPrefix(prefix *models.VpnMemberPrefix) error 
 func (f *SimpleFormatter) FormatVpnConnections(connections []models.EffectiveConnection, total int) error {
 	if len(connections) == 0 {
 		f.Info("No VPN connections found")
-		writeConnectionsSummary(f.Writer, connections)
 		return nil
 	}
 

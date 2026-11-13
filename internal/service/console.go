@@ -243,7 +243,9 @@ func (s *Service) ConsoleConnectWithProgress(ctx context.Context, org, deviceNam
 			if msg == "" {
 				msg = "unknown error"
 			}
-			return nil, &Error{Code: CodeAPIError, Message: "connect task failed: " + msg}
+			// The device's own relay dial may have been refused; its report
+			// carries the relay's status and Retry-After.
+			return nil, &Error{Code: CodeAPIError, Message: "connect task failed: " + msg, Err: pathfinder.AgentRelayRefusal(msg)}
 
 		case models.TaskStatusCanceled:
 			settled = true

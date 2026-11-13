@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -167,11 +165,13 @@ func runNetworkPrefixUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no update flags specified")
 	}
 	v, _ := cmd.Flags().GetBool("publish")
-	if _, err := svc.NetworkPrefixUpdate(context.Background(), org, vpnName, deviceName, variableName, &v); err != nil {
+	prefix, err := svc.NetworkPrefixUpdate(context.Background(), org, vpnName, deviceName, variableName, &v)
+	if err != nil {
 		return err
 	}
-	color.Green("✓ Prefix updated: %s on %s in %s", variableName, deviceName, vpnName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "prefix", Name: variableName, Value: prefix, Action: "updated",
+		Details: map[string]interface{}{"network": vpnName, "device": deviceName},
+		Message: fmt.Sprintf("✓ Prefix updated: %s on %s in %s", variableName, deviceName, vpnName)})
 }
 
 func runNetworkPrefixRemove(cmd *cobra.Command, args []string) error {
@@ -182,14 +182,14 @@ func runNetworkPrefixRemove(cmd *cobra.Command, args []string) error {
 
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	if !skipConfirm {
-		if !helpers.Confirm(fmt.Sprintf("Remove prefix '%s' from '%s' in VPN '%s'?", variableName, deviceName, vpnName)) {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return nil
+		if ok, err := confirmUnlessYes(cmd, fmt.Sprintf("Remove prefix '%s' from '%s' in VPN '%s'?", variableName, deviceName, vpnName)); !ok {
+			return err
 		}
 	}
 	if err := svc.NetworkPrefixRemove(context.Background(), org, vpnName, deviceName, variableName); err != nil {
 		return err
 	}
-	color.Green("✓ Prefix removed: %s from %s in %s", variableName, deviceName, vpnName)
-	return nil
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "network", Name: vpnName, Action: "removed",
+		Details: map[string]interface{}{"device": deviceName, "variable": variableName},
+		Message: fmt.Sprintf("✓ Prefix removed: %s from %s in %s", variableName, deviceName, vpnName)})
 }

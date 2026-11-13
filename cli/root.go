@@ -10,6 +10,7 @@ import (
 	"github.com/netdefense-io/NDCLI/internal/api"
 	"github.com/netdefense-io/NDCLI/internal/auth"
 	"github.com/netdefense-io/NDCLI/internal/config"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 	"github.com/netdefense-io/NDCLI/internal/update"
@@ -83,6 +84,11 @@ It provides commands for managing devices, organizations, templates, and more.`,
 			// Commands that write/revoke tokens require interactive JWT auth.
 			if isTokenMutationCommand(cmd) {
 				return fmt.Errorf("token create/revoke requires interactive authentication — unset NDCLI_TOKEN and log in with 'ndcli auth login'")
+			}
+			// The server refuses a token here (INTERACTIVE_LOGIN_REQUIRED):
+			// an account is deleted only by the interactive login that owns it.
+			if cmd.CommandPath() == "ndcli auth delete" {
+				return fmt.Errorf("auth delete requires interactive authentication — unset NDCLI_TOKEN and log in with 'ndcli auth login'")
 			}
 			initStaticAuth(staticProvider)
 			return setupOutputAndFormatter(cmd)
@@ -326,8 +332,9 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Args:  noArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("ndcli version %s\n", config.Version)
-		fmt.Printf("Build time: %s\n", config.BuildTime)
+	// No config is loaded for version, so only -f picks the format: the human
+	// formats keep the two lines scripts read.
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return output.GetFormatter(outputFmt).FormatVersion(&models.VersionInfo{Version: config.Version, BuildTime: config.BuildTime})
 	},
 }

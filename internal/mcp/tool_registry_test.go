@@ -58,8 +58,9 @@ func TestToolRegistry_SupportAndResponderNames(t *testing.T) {
 		}
 	}
 
-	if got := len(names); got != 179 {
-		t.Errorf("the server registers %d tools, want 179 — update this count deliberately, with the README and CLAUDE.md", got)
+	if got := len(names); got != 180 {
+		t.Errorf("the server registers %d tools, want 180 — update this count deliberately, and the count in the README, CLAUDE.md, "+
+			"server.json.tmpl and mcpb/manifest.json.tmpl with it (TestDocumentedToolCountsMatchTheRegistry checks them)", got)
 	}
 }
 

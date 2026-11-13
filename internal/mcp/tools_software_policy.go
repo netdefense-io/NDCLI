@@ -231,7 +231,7 @@ func (s *Server) registerSoftwarePolicyTools() {
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.software.set_repository",
-		Description: `Add or update a custom package repository in a software policy. Repositories are configured on the device before any package work, so packages served only by a custom repository can then be named in require_package. The entry is identified by 'name': calling this again with the same name updates it in place, and any field you omit keeps its stored value rather than resetting. 'url' and 'signature' are required only when adding a repository that does not exist yet. Identical values are a no-op. Signature configuration is required; type "none" is accepted only for organizations that have unverified repositories enabled. Requires confirm=true.`,
+		Description: `Add or update a custom package repository in a software policy. Repositories are configured on the device before any package work, so packages served only by a custom repository can then be named in require_package. The entry is identified by 'name': calling this again with the same name updates it in place, and any field you omit keeps its stored value rather than resetting. 'url' and 'signature' are required only when adding a repository that does not exist yet. Identical values are a no-op. Signature configuration is required; type "none", or a non-https url, is accepted only when the organization allows unverified repositories (ndcli.org.set_unverified_repos, superuser only; ndcli.org.describe shows it). Requires confirm=true.`,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -697,7 +697,6 @@ func (s *Server) handleSoftwarePolicyPackageMutation(ctx context.Context, req *m
 	// Translate outcomes into a structured payload the LLM can summarize.
 	// Keep keys snake_case to match the rest of the MCP surface.
 	results := make([]map[string]interface{}, 0, len(outcomes))
-	changed, moved, noop := 0, 0, 0
 	for _, o := range outcomes {
 		entry := map[string]interface{}{
 			"package": o.Package,
@@ -707,16 +706,8 @@ func (s *Server) handleSoftwarePolicyPackageMutation(ctx context.Context, req *m
 			entry["from"] = string(o.From)
 		}
 		results = append(results, entry)
-		switch o.Action {
-		case "no-change":
-			noop++
-		case "moved":
-			moved++
-		default:
-			changed++
-		}
 	}
-	summary := fmt.Sprintf("%d change(s), %d move(s), %d no-op(s)", changed, moved, noop)
+	summary := models.PackageEditResult{Outcomes: outcomes}.Summary()
 	data := map[string]interface{}{
 		"policy":  input.Policy,
 		"op":      op,

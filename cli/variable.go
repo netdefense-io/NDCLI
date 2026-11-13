@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/netdefense-io/NDCLI/internal/api"
-	"github.com/netdefense-io/NDCLI/internal/helpers"
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/output"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -325,16 +325,16 @@ func makeVarCreateHandler(meta variableScopeMeta) func(*cobra.Command, []string)
 			return err
 		}
 
-		if meta.requiresEntity {
-			color.Green("Variable created: %s (at %s '%s')", varName, meta.displayName, entity)
-		} else {
+		message := fmt.Sprintf("Variable created: %s (at %s '%s')", varName, meta.displayName, entity)
+		if !meta.requiresEntity {
 			secretIndicator := ""
 			if variable.Secret {
 				secretIndicator = " [SECRET]"
 			}
-			color.Green("Variable created: %s (at %s level)%s", varName, meta.displayName, secretIndicator)
+			message = fmt.Sprintf("Variable created: %s (at %s level)%s", varName, meta.displayName, secretIndicator)
 		}
-		return nil
+		return formatter.FormatActionResult(&models.ActionResult{Resource: "variable", Name: varName, Value: variable, Action: "created",
+			Message: message})
 	}
 }
 
@@ -421,11 +421,12 @@ func makeVarSetHandler(meta variableScopeMeta) func(*cobra.Command, []string) er
 			return err
 		}
 		opts.Value = value
-		if _, err := svc.VariableSet(context.Background(), meta.scope, org, entity, varName, opts); err != nil {
+		variable, err := svc.VariableSet(context.Background(), meta.scope, org, entity, varName, opts)
+		if err != nil {
 			return err
 		}
-		color.Green("Variable updated: %s", varName)
-		return nil
+		return formatter.FormatActionResult(&models.ActionResult{Resource: "variable", Name: varName, Value: variable, Action: "updated",
+			Message: fmt.Sprintf("Variable updated: %s", varName)})
 	}
 }
 
@@ -468,9 +469,10 @@ func makeVarDeleteHandler(meta variableScopeMeta) func(*cobra.Command, []string)
 		skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 		// Org-scope deletes cascade to other-scope overrides — warn first.
+		overrideCount := 0
 		if meta.scope == service.VarScopeOrg {
-			if overrideCount := svc.VariableCountNonOrgDefinitions(ctx, org, varName); overrideCount > 0 {
-				color.Yellow("WARNING: This will also delete %d override(s) at other scopes (OU, template, device)", overrideCount)
+			if overrideCount = svc.VariableCountNonOrgDefinitions(ctx, org, varName); overrideCount > 0 {
+				_, _ = color.New(color.FgYellow).Fprintf(os.Stderr, "WARNING: This will also delete %d override(s) at other scopes (OU, template, device)\n", overrideCount)
 			}
 		}
 
@@ -480,17 +482,17 @@ func makeVarDeleteHandler(meta variableScopeMeta) func(*cobra.Command, []string)
 				msg += fmt.Sprintf(" from %s '%s'", meta.entityName, entity)
 			}
 			msg += "?"
-			if !helpers.Confirm(msg) {
-				fmt.Fprintln(os.Stderr, "Cancelled")
-				return nil
+			if ok, err := confirmUnlessYes(cmd, msg); !ok {
+				return err
 			}
 		}
 
 		if err := svc.VariableDelete(ctx, meta.scope, org, entity, varName); err != nil {
 			return err
 		}
-		color.Green("Variable deleted: %s", varName)
-		return nil
+		return formatter.FormatActionResult(&models.ActionResult{Resource: "name", Name: varName, Action: "deleted",
+			Details: map[string]interface{}{"scope": string(meta.scope), "entity": entity, "cascade_count": overrideCount},
+			Message: fmt.Sprintf("Variable deleted: %s", varName)})
 	}
 }
 

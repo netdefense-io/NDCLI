@@ -181,21 +181,14 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 	// Handle 401 - token refresh and retry
 	if resp.StatusCode == http.StatusUnauthorized && retry && c.authMgr != nil {
+		rejected := ParseError(resp)
 		resp.Body.Close()
 
 		// Brief backoff before refresh attempt
 		time.Sleep(100 * time.Millisecond)
 
 		if err := c.authMgr.ForceRefresh(); err != nil {
-			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
-			// Preserve the provider's own message (e.g. static-token sentinel).
-			if err.Error() != "" {
-				msg = err.Error()
-			}
-			return nil, &APIError{
-				StatusCode: http.StatusUnauthorized,
-				Message:    msg,
-			}
+			return nil, refreshFailedError(rejected, err)
 		}
 
 		// Retry with new token
@@ -203,6 +196,18 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	return resp, nil
+}
+
+// refreshFailedError is the error of a request the server refused with 401
+// when the token could not be refreshed: the provider's own words (the
+// static-token sentinel, say) or the re-login hint, with the code the server
+// answered, so [AUTH_INVALID] and -f json's code survive.
+func refreshFailedError(rejected *APIError, refreshErr error) *APIError {
+	msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
+	if refreshErr.Error() != "" {
+		msg = refreshErr.Error()
+	}
+	return &APIError{StatusCode: http.StatusUnauthorized, Code: rejected.Code, Message: msg}
 }
 
 func (c *Client) handleNetworkError(err error) error {
@@ -458,15 +463,12 @@ func (c *Client) doRawPost(ctx context.Context, path string, open BodyOpener, co
 	update.ProcessResponseHeaders(resp.Header)
 
 	if resp.StatusCode == http.StatusUnauthorized && retry && c.authMgr != nil {
+		rejected := ParseError(resp)
 		resp.Body.Close()
 		cancel()
 		time.Sleep(100 * time.Millisecond)
 		if err := c.authMgr.ForceRefresh(); err != nil {
-			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
-			if err.Error() != "" {
-				msg = err.Error()
-			}
-			return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: msg}
+			return nil, refreshFailedError(rejected, err)
 		}
 		// open() is called again on the retry, which is why it is a
 		// factory rather than a reader: the first attempt consumed the
@@ -517,15 +519,12 @@ func (c *Client) doRawGet(ctx context.Context, path string, retry bool) (*http.R
 	update.ProcessResponseHeaders(resp.Header)
 
 	if resp.StatusCode == http.StatusUnauthorized && retry && c.authMgr != nil {
+		rejected := ParseError(resp)
 		resp.Body.Close()
 		cancel()
 		time.Sleep(100 * time.Millisecond)
 		if err := c.authMgr.ForceRefresh(); err != nil {
-			msg := "Authentication failed. Please run 'ndcli auth login' to re-authenticate."
-			if err.Error() != "" {
-				msg = err.Error()
-			}
-			return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: msg}
+			return nil, refreshFailedError(rejected, err)
 		}
 		return c.doRawGet(ctx, path, false)
 	}

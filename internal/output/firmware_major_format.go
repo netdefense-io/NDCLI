@@ -182,6 +182,32 @@ func firmwareEndOfLifeText(series string) string {
 	return "OPNsense gives " + series + " no more updates while the upgrade path from it is open"
 }
 
+// firmwareSeriesInUseText lists the series the organization's devices run:
+// "25.7 (2 devices, end of life), 26.1 (5 devices)".
+func firmwareSeriesInUseText(list []models.FirmwareSeriesInUse) string {
+	parts := make([]string, 0, len(list))
+	for _, s := range list {
+		parts = append(parts, firmwareSeriesInUseName(s)+" ("+firmwareSeriesInUseCounts(s)+")")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func firmwareSeriesInUseName(s models.FirmwareSeriesInUse) string {
+	if s.Series == "" {
+		return "unknown"
+	}
+	return s.Series
+}
+
+// firmwareSeriesInUseCounts is "2 devices, end of life" or "5 devices".
+func firmwareSeriesInUseCounts(s models.FirmwareSeriesInUse) string {
+	text := firmwarePlural(s.Devices, "device", "devices")
+	if s.EndOfLife {
+		text += ", end of life"
+	}
+	return text
+}
+
 // firmwareAgentRepoText is the control plane's check of NetDefense's own package
 // repository: after an upgrade across a FreeBSD version a device's NetDefense
 // repository names the new version's tree, and a missing one fails every
@@ -241,10 +267,10 @@ func firmwareMajorFailureLine(fl models.FirmwareMajorFailure) string {
 // firmwareMajorClearHint says how a failed major upgrade is cleared.
 const firmwareMajorClearHint = "A failed major upgrade blocks the series in the later tracks only; clear it with 'ndcli firmware failure clear <series> --major'."
 
-// writeFirmwareMajorsTable prints the major upgrades, their failures and the
-// check of NetDefense's repository as the table format shows them. It prints
-// nothing for a board that has none of the three (a control plane that predates
-// major upgrades sends none).
+// writeFirmwareMajorsTable prints the major upgrades, their failures, the
+// check of NetDefense's repository and the series in use as the table format
+// shows them. It prints nothing for a board that has none of the four (a
+// control plane that predates them sends none).
 func writeFirmwareMajorsTable(f BaseFormatter, r *models.FirmwareRollout) {
 	if len(r.Majors) > 0 {
 		fmt.Fprintln(f.Writer)
@@ -270,6 +296,12 @@ func writeFirmwareMajorsTable(f BaseFormatter, r *models.FirmwareRollout) {
 	if r.AgentRepo != nil {
 		fmt.Fprintln(f.Writer)
 		fmt.Fprintf(f.Writer, "NetDefense repository: %s\n", firmwareAgentRepoText(r.AgentRepo, false))
+	}
+	if len(r.SeriesInUse) > 0 {
+		if r.AgentRepo == nil {
+			fmt.Fprintln(f.Writer)
+		}
+		fmt.Fprintf(f.Writer, "Series in use: %s\n", firmwareSeriesInUseText(r.SeriesInUse))
 	}
 }
 
@@ -304,6 +336,9 @@ func writeFirmwareMajorsSimple(f BaseFormatter, r *models.FirmwareRollout) {
 	}
 	if r.AgentRepo != nil {
 		fmt.Fprintf(f.Writer, "  NetDefense repository: %s\n", firmwareAgentRepoText(r.AgentRepo, false))
+	}
+	if len(r.SeriesInUse) > 0 {
+		fmt.Fprintf(f.Writer, "  Series in use: %s\n", firmwareSeriesInUseText(r.SeriesInUse))
 	}
 }
 
@@ -356,5 +391,13 @@ func writeFirmwareMajorsDetailed(f BaseFormatter, r *models.FirmwareRollout) {
 		firmwareFieldBox("NetDefense repository", []firmwareField{
 			{"Check", firmwareAgentRepoText(r.AgentRepo, true)},
 		}).render(f)
+	}
+	if len(r.SeriesInUse) > 0 {
+		fields := make([]firmwareField, 0, len(r.SeriesInUse))
+		for _, s := range r.SeriesInUse {
+			fields = append(fields, firmwareField{firmwareSeriesInUseName(s), firmwareSeriesInUseCounts(s)})
+		}
+		fmt.Fprintln(f.Writer)
+		firmwareFieldBox("Series in use", fields).render(f)
 	}
 }

@@ -164,8 +164,8 @@ updates to its track ('ndcli firmware').
 kernel updates stay deferred, and the device runs the new packages on the old
 base and kernel until a later upgrade without --no-reboot completes them.
 
---mode major upgrades to the next series and always reboots, up to three
-times; --no-reboot is refused with --mode major.
+--mode major upgrades to the next series and always reboots, three times,
+sometimes four; --no-reboot is refused with --mode major.
 
 --no-check skips the firmware availability check before a minor upgrade. With
 ndagent ` + models.FirmwareMajorCheckMinAgentVersion + ` or later, a major upgrade always runs its own check first and

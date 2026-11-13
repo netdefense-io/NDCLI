@@ -286,3 +286,35 @@ func TestRelativeOffsetsRefuseWhatWouldOverflow(t *testing.T) {
 		t.Error("ResolveTimeFilter(36501d) was accepted past its 100-year bound")
 	}
 }
+
+// ClassifyAtInput and the three predicates that read it, over the edges.
+func TestClassifyAtInput(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want AtInputKind
+	}{
+		{"", AtEmpty},
+		{"   ", AtEmpty},
+		{"30m", AtRelative},
+		{"2H", AtRelative},
+		{" 1w ", AtRelative},
+		{"45s", AtRelative},
+		{"2026-05-12T03:00:00Z", AtExplicitZone},
+		{"2026-05-12T03:00:00-03:00", AtExplicitZone},
+		{"2026-05-12T03:00:00-00:00", AtExplicitZone},
+		{"2026-05-12T03:00:00+05:30 ", AtExplicitZone},
+		{"2026-05-12 03:00", AtBare},
+		{"2026-05-12", AtBare},
+		{"2h30m", AtBare},
+		{"30x", AtBare},
+	} {
+		got := ClassifyAtInput(c.in)
+		if got != c.want {
+			t.Errorf("ClassifyAtInput(%q) = %v, want %v", c.in, got, c.want)
+		}
+		if IsRelativeOffset(c.in) != (c.want == AtRelative) || HasExplicitZone(c.in) != (c.want == AtExplicitZone) ||
+			IsBareTimestamp(c.in) != (c.want == AtBare) {
+			t.Errorf("%q: the predicates disagree with %v", c.in, c.want)
+		}
+	}
+}
