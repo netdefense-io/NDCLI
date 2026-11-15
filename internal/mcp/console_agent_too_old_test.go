@@ -17,7 +17,7 @@ import (
 
 // console_open refused for the device's agent returns the control plane's code
 // and message with console_open's hint, which says an update would not give
-// a read-only caller commands, and sends nothing after the refused POST.
+// a read-only caller commands, and sends nothing after the refusal.
 func TestConsoleOpenExplainsAnAgentTooOldForReadOnly(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
@@ -57,7 +57,9 @@ func TestConsoleOpenExplainsAnAgentTooOldForReadOnly(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 1 || seen[0] != "POST /api/v1/organizations/acme/devices/fw-01/connect" {
-		t.Errorf("requests %v, want only the refused POST", seen)
+	// The preflight has the connect request's gates, so it is what is
+	// refused, and no connect request follows.
+	if len(seen) != 1 || seen[0] != "GET /api/v1/organizations/acme/devices/fw-01/connect-info" {
+		t.Errorf("requests %v, want only the refused preflight", seen)
 	}
 }

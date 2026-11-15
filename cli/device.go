@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -461,7 +462,25 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 
 	// Create spinner for connection progress
 	spinner := output.NewConnectSpinner(deviceName)
-	defer spinner.Stop()
+	defer func() { spinner.Stop() }()
+
+	// The server says which transport the session gets. A direct-peer one is
+	// opened and run here; anything else goes on below as it always has.
+	direct, info, err := svc.DirectConnect(ctx, org, deviceName, service.DirectConnectOpts{Timeout: timeout, Progress: spinner.UpdateMessage})
+	if err != nil {
+		spinner.Stop()
+		return service.ConnectAdvice(connectError(ctx, err), connectAgentTooOldHint(deviceName))
+	}
+	if direct != nil {
+		cfg := connectClientConfig("", webadminPort, noWebadmin, webadminOnly, spinner.UpdateMessage, stdoutTTY, stdinTTY)
+		cfg.WebAdminListener = webadminListener
+		return runDirectSession(ctx, stopSignals, spinner, direct, cfg)
+	}
+	if info != nil && info.FallsBack() {
+		spinner.Stop()
+		fmt.Fprintln(os.Stderr, connectFallbackNotice(info.Reason))
+		spinner = output.NewConnectSpinner(deviceName)
+	}
 
 	// Step 1: Initiate connection
 	resp, err := apiClient.Post(ctx, fmt.Sprintf("/api/v1/organizations/%s/devices/%s/connect", org, deviceName), nil)
@@ -589,6 +608,71 @@ func runDeviceConnect(cmd *cobra.Command, args []string) error {
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// connectFallbackNotice says that a session of an organization set to
+// direct-peer + encrypted relay runs on the websocket relay, and why.
+func connectFallbackNotice(reason string) string {
+	return "Note: this session runs on the " + models.ConnectTransportName(models.ConnectTransportRelayLegacy) + ", not on " +
+		models.ConnectTransportName(models.ConnectTransportDirectPeer) + " as the organization is set to: " + models.ConnectFallbackText(reason) + "."
+}
+
+// directPathText is how a direct-peer session reached its device.
+func directPathText(direct bool) string {
+	if direct {
+		return "direct (peer to peer)"
+	}
+	return "relayed (through the encrypted relay)"
+}
+
+// runDirectSession runs a session whose device listens on direct-peer +
+// encrypted relay. A session that cannot be set up fails here: it is never
+// tried on the websocket relay. The transport is named before the shell
+// starts and the path after it ends, never while the terminal is the remote
+// shell's.
+func runDirectSession(ctx context.Context, stopSignals context.CancelFunc, spinner *output.ConnectSpinner, direct *service.DirectConnect, cfg pathfinder.ClientConfig) error {
+	settled := false
+	defer func() {
+		if !settled {
+			stopSignals()
+			_ = svc.CloseConnectSession(direct.Task)
+		}
+	}()
+
+	// 0: not known, 1: direct, 2: relayed.
+	var path atomic.Int32
+	direct.Session.OnPath = func(peerToPeer bool) {
+		if peerToPeer {
+			path.Store(1)
+		} else {
+			path.Store(2)
+		}
+	}
+	cfg.Direct = direct.Session
+	paired := false
+	cfg.OnPaired = func() {
+		paired = true
+		stopSignals()
+		fmt.Fprintln(os.Stderr, "Session on "+models.ConnectTransportName(models.ConnectTransportDirectPeer)+", end-to-end encrypted (relay "+direct.Relay.Hostname+").")
+	}
+	client, err := pathfinder.NewClient(cfg)
+	if err != nil {
+		spinner.Stop()
+		return err
+	}
+	spinner.Stop()
+	err = client.ConnectContext(ctx)
+	if p := path.Load(); paired && p != 0 {
+		fmt.Fprintln(os.Stderr, "Last path to the device: "+directPathText(p == 1)+".")
+	}
+	if err != nil {
+		if paired {
+			return err
+		}
+		return connectError(ctx, err)
+	}
+	settled = true
+	return nil
 }
 
 // connectAgentTooOldHint is the CLI's way forward when the control plane

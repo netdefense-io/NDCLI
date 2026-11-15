@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,6 +18,13 @@ import (
 // refusal of ndcli's own dial does.
 func TestConsoleOpenReadsTheDevicesRateLimitedRelay(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/connect-info") {
+			// A control plane that predates the connect preflight.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
 			_, _ = io.WriteString(w, `{"task": "task-123", "status": "PENDING"}`)

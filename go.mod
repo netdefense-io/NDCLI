@@ -3,6 +3,7 @@ module github.com/netdefense-io/NDCLI
 go 1.27.4
 
 require (
+	filippo.io/edwards25519 v1.2.0
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/adrg/xdg v0.5.3
 	github.com/briandowns/spinner v1.23.0

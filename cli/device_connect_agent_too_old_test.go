@@ -15,7 +15,7 @@ import (
 
 // A read-only session refused for the device's agent ends device connect with
 // the control plane's code and message and the CLI's hint, and sends nothing
-// after the refused POST: no task exists to poll or cancel.
+// after the refusal: no task exists to poll or cancel.
 func TestDeviceConnectExplainsAnAgentTooOldForReadOnly(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
@@ -48,7 +48,9 @@ func TestDeviceConnectExplainsAnAgentTooOldForReadOnly(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 1 || seen[0] != "POST /api/v1/organizations/acme/devices/fw-01/connect" {
-		t.Errorf("requests %v, want only the refused POST", seen)
+	// The preflight has the connect request's gates, so it is what is
+	// refused, and no connect request follows.
+	if len(seen) != 1 || seen[0] != "GET /api/v1/organizations/acme/devices/fw-01/connect-info" {
+		t.Errorf("requests %v, want only the refused preflight", seen)
 	}
 }

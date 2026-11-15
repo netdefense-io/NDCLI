@@ -234,6 +234,7 @@ type Formatter interface {
 	FormatPackageEdit(r *models.PackageEditResult) error
 	FormatEntryEdit(r *models.EntryEditResult) error
 	FormatAuthShow(a *models.AuthShow) error
+	FormatOrgConnectTransport(t *models.OrgConnectTransport) error
 	FormatConfigView(c *models.ConfigView) error
 	FormatVersion(v *models.VersionInfo) error
 

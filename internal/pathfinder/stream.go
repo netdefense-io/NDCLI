@@ -11,9 +11,9 @@ import (
 // FrameTypeOpen flood can force onto this process.
 const maxConcurrentStreams = 64
 
-// StreamManager manages multiplexed streams over a relay client connection
+// StreamManager manages multiplexed streams over a session's link
 type StreamManager struct {
-	client *RelayClient
+	client link
 
 	streams      map[uint32]*Stream
 	streamsMu    sync.RWMutex
@@ -22,8 +22,8 @@ type StreamManager struct {
 	onNewStream func(*Stream)
 }
 
-// NewStreamManager creates a new stream manager for the given relay client
-func NewStreamManager(client *RelayClient) *StreamManager {
+// NewStreamManager creates a new stream manager for the given link
+func NewStreamManager(client link) *StreamManager {
 	mgr := &StreamManager{
 		client:  client,
 		streams: make(map[uint32]*Stream),
@@ -263,25 +263,33 @@ func (s *Stream) nextFrame() ([]byte, error) {
 	return nil, io.EOF
 }
 
-// Write writes data to the stream
+// Write writes data to the stream, in frames of at most maxStreamFrameData
+// bytes each. A write longer than one frame is not one unit: frames of two
+// goroutines writing to the same stream at once may alternate.
 func (s *Stream) Write(p []byte) (int, error) {
-	select {
-	case <-s.closed:
-		return 0, io.ErrClosedPipe
-	default:
-	}
+	written := 0
+	for {
+		select {
+		case <-s.closed:
+			return written, io.ErrClosedPipe
+		default:
+		}
 
-	frame := &Frame{
-		Type:     FrameTypeData,
-		StreamID: s.id,
-		Data:     p,
-	}
+		frame := &Frame{
+			Type:     FrameTypeData,
+			StreamID: s.id,
+			Data:     p[written:min(len(p), written+maxStreamFrameData)],
+		}
 
-	if err := s.manager.send(frame); err != nil {
-		return 0, err
-	}
+		if err := s.manager.send(frame); err != nil {
+			return written, err
+		}
 
-	return len(p), nil
+		written += len(frame.Data)
+		if written == len(p) {
+			return written, nil
+		}
+	}
 }
 
 // Close closes the stream

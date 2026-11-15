@@ -33,9 +33,13 @@ func (f *JSONFormatter) FormatTaskCancelled(r *models.TaskCancelResult) error {
 	if r.Outcome != "" {
 		outcome = r.Outcome
 	}
-	return f.output(map[string]interface{}{
+	out := map[string]interface{}{
 		"task":    r.Task,
 		"outcome": outcome,
 		"message": r.Message,
-	})
+	}
+	if r.CloseTask != "" {
+		out["close_task"] = r.CloseTask
+	}
+	return f.output(out)
 }

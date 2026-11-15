@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/netdefense-io/NDCLI/internal/pathfinder"
@@ -29,6 +30,11 @@ type consoleSession struct {
 	openedAt  time.Time
 
 	handle *pathfinder.ExecHandle
+
+	// transport is what the session runs on. path is how a direct-peer
+	// session reaches its device: 0 not known yet, 1 direct, 2 relayed.
+	transport string
+	path      atomic.Int32
 
 	// mu serialises Exec calls for this session.
 	mu sync.Mutex
@@ -283,4 +289,25 @@ func (m *ConsoleSessionManager) reapIdle() {
 	for _, id := range idle {
 		m.removeWithReason(id, "closed after 30 minutes without activity")
 	}
+}
+
+// setPath records how a direct-peer session reaches its device.
+func (c *consoleSession) setPath(direct bool) {
+	if direct {
+		c.path.Store(1)
+	} else {
+		c.path.Store(2)
+	}
+}
+
+// pathValue is the path as the tools return it: "direct", "relayed", or nil
+// while it is not known, as it always is on the websocket relay.
+func (c *consoleSession) pathValue() interface{} {
+	switch c.path.Load() {
+	case 1:
+		return "direct"
+	case 2:
+		return "relayed"
+	}
+	return nil
 }

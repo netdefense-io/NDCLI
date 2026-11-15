@@ -37,6 +37,21 @@ type orgSetUnverifiedReposInput struct {
 	Confirm      bool   `json:"confirm"`
 }
 
+type orgSetConnectTransportInput struct {
+	Organization string `json:"organization,omitempty"`
+	Transport    string `json:"transport"`
+	Relay        string `json:"relay,omitempty"`
+	ClearRelay   bool   `json:"clear_relay,omitempty"`
+	Confirm      bool   `json:"confirm"`
+}
+
+// connectTransportMeaning is what the two transports are, shared by the two
+// tools' descriptions.
+const connectTransportMeaning = "The transports are relay-legacy (the websocket relay) and direct-peer (direct-peer + encrypted relay: " +
+	"end-to-end encrypted between the connecting program and the device, peer to peer when the networks allow it and through an encrypted relay otherwise). " +
+	"The server chooses each session's transport from this setting; a session of an organization set to direct-peer still runs on the websocket relay " +
+	"when the device's agent or the connecting program cannot run direct-peer, and reports why. "
+
 // unverifiedReposDescription is what ndcli.org.set_unverified_repos does, who
 // may call it, and what follows each way.
 const unverifiedReposDescription = "Allow or forbid the organization's software policies to declare package repositories " +
@@ -176,6 +191,36 @@ func (s *Server) registerOrgTools() {
 			"required": []string{"ou"},
 		},
 	}, s.handleOrgSetDefaultOU)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name: "ndcli.org.connect_transport",
+		Description: "Read which transport the organization's remote sessions (ndcli device connect, the console tools) run on. " + connectTransportMeaning +
+			"Returns connect_transport, connect_relay (the relay direct-peer sessions meet on, null when none is chosen), relays (the relays the server offers) " +
+			"and direct_peer_available (false when this server has direct-peer switched off or offers no relay). SERVER_TOO_OLD when the server predates the choice.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{"organization": organizationProperty()},
+		},
+	}, s.handleOrgConnectTransport)
+
+	s.mcpServer.AddTool(&mcp.Tool{
+		Name: "ndcli.org.set_connect_transport",
+		Description: "Set which transport the organization's remote sessions run on. " + connectTransportMeaning +
+			"direct-peer needs a relay: relay is an id from ndcli.org.connect_transport, and without it the relay already chosen is kept. " +
+			"Only a superuser of the organization may change it, from an interactive login: a personal access token is refused. " +
+			"The change applies to the next session; open sessions keep running. Previews unless confirm=true.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"organization": organizationProperty(),
+				"transport":    stringEnumProperty("The transport of the organization's next remote sessions", models.ConnectTransports),
+				"relay":        stringProperty("Relay id for direct-peer sessions; omit to keep the one already chosen"),
+				"clear_relay":  boolProperty("true to remove the chosen relay, which only relay-legacy allows; not together with relay"),
+				"confirm":      confirmProperty(),
+			},
+			"required": []string{"transport"},
+		},
+	}, s.handleOrgSetConnectTransport)
 
 	s.mcpServer.AddTool(&mcp.Tool{
 		Name:        "ndcli.org.set_unverified_repos",
@@ -793,4 +838,84 @@ func accountSummary(a *models.Account) map[string]interface{} {
 		"created_at": a.CreatedAt,
 		"last_login": a.LastLogin,
 	}
+}
+
+// connectTransportData is the setting as both tools return it: the keys of
+// the CLI's -f json.
+func connectTransportData(t *models.OrgConnectTransport) map[string]interface{} {
+	return map[string]interface{}{
+		"organization_name":     t.OrganizationName,
+		"connect_transport":     t.ConnectTransport,
+		"connect_relay":         t.ConnectRelay,
+		"relays":                t.Relays,
+		"direct_peer_available": t.DirectPeerAvailable,
+	}
+}
+
+func (s *Server) handleOrgConnectTransport(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[struct {
+		Organization string `json:"organization,omitempty"`
+	}](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+	setting, err := s.svc.OrgConnectTransport(apiCtx, org)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	return s.successResult(connectTransportData(setting), "")
+}
+
+func (s *Server) handleOrgSetConnectTransport(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.svc.RequireAuth(); err != nil {
+		return s.errorResult(err)
+	}
+	argsJSON, _ := json.Marshal(req.Params.Arguments)
+	input, err := parseInput[orgSetConnectTransportInput](argsJSON)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if input.Transport != models.ConnectTransportRelayLegacy && input.Transport != models.ConnectTransportDirectPeer {
+		return s.errorResult(&service.Error{Code: service.CodeInvalidInput, Message: "transport is required: relay-legacy (the websocket relay) or direct-peer (direct-peer + encrypted relay)"})
+	}
+	if input.Relay != "" && input.ClearRelay {
+		return s.errorResult(&service.Error{Code: service.CodeInvalidInput, Message: "name a relay or clear it, not both"})
+	}
+	org, err := s.svc.ResolveOrg(input.Organization)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	if !input.Confirm {
+		note := "Its next remote sessions then run on the websocket relay, without end-to-end encryption; open sessions keep running."
+		if input.Transport == models.ConnectTransportDirectPeer {
+			note = "Its next remote sessions then run on direct-peer + encrypted relay where the device's agent can; open sessions keep running."
+		}
+		extra := map[string]interface{}{"connect_transport": input.Transport}
+		if input.Relay != "" {
+			extra["connect_relay"] = input.Relay
+		}
+		if input.ClearRelay {
+			extra["connect_relay"] = nil
+		}
+		return s.previewResultWithNote("set the remote-session transport to "+input.Transport+" in", org, note, extra)
+	}
+	apiCtx, cancel := contextWithTimeout()
+	defer cancel()
+	setting, err := s.svc.OrgSetConnectTransport(apiCtx, org, input.Transport, input.Relay, input.ClearRelay)
+	if err != nil {
+		return s.errorResult(err)
+	}
+	data := connectTransportData(setting)
+	data["action"] = "set"
+	return s.successResult(data, fmt.Sprintf("Remote sessions of '%s' now run on %s", org, models.ConnectTransportName(setting.ConnectTransport)))
 }

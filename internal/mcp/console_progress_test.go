@@ -24,6 +24,12 @@ func consoleOpenWithProgress(t *testing.T, token any, pendingPolls int) []*mcp.P
 	polls := 0
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/connect-info") {
+			// A control plane that predates the preflight.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
+			return
+		}
 		if r.Method == http.MethodPost {
 			_ = json.NewEncoder(w).Encode(map[string]any{"task": "task-123", "status": "PENDING"})
 			return

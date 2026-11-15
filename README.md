@@ -8,7 +8,7 @@
 
 ## Give an AI agent your firewall fleet
 
-The second binary in this repo, `netdefense-mcp`, exposes **180 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, firmware tracks, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
+The second binary in this repo, `netdefense-mcp`, exposes **182 [MCP](https://modelcontextprotocol.io) tools** covering every domain `ndcli` does — devices, organizations, OUs, sync, tasks, run commands, schedules, snippets, software policies, templates, networks, variables, backups, firmware tracks, support tickets, the responder console, and persistent remote consoles. Point Claude, or any other MCP-compatible client, at it and it can inspect and operate your entire fleet the same way a human operator would from the CLI — not a single device, the whole organization.
 
 **Start with the sharp edge, because it's the one that matters.** `ndcli.device.console_exec` runs arbitrary shell commands on a device, with administrative privilege, and takes no confirmation flag. It is gated on the caller's role — a read-only token is refused before a stream ever opens — but an agent holding a write-scoped token has a shell. Scope the token you hand an agent accordingly, and if you want a hard limit that no token can cross, set the device-side remote-access policy on the firewall itself (Services → NetDefense → Settings), which caps what any session may be regardless of who asks.
 
@@ -54,7 +54,9 @@ scoop install ndcli
 
 ### Binary downloads
 
-Pre-built archives for macOS (amd64/arm64), Linux (amd64/arm64), and Windows (amd64) are on the [ndcli-releases](https://github.com/netdefense-io/ndcli-releases/releases) page. Each archive contains both `ndcli` and `netdefense-mcp`.
+Pre-built archives for macOS (amd64/arm64), Linux (amd64/arm64), and Windows (amd64) are on the [ndcli-releases](https://github.com/netdefense-io/ndcli-releases/releases) page. Each archive contains `ndcli`, `netdefense-mcp`, the `netdefense` terminal UI and `netdefense-connect`.
+
+`netdefense-connect` is a companion the other three start for a remote session when the organization uses the direct-peer + encrypted relay transport. It is looked up beside the program that starts it, so keep the four in one directory. `THIRD_PARTY_NOTICES`, in the same archive, holds the licences of the software they are built from.
 
 ### From source
 
@@ -64,6 +66,7 @@ Requires Go 1.27.4+.
 git clone https://github.com/netdefense-io/NDCLI.git
 cd NDCLI
 make build build-mcp
+make build-connect   # the companion for direct-peer + encrypted relay sessions
 ```
 
 ## Usage

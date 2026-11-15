@@ -111,7 +111,7 @@ type execStreamIface interface {
 type ExecHandle struct {
 	streamMgr  *StreamManager
 	execStream *Stream
-	relay      *RelayClient
+	relay      link
 
 	// execStreamOverride is non-nil only in tests; readerLoop uses it instead
 	// of execStream when set. This lets tests inject a fakeStream without
@@ -187,35 +187,46 @@ var pairingHeartbeat = 10 * time.Second
 // ConnectExecContext is ConnectExec that gives up, and closes the relay
 // connection, as soon as ctx is done.
 func (c *Client) ConnectExecContext(ctx context.Context) (*ExecHandle, error) {
-	wsURL := c.buildWebSocketURL()
+	// relay is the session's link, whichever transport carries it.
+	var relay link
+	if c.direct != nil {
+		direct, err := c.pairDirect(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		relay = direct
+	} else {
+		wsURL := c.buildWebSocketURL()
 
-	c.progress("Connecting to relay server...")
+		c.progress("Connecting to relay server...")
 
-	relay, stopWatch, err := c.dialRelay(ctx, wsURL)
-	if err != nil {
-		return nil, err
-	}
-	defer stopWatch()
+		ws, stopWatch, err := c.dialRelay(ctx, wsURL)
+		if err != nil {
+			return nil, err
+		}
+		defer stopWatch()
 
-	if err := relay.WaitForRegistration(10 * time.Second); err != nil {
-		relay.Close()
-		return nil, &PathfinderError{Message: "registration failed: " + err.Error()}
-	}
+		if err := ws.WaitForRegistration(10 * time.Second); err != nil {
+			_ = ws.Close()
+			return nil, &PathfinderError{Message: "registration failed: " + err.Error()}
+		}
 
-	c.progress("Waiting for device...")
+		c.progress("Waiting for device...")
 
-	// The wait ends at the earlier of the pairing timeout and ctx's deadline,
-	// so the countdown in the heartbeat does too.
-	pairingLeft := execPairingTimeout
-	if dl, ok := ctx.Deadline(); ok {
-		pairingLeft = min(pairingLeft, time.Until(dl))
-	}
-	stopBeat := c.heartbeat(pairingHeartbeat, pairingLeft)
-	err = relay.WaitForPairing(execPairingTimeout)
-	stopBeat()
-	if err != nil {
-		relay.Close()
-		return nil, &PathfinderError{Message: "pairing failed: " + err.Error()}
+		// The wait ends at the earlier of the pairing timeout and ctx's deadline,
+		// so the countdown in the heartbeat does too.
+		pairingLeft := execPairingTimeout
+		if dl, ok := ctx.Deadline(); ok {
+			pairingLeft = min(pairingLeft, time.Until(dl))
+		}
+		stopBeat := c.heartbeat(pairingHeartbeat, pairingLeft)
+		err = ws.WaitForPairing(execPairingTimeout)
+		stopBeat()
+		if err != nil {
+			_ = ws.Close()
+			return nil, &PathfinderError{Message: "pairing failed: " + err.Error()}
+		}
+		relay = ws
 	}
 
 	c.progress("Opening exec stream...")
@@ -513,6 +524,11 @@ func newUUID() (string, error) {
 // keeps the pairing wait alive. Without a progress callback it does nothing.
 // stop returns once the last message has been sent.
 func (c *Client) heartbeat(interval, limit time.Duration) (stop func()) {
+	return c.heartbeatSaying(interval, limit, "Still waiting for the device to join the relay (%ds left)")
+}
+
+// heartbeatSaying is heartbeat with its message, which takes the seconds left.
+func (c *Client) heartbeatSaying(interval, limit time.Duration, message string) (stop func()) {
 	if c.onProgress == nil {
 		return func() {}
 	}
@@ -529,7 +545,7 @@ func (c *Client) heartbeat(interval, limit time.Duration) (stop func()) {
 				return
 			case <-t.C:
 				left := max(0, int((limit - time.Since(start)).Seconds()))
-				c.progress(fmt.Sprintf("Still waiting for the device to join the relay (%ds left)", left))
+				c.progress(fmt.Sprintf(message, left))
 			}
 		}
 	}()

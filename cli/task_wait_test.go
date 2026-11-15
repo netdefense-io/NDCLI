@@ -40,6 +40,10 @@ func canceledTaskServer(t *testing.T) *httptest.Server {
 			json.NewEncoder(w).Encode(map[string]any{"task": "T1", "type": "PULL", "status": status()})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/tasks/T1/connect-status":
 			json.NewEncoder(w).Encode(map[string]any{"task": "T1", "status": status()})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/connect-info"):
+			// A control plane that predates the connect preflight.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -77,10 +81,11 @@ func TestDeviceConnectStopsWhenTheTaskIsCanceled(t *testing.T) {
 	srv := canceledTaskServer(t)
 	defer srv.Close()
 
-	origClient, origOrg := apiClient, orgName
+	origClient, origSvc, origOrg := apiClient, svc, orgName
 	apiClient = api.NewClient(srv.URL, false, &noopAuthProvider{})
+	svc = service.New(apiClient, nil, nil)
 	orgName = "acme"
-	t.Cleanup(func() { apiClient, orgName = origClient, origOrg })
+	t.Cleanup(func() { apiClient, svc, orgName = origClient, origSvc, origOrg })
 
 	cmd, _, err := rootCmd.Find([]string{"device", "connect"})
 	if err != nil {

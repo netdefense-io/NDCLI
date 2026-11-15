@@ -11,7 +11,17 @@ const (
 	FrameTypeClose byte = 0x02
 	FrameTypeOpen  byte = 0x03
 	FrameTypeAck   byte = 0x04
+	// FrameTypeKeepAlive, stream 0 and no data, is sent on a direct-peer
+	// session by an end that has sent nothing for a while, so the other can
+	// tell a quiet session from a dead one. The websocket relay has its own
+	// pings and never carries it.
+	FrameTypeKeepAlive byte = 0x05
 )
+
+// maxStreamFrameData is the most data one frame of a stream carries. A
+// direct-peer session ends when it reads a longer frame, and the websocket
+// relay takes longer messages, so a sender that keeps to it works on both.
+const maxStreamFrameData = 64 * 1024
 
 // maxFrameDataLen caps a single frame payload, matching the relay WebSocket
 // read limit (see RelayClient.readPump's SetReadLimit). Rejecting any length

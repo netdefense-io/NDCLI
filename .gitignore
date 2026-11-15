@@ -1,5 +1,7 @@
 # Binaries
 bin/
+# go build inside the nested module, without -o
+/netdefense-connect/netdefense-connect
 *.exe
 *.exe~
 *.dll

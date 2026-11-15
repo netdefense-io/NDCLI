@@ -348,11 +348,13 @@ func (s *Service) TaskCancel(ctx context.Context, taskID string) (*models.TaskCa
 	// others.
 	result := &models.TaskCancelResult{Task: taskID, Message: "Task cancelled"}
 	var body struct {
-		Message string `json:"message"`
-		Outcome string `json:"outcome"`
+		Message   string `json:"message"`
+		Outcome   string `json:"outcome"`
+		CloseTask string `json:"close_task"`
 	}
 	if raw, err := api.ReadBody(resp.Body); err == nil && len(raw) > 0 && api.DecodeJSON(bytes.NewReader(raw), &body) == nil {
 		result.Outcome = body.Outcome
+		result.CloseTask = body.CloseTask
 		if body.Message != "" {
 			result.Message = body.Message
 		}

@@ -36,7 +36,40 @@ type ClientConfig struct {
 	OnPaired         func()           // Optional; called once the device has paired
 	IsTTY            bool             // Whether stdout is a terminal (WebAdmin box, messages)
 	StdinIsTTY       bool             // Whether stdin is a terminal; the shell needs both
+	// Direct, when set, runs the session on the direct-peer + encrypted relay
+	// transport, and SessionID is not used. When nil the session runs on the
+	// websocket relay.
+	Direct *DirectSession
 }
+
+// DirectSession is what a session on the direct-peer + encrypted relay
+// transport is made of: the relay both ends meet on, and the session's keys.
+type DirectSession struct {
+	RelayHost     string
+	RelayPort     int
+	RelaySTUNPort int
+	// ClientKey is this end's tunnel key and DeviceKey the device's, from
+	// which the device's public keys are derived. Both are clamped.
+	ClientKey    [32]byte
+	DeviceKey    [32]byte
+	PresharedKey [32]byte
+	// ConnectTimeout is how long the device has to answer; zero means
+	// directConnectTimeout.
+	ConnectTimeout time.Duration
+	// OnPath, when set, is told how the device is reached each time that
+	// changes: true peer to peer, false through the relay.
+	OnPath func(direct bool)
+}
+
+// directConnectTimeout is how long the device has to answer on a direct-peer
+// session. The device is already listening when the session is dialed, so a
+// dial that does not complete in this time means the keys do not match or
+// the path is closed, and is the session's failure.
+const directConnectTimeout = 30 * time.Second
+
+// directDevicePort is the one TCP port a device serves a direct-peer session
+// on.
+const directDevicePort = 1
 
 // Client represents a Pathfinder WebSocket client
 type Client struct {
@@ -49,6 +82,7 @@ type Client struct {
 	webAdminOnly    bool
 	onProgress      ProgressCallback
 	onPaired        func()
+	direct          *DirectSession
 	relayRetryAfter time.Duration
 	isTTY           bool
 	stdinIsTTY      bool
@@ -70,11 +104,15 @@ type ShellOutcome struct {
 // once for both.
 func NewClient(cfg ClientConfig) (*Client, error) {
 	appCfg := config.Get()
-	if appCfg.Pathfinder.Host == "" {
-		return nil, ErrPathfinderNotConfigured
+	// The relay host and its TLS setting are the websocket relay's; a
+	// direct-peer session names its own relay and always verifies it.
+	if cfg.Direct == nil {
+		if appCfg.Pathfinder.Host == "" {
+			return nil, ErrPathfinderNotConfigured
+		}
+		warnIfPathfinderSSLVerifyDisabled(os.Stderr)
+		warnIfPathfinderPlaintext(os.Stderr, appCfg.Pathfinder.Host)
 	}
-	warnIfPathfinderSSLVerifyDisabled(os.Stderr)
-	warnIfPathfinderPlaintext(os.Stderr, appCfg.Pathfinder.Host)
 	return &Client{
 		host:            appCfg.Pathfinder.Host,
 		sslVerify:       appCfg.Pathfinder.SSLVerify,
@@ -85,6 +123,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		webAdminOnly:    cfg.WebAdminOnly,
 		onProgress:      cfg.OnProgress,
 		onPaired:        cfg.OnPaired,
+		direct:          cfg.Direct,
 		isTTY:           cfg.IsTTY,
 		stdinIsTTY:      cfg.StdinIsTTY,
 	}, nil
@@ -299,36 +338,49 @@ func (c *Client) Connect() error {
 // when ctx ends before the device pairs. Once it has paired the session no
 // longer follows ctx: the user ends it, as Connect describes.
 func (c *Client) ConnectContext(ctx context.Context) error {
-	// Build WebSocket URL
-	wsURL := c.buildWebSocketURL()
+	// relay is the session's link, whichever transport carries it.
+	var relay link
+	if c.direct != nil {
+		direct, err := c.pairDirect(ctx, false)
+		if err != nil {
+			return err
+		}
+		// As for the websocket relay below: reportEnd must run before Close.
+		defer func() { _ = direct.Close() }()
+		relay = direct
+	} else {
+		// Build WebSocket URL
+		wsURL := c.buildWebSocketURL()
 
-	c.progress("Connecting to relay server...")
+		c.progress("Connecting to relay server...")
 
-	// Connect to the relay server
-	relay, stopWatch, err := c.dialRelay(ctx, wsURL)
-	if err != nil {
-		return err
-	}
-	defer stopWatch()
-	// Defers run last-in first-out: reportEnd (deferred below) must run
-	// before this Close, or a user quit would be reported as a relay end.
-	defer relay.Close()
+		// Connect to the relay server
+		ws, stopWatch, err := c.dialRelay(ctx, wsURL)
+		if err != nil {
+			return err
+		}
+		defer stopWatch()
+		// Defers run last-in first-out: reportEnd (deferred below) must run
+		// before this Close, or a user quit would be reported as a relay end.
+		defer func() { _ = ws.Close() }()
 
-	// Wait for registration confirmation
-	if err := relay.WaitForRegistration(10 * time.Second); err != nil {
-		return &PathfinderError{Message: "registration failed: " + err.Error()}
-	}
+		// Wait for registration confirmation
+		if err := ws.WaitForRegistration(10 * time.Second); err != nil {
+			return &PathfinderError{Message: "registration failed: " + err.Error()}
+		}
 
-	c.progress("Waiting for device...")
+		c.progress("Waiting for device...")
 
-	// Wait for the device to connect and pair
-	if err := relay.WaitForPairing(120 * time.Second); err != nil {
-		return &PathfinderError{Message: "pairing failed: " + err.Error()}
-	}
-	// ctx may have ended just as the device paired; the relay is closing
-	// then, so the connect is given up like any other before pairing.
-	if !stopWatch() {
-		return &PathfinderError{Message: "pairing failed: " + context.Cause(ctx).Error(), Err: ctx.Err()}
+		// Wait for the device to connect and pair
+		if err := ws.WaitForPairing(120 * time.Second); err != nil {
+			return &PathfinderError{Message: "pairing failed: " + err.Error()}
+		}
+		// ctx may have ended just as the device paired; the relay is closing
+		// then, so the connect is given up like any other before pairing.
+		if !stopWatch() {
+			return &PathfinderError{Message: "pairing failed: " + context.Cause(ctx).Error(), Err: ctx.Err()}
+		}
+		relay = ws
 	}
 	if c.onPaired != nil {
 		c.onPaired()
@@ -463,7 +515,7 @@ func (c *Client) announceWebAdmin(stderr io.Writer, url string) {
 // The WebAdmin link box is printed by Connect before the shell runs, so here
 // we only show a short reminder (with the URL repeated for convenience) once
 // the foreground shell has exited or for terminal-less sessions.
-func (c *Client) waitForQuit(relay *RelayClient, webAdminURL string) {
+func (c *Client) waitForQuit(relay link, webAdminURL string) {
 	if c.isTTY && webAdminURL != "" {
 		fmt.Printf("WebAdmin tunnel still active at %s — press Ctrl-C to close.\n", webAdminURL)
 	}
@@ -496,7 +548,7 @@ func (c *Client) waitForQuit(relay *RelayClient, webAdminURL string) {
 	}
 }
 
-func endReasonOrDefault(relay *RelayClient) string {
+func endReasonOrDefault(relay link) string {
 	if r := relay.EndReason(); r != "" {
 		return r
 	}
@@ -505,7 +557,7 @@ func endReasonOrDefault(relay *RelayClient) string {
 
 // reportEnd tells the user why a session the relay ended is over. It prints
 // nothing when the user ended the session.
-func (c *Client) reportEnd(relay *RelayClient) {
+func (c *Client) reportEnd(relay link) {
 	if reason := relay.EndReason(); reason != "" && !c.endReported {
 		c.endReported = true
 		fmt.Fprintf(os.Stderr, "\nSession ended: %s\n", reason)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/netdefense-io/NDCLI/internal/models"
 	"github.com/netdefense-io/NDCLI/internal/pathfinder"
 	"github.com/netdefense-io/NDCLI/internal/service"
 )
@@ -59,7 +60,12 @@ func (s *Server) registerConsoleTools() {
 			fmt.Sprintf("One server keeps at most %d sessions open or opening; another console_open fails with CONSOLE_LIMIT until one is closed. ", maxConsoleSessions) +
 			"relay_retry_after_seconds is how long the open waited for the relay before it got in, a 503's small jitter included (0 when it did not wait): a rate limit (429) is waited out once, " +
 			"a relay at capacity (503 with Retry-After) up to twice, two retries in all. A refusal not waited out is RATE_LIMITED or RELAY_BUSY, with retry_after_seconds; " +
-			"a 503 without Retry-After is RELAY_UNAVAILABLE, with no wait to honour: the relay is restarting or down, so retrying at once only creates another connect task.",
+			"a 503 without Retry-After is RELAY_UNAVAILABLE, with no wait to honour: the relay is restarting or down, so retrying at once only creates another connect task. " +
+			"transport is what the session runs on, chosen by the server from the organization's setting: relay-legacy (the websocket relay) or direct-peer (direct-peer + encrypted relay, end-to-end encrypted). " +
+			"For direct-peer, path says how the device is reached, direct (peer to peer) or relayed (through the encrypted relay), null until known; ndcli.device.console_list has the current value. " +
+			"transport_fallback_reason is present when the organization is set to direct-peer and this session runs on the websocket relay instead: direct_peer_disabled, agent_too_old or protocol_mismatch. " +
+			"A direct-peer session that cannot be set up fails and is never retried on the websocket relay: COMPANION_UNAVAILABLE (netdefense-connect is missing or of another release: reinstall ndcli), " +
+			"RELAY_UNREACHABLE or DEVICE_NO_ANSWER.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -175,40 +181,67 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	defer cancel()
 
 	progress := progressNotifier(ctx, req)
-	connResult, connErr := s.svc.ConsoleConnectWithProgress(apiCtx, org, input.Device, connectTimeout, progress)
-	if connErr != nil {
-		var rl *pathfinder.RateLimitedError
-		var busy *pathfinder.RelayBusyError
-		if errors.As(connErr, &rl) || errors.As(connErr, &busy) {
-			return s.relayConnectErrorResult(connErr)
-		}
-		return s.errorResult(service.ConnectAdvice(connErr, consoleAgentTooOldHint))
-	}
 
-	// Authoritative read-only gate. NDManager derives read_only from the
-	// caller's role and returns it in the connect-status response. When it is
-	// explicitly true, terminal/console exec is not permitted for this session,
-	// so fail console_open EARLY with a clear, self-explanatory message — before
-	// opening any exec stream. A nil flag (older NDManager that omits the field)
-	// means "unknown": proceed as before and rely on the agent's server-side
-	// enforcement. The agent block remains the authoritative guarantee; this is
-	// the clarity layer.
-	if connResult.ReadOnly != nil && *connResult.ReadOnly {
-		_ = s.svc.CloseConnectSession(connResult.Task)
-		return s.errorResult(&ToolError{
-			Code:    "READ_ONLY_SESSION",
-			Message: pathfinder.ErrReadOnlySession.Message,
-		})
-	}
-
-	// Dial the Pathfinder relay (non-blocking; opens exec stream, no PTY).
-	pfClient, pfErr := pathfinder.NewClient(pathfinder.ClientConfig{
-		SessionID:       connResult.PathfinderSession,
-		WebAdminEnabled: false,
-		OnProgress:      pathfinder.ProgressCallback(progress),
+	// The server says which transport the session gets. A direct-peer one is
+	// opened here; anything else runs on the websocket relay as before.
+	direct, info, connErr := s.svc.DirectConnect(apiCtx, org, input.Device, service.DirectConnectOpts{
+		Timeout:        connectTimeout,
+		Progress:       progress,
+		RefuseReadOnly: true,
 	})
+	if connErr != nil {
+		return s.directConnectErrorResult(service.ConnectAdvice(connErr, consoleAgentTooOldHint))
+	}
+
+	sess := &consoleSession{org: org, device: input.Device, transport: models.ConnectTransportRelayLegacy}
+	pfConfig := pathfinder.ClientConfig{WebAdminEnabled: false, OnProgress: pathfinder.ProgressCallback(progress)}
+	var task string
+	if direct != nil {
+		// The status has the last word on the role, as on the websocket
+		// relay: it may have changed since the preflight.
+		if direct.ReadOnly {
+			_ = s.svc.CloseConnectSession(direct.Task)
+			return s.errorResult(&ToolError{Code: "READ_ONLY_SESSION", Message: pathfinder.ErrReadOnlySession.Message})
+		}
+		task = direct.Task
+		sess.transport = models.ConnectTransportDirectPeer
+		direct.Session.OnPath = sess.setPath
+		pfConfig.Direct = direct.Session
+	} else {
+		// Run the control-plane connect flow (POST + poll) to get the pathfinder session key.
+		connResult, connErr := s.svc.ConsoleConnectWithProgress(apiCtx, org, input.Device, connectTimeout, progress)
+		if connErr != nil {
+			var rl *pathfinder.RateLimitedError
+			var busy *pathfinder.RelayBusyError
+			if errors.As(connErr, &rl) || errors.As(connErr, &busy) {
+				return s.relayConnectErrorResult(connErr)
+			}
+			return s.errorResult(service.ConnectAdvice(connErr, consoleAgentTooOldHint))
+		}
+
+		// Authoritative read-only gate. NDManager derives read_only from the
+		// caller's role and returns it in the connect-status response. When it is
+		// explicitly true, terminal/console exec is not permitted for this session,
+		// so fail console_open EARLY with a clear, self-explanatory message — before
+		// opening any exec stream. A nil flag (older NDManager that omits the field)
+		// means "unknown": proceed as before and rely on the agent's server-side
+		// enforcement. The agent block remains the authoritative guarantee; this is
+		// the clarity layer.
+		if connResult.ReadOnly != nil && *connResult.ReadOnly {
+			_ = s.svc.CloseConnectSession(connResult.Task)
+			return s.errorResult(&ToolError{
+				Code:    "READ_ONLY_SESSION",
+				Message: pathfinder.ErrReadOnlySession.Message,
+			})
+		}
+		task = connResult.Task
+		pfConfig.SessionID = connResult.PathfinderSession
+	}
+
+	// Dial the session (non-blocking; opens exec stream, no PTY).
+	pfClient, pfErr := pathfinder.NewClient(pfConfig)
 	if pfErr != nil {
-		_ = s.svc.CloseConnectSession(connResult.Task)
+		_ = s.svc.CloseConnectSession(task)
 		return s.errorResult(&service.Error{
 			Code:    service.CodeAPIError,
 			Message: "relay client init failed: " + pfErr.Error(),
@@ -218,8 +251,8 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 
 	handle, pfErr := pfClient.ConnectExecContext(ctx)
 	if pfErr != nil {
-		_ = s.svc.CloseConnectSession(connResult.Task)
-		return s.relayConnectErrorResult(pfErr)
+		_ = s.svc.CloseConnectSession(task)
+		return s.directConnectErrorResult(pfErr)
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -238,18 +271,12 @@ func (s *Server) handleConsoleOpen(ctx context.Context, req *mcp.CallToolRequest
 	}
 
 	now := time.Now()
-	sess := &consoleSession{
-		sessionID:    sessionID,
-		org:          org,
-		device:       input.Device,
-		openedAt:     now,
-		lastActivity: now,
-		handle:       handle,
-	}
+	sess.sessionID, sess.openedAt, sess.lastActivity, sess.handle = sessionID, now, now, handle
 	s.consoleSessions.Add(sess)
 
 	expiresAt := now.Add(consoleSessionIdleTimeout)
 	data, msg := consoleOpenResult(sessionID, input.Device, org, expiresAt, pfClient.RelayRetryAfter())
+	msg = addConsoleTransport(data, msg, sess, info)
 	return s.successResult(data, msg)
 }
 
@@ -275,6 +302,45 @@ func progressNotifier(ctx context.Context, req *mcp.CallToolRequest) func(string
 		step++
 		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: step, Message: msg})
 	}
+}
+
+// addConsoleTransport adds to console_open's data the transport the session
+// runs on, for a direct-peer session how the device is reached (null until
+// that is known), and why a session of an organization set to direct-peer
+// runs on the websocket relay. It returns the message with the same said.
+func addConsoleTransport(data map[string]interface{}, msg string, sess *consoleSession, info *models.ConnectInfo) string {
+	data["transport"] = sess.transport
+	if sess.transport == models.ConnectTransportDirectPeer {
+		data["path"] = sess.pathValue()
+		return msg + " over " + models.ConnectTransportName(sess.transport)
+	}
+	if info != nil && info.FallsBack() {
+		data["transport_fallback_reason"] = info.Reason
+		return msg + " on the websocket relay, not on " + models.ConnectTransportName(models.ConnectTransportDirectPeer) + " as the organization is set to: " + models.ConnectFallbackText(info.Reason)
+	}
+	return msg
+}
+
+// directConnectErrorResult reports a direct-peer session that could not be
+// set up under a code that says which part failed; any other error goes the
+// websocket relay's way.
+func (s *Server) directConnectErrorResult(err error) (*mcp.CallToolResult, error) {
+	var direct *pathfinder.DirectError
+	if !errors.As(err, &direct) {
+		var svcErr *service.Error
+		if errors.As(err, &svcErr) {
+			return s.errorResult(err)
+		}
+		return s.relayConnectErrorResult(err)
+	}
+	code := "COMPANION_UNAVAILABLE"
+	switch direct.Failure {
+	case pathfinder.DirectRelayUnreachable:
+		code = "RELAY_UNREACHABLE"
+	case pathfinder.DirectNoAnswer:
+		code = "DEVICE_NO_ANSWER"
+	}
+	return s.errorResult(&ToolError{Code: code, Message: direct.Error()})
 }
 
 // consoleOpenResult builds console_open's data and message.
@@ -438,6 +504,8 @@ func (s *Server) handleConsoleList(ctx context.Context, req *mcp.CallToolRequest
 			"org":           sess.org,
 			"opened_at":     sess.openedAt.Format(time.RFC3339),
 			"last_activity": sess.getLastActivity().Format(time.RFC3339),
+			"transport":     sess.transport,
+			"path":          sess.pathValue(),
 		})
 	}
 

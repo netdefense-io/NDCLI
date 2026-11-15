@@ -79,6 +79,47 @@ question. 'ndcli org describe <org>' shows the current setting.`,
 	RunE:      runOrgUnverifiedRepos,
 }
 
+var orgConnectTransportCmd = &cobra.Command{
+	Use:   "connect-transport",
+	Short: "Show or set the transport of the organization's remote sessions",
+	Long: `Remote sessions (ndcli device connect, the MCP console) of the organization
+(-o) run on one of two transports:
+
+  relay-legacy   the websocket relay
+  direct-peer    direct-peer + encrypted relay: end-to-end encrypted between
+                 this program and the device, peer to peer when the networks
+                 allow it and through an encrypted relay otherwise
+
+The server chooses the transport of each session from this setting. A session
+of an organization set to direct-peer still runs on the websocket relay when
+the device's agent or the connecting program cannot run direct-peer, and says
+so; a direct-peer session that cannot be set up fails and is never retried on
+the websocket relay.`,
+}
+
+var orgConnectTransportShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show the transport, the relay and the relays the server offers",
+	Args:  noArgs,
+	RunE:  runOrgConnectTransportShow,
+}
+
+var orgConnectTransportSetCmd = &cobra.Command{
+	Use:   "set <relay-legacy|direct-peer>",
+	Short: "Set the transport of the organization's remote sessions",
+	Long: `Set the transport of the organization's (-o) remote sessions. direct-peer
+needs a relay: --relay names one of the relays 'ndcli org connect-transport
+show' lists, and without it the relay already chosen is kept. --no-relay
+removes the chosen relay, which only the websocket relay allows.
+
+Only a superuser of the organization may change it, from an interactive login:
+the server refuses a personal access token. The change applies to the next
+session; open sessions keep running. It asks first; -y skips the question.`,
+	Args:      cobra.ExactArgs(1),
+	ValidArgs: models.ConnectTransports,
+	RunE:      runOrgConnectTransportSet,
+}
+
 var orgInviteCmd = &cobra.Command{
 	Use:   "invite",
 	Short: "Manage organization invitations",
@@ -179,6 +220,13 @@ func init() {
 	orgCmd.AddCommand(orgDescribeCmd)
 	orgCmd.AddCommand(orgSetDefaultOUCmd)
 	orgCmd.AddCommand(orgUnverifiedReposCmd)
+	orgCmd.AddCommand(orgConnectTransportCmd)
+	orgConnectTransportCmd.AddCommand(orgConnectTransportShowCmd)
+	orgConnectTransportCmd.AddCommand(orgConnectTransportSetCmd)
+	orgConnectTransportSetCmd.Flags().String("relay", "", "Relay for direct-peer sessions (an id from 'connect-transport show')")
+	orgConnectTransportSetCmd.Flags().Bool("no-relay", false, "Remove the chosen relay")
+	orgConnectTransportSetCmd.MarkFlagsMutuallyExclusive("relay", "no-relay")
+	addYesFlag(orgConnectTransportSetCmd)
 	addYesFlag(orgUnverifiedReposCmd)
 	orgCmd.AddCommand(orgQuotaCmd)
 	orgCmd.AddCommand(orgInviteCmd)
@@ -370,6 +418,53 @@ func runOrgUnverifiedRepos(cmd *cobra.Command, args []string) error {
 	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: action,
 		Details: map[string]interface{}{"allow_unverified_repos": allow},
 		Message: fmt.Sprintf("✓ Unverified repositories %s in %s", action, org)})
+}
+
+func runOrgConnectTransportShow(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+	setting, err := svc.OrgConnectTransport(context.Background(), org)
+	if err != nil {
+		return err
+	}
+	return formatter.FormatOrgConnectTransport(setting)
+}
+
+func runOrgConnectTransportSet(cmd *cobra.Command, args []string) error {
+	requireAuth()
+	org := requireOrganization()
+	transport := args[0]
+	relay, _ := cmd.Flags().GetString("relay")
+	noRelay, _ := cmd.Flags().GetBool("no-relay")
+	var prompt string
+	switch transport {
+	case models.ConnectTransportDirectPeer:
+		prompt = fmt.Sprintf("Run the next remote sessions of '%s' on direct-peer + encrypted relay?", org)
+	case models.ConnectTransportRelayLegacy:
+		prompt = fmt.Sprintf("Run the next remote sessions of '%s' on the websocket relay, without end-to-end encryption?", org)
+	default:
+		return &service.Error{Code: service.CodeInvalidInput, Message: fmt.Sprintf("%q is neither %s nor %s", transport, models.ConnectTransportRelayLegacy, models.ConnectTransportDirectPeer)}
+	}
+	if ok, err := confirmUnlessYes(cmd, prompt); !ok {
+		return err
+	}
+	setting, err := svc.OrgSetConnectTransport(context.Background(), org, transport, relay, noRelay)
+	if err != nil {
+		return err
+	}
+	details := map[string]interface{}{
+		"organization_name":     setting.OrganizationName,
+		"connect_transport":     setting.ConnectTransport,
+		"connect_relay":         setting.ConnectRelay,
+		"relays":                setting.Relays,
+		"direct_peer_available": setting.DirectPeerAvailable,
+	}
+	message := fmt.Sprintf("✓ Remote sessions of %s now run on %s", org, models.ConnectTransportName(setting.ConnectTransport))
+	if setting.ConnectTransport == models.ConnectTransportDirectPeer && setting.ConnectRelay != nil {
+		message += " (relay " + *setting.ConnectRelay + ")"
+	}
+	return formatter.FormatActionResult(&models.ActionResult{Resource: "organization", Name: org, Action: "set",
+		Details: details, Message: message})
 }
 
 func runOrgInviteSend(cmd *cobra.Command, args []string) error {

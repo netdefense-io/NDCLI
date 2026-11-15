@@ -268,6 +268,14 @@ type ConnectInitResponse struct {
 	Task    string `json:"task"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
+	// Transport is the transport of the task that was created. A server that
+	// predates the choice, or an organization on the websocket relay, sends
+	// none. TransportReason says why a session of an organization set to
+	// direct-peer was put on the websocket relay; ConnectID names a
+	// direct-peer session.
+	Transport       string `json:"transport,omitempty"`
+	TransportReason string `json:"transport_reason,omitempty"`
+	ConnectID       string `json:"connect_id,omitempty"`
 }
 
 // ConnectStatusResponse is returned by GET /tasks/{task}/connect-status
@@ -281,6 +289,14 @@ type ConnectStatusResponse struct {
 	// omits the field (nil) is distinguishable from an explicit false: nil means
 	// "unknown, proceed as before"; *true means terminal/exec is not allowed.
 	ReadOnly *bool `json:"read_only,omitempty"`
+	// Transport is absent for a task of the websocket relay in an
+	// organization set to it. A direct-peer task also carries ConnectID,
+	// Relay and Session (pending, ready or ended): the client dials when
+	// Status is COMPLETED and Session is ready, and at no other time.
+	Transport string        `json:"transport,omitempty"`
+	ConnectID string        `json:"connect_id,omitempty"`
+	Relay     *ConnectRelay `json:"relay,omitempty"`
+	Session   string        `json:"session,omitempty"`
 }
 
 // ConnectPayload is the parsed payload from a completed connect task

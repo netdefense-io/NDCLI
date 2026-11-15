@@ -2,7 +2,9 @@
 #
 # Build the netdefense-mcp MCPB (MCP Bundle) artifact for the MCP Registry.
 #
-# Bundles three platform binaries into a single .mcpb zip, so the registry's
+# Bundles three platform binaries, each with the netdefense-connect companion
+# it starts for a session on the direct-peer + encrypted relay transport, and
+# the licences of what they are built from, into a single .mcpb zip, so the registry's
 # "mcpb" package type has exactly one artifact per release (see
 # https://github.com/modelcontextprotocol/registry docs/reference for the
 # mcpb package type — one `identifier` + one `fileSha256` per server.json
@@ -69,6 +71,28 @@ for pair in "darwin/arm64:$DARWIN_BIN" "linux/amd64:$LINUX_BIN" "windows/amd64:$
     fi
 done
 
+# netdefense-mcp looks for its companion in its own directory and nowhere
+# else, so each platform's goes beside it.
+DARWIN_CONNECT="$(find_binary darwin arm64 netdefense-connect)"
+LINUX_CONNECT="$(find_binary linux amd64 netdefense-connect)"
+WIN_CONNECT="$(find_binary windows amd64 netdefense-connect.exe)"
+
+for pair in "darwin/arm64:$DARWIN_CONNECT" "linux/amd64:$LINUX_CONNECT" "windows/amd64:$WIN_CONNECT"; do
+    label="${pair%%:*}"
+    path="${pair#*:}"
+    if [[ -z "$path" ]]; then
+        echo "error: could not find netdefense-connect binary for $label under $DIST_DIR" >&2
+        echo "       (did the goreleaser step run first and build the netdefense-connect target?)" >&2
+        exit 1
+    fi
+done
+
+NOTICES="$REPO_ROOT/THIRD_PARTY_NOTICES"
+if [[ ! -f "$NOTICES" ]]; then
+    echo "error: $NOTICES not found" >&2
+    exit 1
+fi
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -76,6 +100,10 @@ mkdir -p "$WORKDIR/server/darwin" "$WORKDIR/server/linux" "$WORKDIR/server/win32
 install -m 0755 "$DARWIN_BIN" "$WORKDIR/server/darwin/netdefense-mcp"
 install -m 0755 "$LINUX_BIN" "$WORKDIR/server/linux/netdefense-mcp"
 install -m 0755 "$WIN_BIN" "$WORKDIR/server/win32/netdefense-mcp.exe"
+install -m 0755 "$DARWIN_CONNECT" "$WORKDIR/server/darwin/netdefense-connect"
+install -m 0755 "$LINUX_CONNECT" "$WORKDIR/server/linux/netdefense-connect"
+install -m 0755 "$WIN_CONNECT" "$WORKDIR/server/win32/netdefense-connect.exe"
+install -m 0644 "$NOTICES" "$WORKDIR/THIRD_PARTY_NOTICES"
 
 # Populate the manifest's "tools" array from a live introspection of the
 # server's own tool registry, so it can never drift from what's actually
@@ -102,7 +130,7 @@ rm -f "$MCPB_PATH"
 
 # ZIP with max compression, matching the MCPB CLI's own `pack` behavior
 # (an .mcpb is just a zip of manifest.json + icon + bundled server files).
-(cd "$WORKDIR" && zip -X -r -9 -q "$MCPB_PATH" manifest.json icon.png server)
+(cd "$WORKDIR" && zip -X -r -9 -q "$MCPB_PATH" manifest.json icon.png THIRD_PARTY_NOTICES server)
 
 SHA256="$(openssl dgst -sha256 "$MCPB_PATH" | awk '{print $NF}')"
 echo "$SHA256" > "${MCPB_PATH}.sha256"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -21,6 +22,13 @@ func consoleOpenSeeing(t *testing.T, readOnly bool, relayHost string) (ToolRespo
 	var mu sync.Mutex
 	var seen []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/connect-info") {
+			// A control plane that predates the connect preflight.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
+			return
+		}
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		mu.Unlock()

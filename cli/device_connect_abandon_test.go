@@ -40,6 +40,13 @@ func deviceConnectAgainstStatus(t *testing.T, status map[string]any, timeout str
 	var mu sync.Mutex
 	cancels := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/connect-info") {
+			// A control plane that predates the connect preflight.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodPost:

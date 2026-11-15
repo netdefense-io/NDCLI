@@ -47,6 +47,8 @@ func promptCases() []promptCase {
 			answer: `{"organization_name":"acme","allow_unverified_repos":true}`},
 		{path: []string{"org", "unverified-repos"}, args: []string{"forbid"}, want: "PUT /api/v1/organizations/acme/allow-unverified-repos",
 			answer: `{"organization_name":"acme","allow_unverified_repos":false}`},
+		{path: []string{"org", "connect-transport", "set"}, args: []string{"relay-legacy"}, want: "PUT /api/v1/organizations/acme/connect-transport",
+			answer: `{"organization_name":"acme","connect_transport":"relay-legacy","connect_relay":null,"relays":[],"direct_peer_available":true}`},
 		{path: []string{"software", "delete"}, args: []string{"base"}, want: "DELETE /api/v1/organizations/acme/software-policies/base"},
 		{path: []string{"org", "account", "disable"}, args: []string{"ann@acme.test"}, want: "PUT /api/v1/organizations/acme/accounts/ann@acme.test/disable"},
 		{path: []string{"auth", "token", "revoke"}, args: []string{"ci"}, want: "DELETE /api/v1/auth/tokens/ci"},

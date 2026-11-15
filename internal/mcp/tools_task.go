@@ -128,7 +128,9 @@ func (s *Server) registerTaskTools() {
 		Name: "ndcli.task.cancel",
 		Description: "Cancel a pending or scheduled task, or a CONNECT task while it is in progress; for a completed CONNECT task, close its relay session. " +
 			"action is always cancelled, the request made. outcome says what happened: CANCELED (the task is now CANCELED) or " +
-			"SESSION_CLOSED (a completed CONNECT task's relay session was closed; the task stays COMPLETED); branch on it. " +
+			"SESSION_CLOSED (a completed CONNECT task's relay session was closed; the task stays COMPLETED), or " +
+			"SESSION_CLOSING (a completed CONNECT task's direct-peer + encrypted relay session may still be open: the relay no longer admits it and the device has been told to close, by the task in close_task; " +
+			"a path that runs peer to peer stays up until the device receives that); branch on it. close_task is present only when the cancel issued such a task. " +
 			"It is null when the control plane predates it; then, or for a value not listed here, message, the server's sentence, is the account. Requires confirm=true.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -246,12 +248,16 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *mcp.CallToolRequest)
 	if result.Outcome != "" {
 		outcome = result.Outcome
 	}
-	return s.successResult(map[string]interface{}{
+	data := map[string]interface{}{
 		"task":    input.Task,
 		"action":  "cancelled",
 		"outcome": outcome,
 		"message": result.Message,
-	}, result.Summary())
+	}
+	if result.CloseTask != "" {
+		data["close_task"] = result.CloseTask
+	}
+	return s.successResult(data, result.Summary())
 }
 
 func taskSummary(t *models.Task) map[string]interface{} {
