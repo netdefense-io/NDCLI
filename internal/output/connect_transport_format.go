@@ -29,7 +29,7 @@ func WriteOrgConnectTransport(w io.Writer, t *models.OrgConnectTransport) {
 		if r.Label != "" {
 			line += "  " + r.Label
 		}
-		fmt.Fprintf(w, "%s  %s:%d\n", line, r.Hostname, r.DERPPort)
+		fmt.Fprintf(w, "%s  %s:%d\n", line, r.Hostname, r.RelayPort)
 	}
 }
 

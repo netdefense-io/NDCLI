@@ -126,7 +126,7 @@ func (s *Service) ConnectPreflight(ctx context.Context, org, deviceName string) 
 func checkDirectInfo(info *models.ConnectInfo) error {
 	missing := ""
 	switch {
-	case info.Relay == nil || info.Relay.ID == "" || info.Relay.Hostname == "" || info.Relay.DERPPort <= 0 || info.Relay.STUNPort <= 0:
+	case info.Relay == nil || info.Relay.ID == "" || info.Relay.Hostname == "" || info.Relay.RelayPort <= 0 || info.Relay.STUNPort <= 0:
 		missing = "the relay"
 	case info.ExpiresAt == nil || *info.ExpiresAt <= 0:
 		missing = "the expiry"
@@ -246,7 +246,7 @@ func (s *Service) openDirect(ctx context.Context, org, deviceName string, info *
 	sealed, err := secret.Seal(info.Device.Pubkey, directpeer.Binding{
 		DeviceUUID:    info.Device.UUID,
 		RelayHostname: info.Relay.Hostname,
-		RelayPort:     info.Relay.DERPPort,
+		RelayPort:     info.Relay.RelayPort,
 		RelaySTUNPort: info.Relay.STUNPort,
 		ExpiresAt:     *info.ExpiresAt,
 	})
@@ -288,7 +288,7 @@ func (s *Service) openDirect(ctx context.Context, org, deviceName string, info *
 		task: initResp.Task,
 		session: &pathfinder.DirectSession{
 			RelayHost:     info.Relay.Hostname,
-			RelayPort:     info.Relay.DERPPort,
+			RelayPort:     info.Relay.RelayPort,
 			RelaySTUNPort: info.Relay.STUNPort,
 			ClientKey:     secret.ClientKey,
 			DeviceKey:     secret.DeviceKey,

@@ -44,7 +44,7 @@ func TestConnectInfoDecodes(t *testing.T) {
 	  "read_only": false,
 	  "device": {"uuid": "3f2b8c1e-6a4d-4e0b-9c57-d1a2b3c4e5f6", "pubkey": "GNYj+6IySqyqrU9AAhGW4DqyIfBRDzEKgc8THotleiE=", "agent_version": "1.32.0"},
 	  "protocol": 1,
-	  "relay": {"id": "eu", "label": "Europe", "hostname": "relay-eu.example.net", "derp_port": 443, "stun_port": 3478},
+	  "relay": {"id": "eu", "label": "Europe", "hostname": "relay-eu.example.net", "relay_port": 443, "stun_port": 3478},
 	  "expires_at": 1794700800,
 	  "limits": {"max_seconds": 28800, "idle_seconds": 1800, "pair_seconds": 300, "device_sessions": 4}
 	}`
@@ -59,7 +59,7 @@ func TestConnectInfoDecodes(t *testing.T) {
 		OrgTransport: "direct-peer",
 		Device:       ConnectInfoDevice{UUID: "3f2b8c1e-6a4d-4e0b-9c57-d1a2b3c4e5f6", Pubkey: "GNYj+6IySqyqrU9AAhGW4DqyIfBRDzEKgc8THotleiE=", AgentVersion: &version},
 		Protocol:     &protocol,
-		Relay:        &ConnectRelay{ID: "eu", Label: "Europe", Hostname: "relay-eu.example.net", DERPPort: 443, STUNPort: 3478},
+		Relay:        &ConnectRelay{ID: "eu", Label: "Europe", Hostname: "relay-eu.example.net", RelayPort: 443, STUNPort: 3478},
 		ExpiresAt:    &expires,
 		Limits:       &ConnectLimits{MaxSeconds: 28800, IdleSeconds: 1800, PairSeconds: 300, DeviceSessions: 4},
 	}
@@ -134,12 +134,12 @@ func TestAnOlderServersConnectAnswersAreUnchanged(t *testing.T) {
 func TestADirectPeerStatusDecodes(t *testing.T) {
 	const status = `{"task":"tQSd9RCV","status":"COMPLETED","message":"Session ready","read_only":false,
 	  "transport":"direct-peer","connect_id":"eff97f3e3ad593d08e250b5a5e492449","session":"ready",
-	  "relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","derp_port":443,"stun_port":3478}}`
+	  "relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","relay_port":443,"stun_port":3478}}`
 	var polled ConnectStatusResponse
 	if err := json.Unmarshal([]byte(status), &polled); err != nil {
 		t.Fatal(err)
 	}
-	wantRelay := ConnectRelay{ID: "eu", Label: "Europe", Hostname: "relay-eu.example.net", DERPPort: 443, STUNPort: 3478}
+	wantRelay := ConnectRelay{ID: "eu", Label: "Europe", Hostname: "relay-eu.example.net", RelayPort: 443, STUNPort: 3478}
 	if polled.Transport != ConnectTransportDirectPeer || polled.ConnectID != "eff97f3e3ad593d08e250b5a5e492449" ||
 		polled.Session != ConnectSessionReady || polled.Relay == nil || *polled.Relay != wantRelay {
 		t.Errorf("decoded %+v", polled)
@@ -231,5 +231,39 @@ func TestACancelThatLeavesASessionClosing(t *testing.T) {
 	want := "Remote session closing: tQSd9RCV (the task stays COMPLETED). The relay no longer admits it and the device has been told to close (task c1o2s3e4)"
 	if got := r.Summary(); got != want {
 		t.Errorf("Summary = %q\nwant %q", got, want)
+	}
+}
+
+// The port is read from relay_port, or from derp_port when a server older
+// than the rename sends only that, and is always written as relay_port.
+func TestTheRelayPortKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       int
+	}{
+		{"relay_port", `{"id":"eu","hostname":"h","relay_port":443,"stun_port":3478}`, 443},
+		{"an older server's derp_port", `{"id":"eu","hostname":"h","derp_port":8443,"stun_port":3478}`, 8443},
+		{"both, relay_port first", `{"id":"eu","hostname":"h","relay_port":443,"derp_port":8443,"stun_port":3478}`, 443},
+		{"both, derp_port first", `{"id":"eu","hostname":"h","derp_port":8443,"relay_port":443,"stun_port":3478}`, 443},
+		{"neither", `{"id":"eu","hostname":"h","stun_port":3478}`, 0},
+	} {
+		var r ConnectRelay
+		if err := json.Unmarshal([]byte(tc.body), &r); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if r.RelayPort != tc.want || r.ID != "eu" || r.Hostname != "h" || r.STUNPort != 3478 {
+			t.Errorf("%s: decoded %+v, want port %d", tc.name, r, tc.want)
+		}
+	}
+	var r ConnectRelay
+	if err := json.Unmarshal([]byte(`{"id":"eu","hostname":"h","relay_port":"443"}`), &r); err == nil {
+		t.Error("a port that is not a number decoded")
+	}
+	out, err := json.Marshal(ConnectRelay{ID: "eu", Hostname: "h", RelayPort: 443, STUNPort: 3478})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"id":"eu","hostname":"h","relay_port":443,"stun_port":3478}` {
+		t.Errorf("encoded as %s", out)
 	}
 }

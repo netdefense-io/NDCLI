@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 // The transports a remote session can run on, as every request, answer and
 // setting names them.
 const (
@@ -76,11 +78,33 @@ func ConnectFallbackText(reason string) string {
 
 // ConnectRelay is a relay as the server describes it.
 type ConnectRelay struct {
-	ID       string `json:"id"`
-	Label    string `json:"label,omitempty"`
-	Hostname string `json:"hostname"`
-	DERPPort int    `json:"derp_port"`
-	STUNPort int    `json:"stun_port"`
+	ID        string `json:"id"`
+	Label     string `json:"label,omitempty"`
+	Hostname  string `json:"hostname"`
+	RelayPort int    `json:"relay_port"`
+	STUNPort  int    `json:"stun_port"`
+}
+
+// UnmarshalJSON reads the port from relay_port, or from derp_port when a
+// server older than the rename sends only that.
+func (r *ConnectRelay) UnmarshalJSON(b []byte) error {
+	type plain ConnectRelay
+	var v struct {
+		plain
+		RelayPort *int `json:"relay_port"`
+		DERPPort  *int `json:"derp_port"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*r = ConnectRelay(v.plain)
+	switch {
+	case v.RelayPort != nil:
+		r.RelayPort = *v.RelayPort
+	case v.DERPPort != nil:
+		r.RelayPort = *v.DERPPort
+	}
+	return nil
 }
 
 // ConnectInfoDevice is the device a session would reach: what the session's

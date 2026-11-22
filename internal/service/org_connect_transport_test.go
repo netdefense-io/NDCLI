@@ -11,7 +11,7 @@ import (
 )
 
 const connectTransportAnswer = `{"organization_name":"acme","connect_transport":"direct-peer","connect_relay":"eu",
-	"relays":[{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","derp_port":443,"stun_port":3478}],"direct_peer_available":true}`
+	"relays":[{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","relay_port":443,"stun_port":3478}],"direct_peer_available":true}`
 
 // connectTransportServer answers the setting's route and records the last
 // request's method and body.

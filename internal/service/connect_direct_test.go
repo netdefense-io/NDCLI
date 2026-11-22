@@ -31,7 +31,7 @@ const (
 
 	directInfoBody = `{"transport":"direct-peer","reason":"org_setting","org_transport":"direct-peer","read_only":false,
 		"device":{"uuid":"3f2b8c1e-6a4d-4e0b-9c57-d1a2b3c4e5f6","pubkey":"` + directDevicePubkey + `","agent_version":"1.32.0"},
-		"protocol":1,"relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","derp_port":443,"stun_port":3478},
+		"protocol":1,"relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","relay_port":443,"stun_port":3478},
 		"expires_at":1794700800,"limits":{"max_seconds":28800,"idle_seconds":1800,"pair_seconds":300,"device_sessions":4}}`
 	legacyInfoBody   = `{"transport":"relay-legacy","reason":"org_setting","org_transport":"relay-legacy","read_only":false,"device":{"uuid":"u","pubkey":"k","agent_version":null},"protocol":null,"relay":null,"expires_at":null,"limits":null}`
 	fallbackInfoBody = `{"transport":"relay-legacy","reason":"agent_too_old","org_transport":"direct-peer","read_only":false,"device":{"uuid":"u","pubkey":"k","agent_version":"1.20.0"},"protocol":null,"relay":null,"expires_at":null,"limits":null}`
@@ -246,6 +246,24 @@ func TestADirectPeerSessionIsOpenedAndHandedOver(t *testing.T) {
 	}
 }
 
+// A server older than the rename names the relay's port derp_port.
+func TestADirectPeerSessionReadsAnOlderServersRelayPort(t *testing.T) {
+	directFixture(t)
+	older := strings.Replace(directInfoBody, `"relay_port":443`, `"derp_port":443`, 1)
+	d := newDirectServer(t, map[string][]answer{
+		directInfoRoute:   ok(older),
+		directPostRoute:   {{status: http.StatusAccepted, raw: directAccepted}},
+		directStatusRoute: {{status: 200, raw: directReady}},
+	})
+	session, _, err := directConnect(t, d, DirectConnectOpts{})
+	if err != nil || session == nil {
+		t.Fatalf("got %v, %v", session, err)
+	}
+	if session.Session.RelayPort != 443 {
+		t.Errorf("relay port %d, want 443", session.Session.RelayPort)
+	}
+}
+
 func directWiped(s *pathfinder.DirectSession) bool {
 	var zero [32]byte
 	return s.ClientKey == zero && s.DeviceKey == zero && s.PresharedKey == zero
@@ -413,7 +431,7 @@ func TestNothingIsAskedOfTheDeviceWhenTheSessionCannotRun(t *testing.T) {
 	}{
 		{"the companion is missing", directInfoBody, DirectConnectOpts{}, missing, CodeAPIError},
 		{"a read-only session the caller cannot use", strings.Replace(directInfoBody, `"read_only":false`, `"read_only":true`, 1), DirectConnectOpts{RefuseReadOnly: true}, nil, CodeReadOnlySession},
-		{"no relay", strings.Replace(directInfoBody, `"relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","derp_port":443,"stun_port":3478}`, `"relay":null`, 1), DirectConnectOpts{}, nil, CodeAPIError},
+		{"no relay", strings.Replace(directInfoBody, `"relay":{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","relay_port":443,"stun_port":3478}`, `"relay":null`, 1), DirectConnectOpts{}, nil, CodeAPIError},
 		{"no expiry", strings.Replace(directInfoBody, `"expires_at":1794700800`, `"expires_at":null`, 1), DirectConnectOpts{}, nil, CodeAPIError},
 		{"no device key", strings.Replace(directInfoBody, directDevicePubkey, "", 1), DirectConnectOpts{}, nil, CodeAPIError},
 		{"a device key that is not one", strings.Replace(directInfoBody, directDevicePubkey, "AAAA", 1), DirectConnectOpts{}, nil, CodeAPIError},

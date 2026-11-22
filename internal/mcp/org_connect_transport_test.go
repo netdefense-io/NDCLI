@@ -23,7 +23,7 @@ func TestOrgConnectTransportTools(t *testing.T) {
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"organization_name":"acme","connect_transport":"direct-peer","connect_relay":"eu","relays":[{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","derp_port":443,"stun_port":3478}],"direct_peer_available":true}`)
+		_, _ = io.WriteString(w, `{"organization_name":"acme","connect_transport":"direct-peer","connect_relay":"eu","relays":[{"id":"eu","label":"Europe","hostname":"relay-eu.example.net","relay_port":443,"stun_port":3478}],"direct_peer_available":true}`)
 	}))
 	t.Cleanup(api.Close)
 	s := newStaticAuthTestServerWithAPI(t, api, "acme")
@@ -62,6 +62,14 @@ func TestOrgConnectTransportTools(t *testing.T) {
 		t.Fatalf("read: %+v", read)
 	}
 	hasKeys("read", read.Data, keys...)
+	relays, _ := read.Data.(map[string]interface{})["relays"].([]interface{})
+	if len(relays) != 1 {
+		t.Fatalf("relays: %v", read.Data)
+	}
+	relay, _ := relays[0].(map[string]interface{})
+	if relay["relay_port"] != float64(443) || relay["derp_port"] != nil {
+		t.Errorf("relay %v, want relay_port 443 and no derp_port", relay)
+	}
 
 	before := requests()
 	preview := callTool(t, cs, "ndcli.org.set_connect_transport", `{"transport":"direct-peer","relay":"eu"}`)
