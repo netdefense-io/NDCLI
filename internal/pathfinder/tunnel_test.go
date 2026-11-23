@@ -26,6 +26,10 @@ func TestTunnelDeliversTheWholeReplyBeforeClosing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
+		request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: localhost:%d\r\n\r\n", tunnel.Port())
+		if _, err := io.WriteString(conn, request); err != nil {
+			t.Fatalf("write request: %v", err)
+		}
 		waitForStream(t, mgr, id)
 		sent := sendFrames(mgr, id, 64)
 

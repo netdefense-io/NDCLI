@@ -1,11 +1,15 @@
 package pathfinder
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Tunnel listens on a local port and proxies connections to a remote service
@@ -132,41 +136,136 @@ func (t *Tunnel) handleConn(conn net.Conn) {
 	remoteAddr := conn.RemoteAddr().String()
 	debugLog("Tunnel: new connection from %s for service %q", remoteAddr, t.serviceName)
 
-	// Open a new stream to the remote service
-	stream, err := t.manager.OpenStream(t.serviceName)
-	if err != nil {
-		debugLog("Tunnel: failed to open stream for %s: %v", remoteAddr, err)
-		return
+	s := &tunnelConn{
+		tunnel:     t,
+		conn:       conn,
+		br:         bufio.NewReaderSize(conn, 32<<10),
+		remoteAddr: remoteAddr,
+		done:       make(chan struct{}),
 	}
-
-	debugLog("Tunnel: stream %d opened for connection from %s", stream.ID(), remoteAddr)
-
-	// Bidirectional copy between TCP connection and stream
-	done := make(chan struct{})
-	var closeOnce sync.Once
-	signalDone := func() {
-		closeOnce.Do(func() { close(done) })
-	}
-
-	// TCP → Stream
-	go func() {
-		n, err := io.Copy(stream, conn)
-		debugLog("Tunnel: TCP→Stream finished for %s: bytes=%d, err=%v", remoteAddr, n, err)
-		stream.Close() // Close stream to unblock the other direction
-		signalDone()
-	}()
-
-	// Stream → TCP
-	go func() {
-		n, err := io.Copy(conn, stream)
-		debugLog("Tunnel: Stream→TCP finished for %s: bytes=%d, err=%v", remoteAddr, n, err)
-		// Close TCP write side to signal EOF
-		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			tcpConn.CloseWrite()
-		}
-		signalDone()
-	}()
-
-	<-done
+	go s.forwardRequests()
+	<-s.done
 	debugLog("Tunnel: connection from %s closed", remoteAddr)
 }
+
+// tunnelConn is one browser connection. Each request is checked
+// (requestGate) before any of it reaches the device; the stream is opened by
+// the first request let through.
+type tunnelConn struct {
+	tunnel     *Tunnel
+	conn       net.Conn
+	br         *bufio.Reader
+	remoteAddr string
+
+	stream     *Stream
+	copierDone chan struct{}
+	refusing   atomic.Bool
+
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func (c *tunnelConn) finish() { c.closeOnce.Do(func() { close(c.done) }) }
+
+func (c *tunnelConn) forwardRequests() {
+	defer c.finish()
+	defer func() {
+		if c.stream != nil {
+			_ = c.stream.Close()
+		}
+	}()
+
+	gate := newRequestGate(c.tunnel.actualPort)
+	for {
+		head, err := readRequestHead(c.br)
+		if err == errHeadTooLarge {
+			c.refuse(&gateRefusal{status: http.StatusRequestHeaderFieldsTooLarge, body: "The request headers are too large."})
+			return
+		}
+		if err != nil {
+			debugLog("Tunnel: TCP→Stream finished for %s: %v", c.remoteAddr, err)
+			return
+		}
+		req, err := parseRequestHead(head)
+		if err != nil {
+			debugLog("Tunnel: unreadable request from %s: %v", c.remoteAddr, err)
+			c.refuse(&gateRefusal{status: http.StatusBadRequest, body: "The request could not be read."})
+			return
+		}
+		if refusal := gate.check(req); refusal != nil {
+			refusal.head = req.Method == http.MethodHead
+			debugLog("Tunnel: refused %d %s", refusal.status, describeRequest(req))
+			c.refuse(refusal)
+			return
+		}
+		debugLog("Tunnel: forwarding %s", describeRequest(req))
+
+		if c.stream == nil && !c.openStream() {
+			return
+		}
+		if _, err := c.stream.Write(head); err != nil {
+			return
+		}
+		if err := copyRequestBody(c.stream, c.br, req); err != nil {
+			debugLog("Tunnel: request body from %s: %v", c.remoteAddr, err)
+			return
+		}
+	}
+}
+
+func (c *tunnelConn) openStream() bool {
+	stream, err := c.tunnel.manager.OpenStream(c.tunnel.serviceName)
+	if err != nil {
+		debugLog("Tunnel: failed to open stream for %s: %v", c.remoteAddr, err)
+		c.refuse(&gateRefusal{status: http.StatusBadGateway, body: "The device session is not available."})
+		return false
+	}
+	debugLog("Tunnel: stream %d opened for connection from %s", stream.ID(), c.remoteAddr)
+	c.stream = stream
+	c.copierDone = make(chan struct{})
+	go c.copyReplies()
+	return true
+}
+
+// copyReplies hands the device's replies to the browser. A stream the tunnel
+// closed to refuse a request leaves the connection to refuse.
+func (c *tunnelConn) copyReplies() {
+	defer close(c.copierDone)
+	n, err := io.Copy(c.conn, c.stream)
+	debugLog("Tunnel: Stream→TCP finished for %s: bytes=%d, err=%v", c.remoteAddr, n, err)
+	if c.refusing.Load() {
+		return
+	}
+	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+		_ = tcpConn.CloseWrite()
+	}
+	c.finish()
+}
+
+// refuse answers a request the tunnel does not forward and ends the
+// connection. The stream is closed and the reply copier waited for first, so
+// the refusal is not written into a reply the copier is writing (a reply the
+// device had not finished is cut short); what the client still sends is read
+// for a moment, so that it reads the refusal rather than a reset.
+func (c *tunnelConn) refuse(r *gateRefusal) {
+	if c.stream != nil {
+		c.refusing.Store(true)
+		_ = c.conn.SetWriteDeadline(time.Now().Add(refusalDrain))
+		_ = c.stream.Close()
+		<-c.copierDone
+		_ = c.conn.SetWriteDeadline(time.Now().Add(refusalDrain))
+	}
+	if writeRefusal(c.conn, r) != nil {
+		return
+	}
+	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+		_ = tcpConn.CloseWrite()
+	}
+	_ = c.conn.SetReadDeadline(time.Now().Add(refusalDrain))
+	_, _ = io.CopyN(io.Discard, c.br, maxRefusalDrain)
+}
+
+const (
+	refusalDrain    = 2 * time.Second
+	maxRefusalDrain = 1 << 20
+)
