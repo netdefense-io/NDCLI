@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ func startGateTunnel(t *testing.T) *gateTunnel {
 	link := &captureLink{}
 	mgr := NewStreamManager(link)
 	tunnel := NewTunnel(0, "webadmin", mgr)
+	tunnel.secret = testSecret()
 	if err := tunnel.Start(); err != nil {
 		t.Fatalf("start tunnel: %v", err)
 	}
@@ -107,7 +109,13 @@ func readResponse(t *testing.T, br *bufio.Reader) (*http.Response, string) {
 }
 
 func get(host string, extra ...string) string {
-	return "GET /index.php HTTP/1.1\r\nHost: " + host + "\r\n" + strings.Join(extra, "") + "\r\n"
+	return "GET /index.php HTTP/1.1\r\nHost: " + host + "\r\n" + cookieLine(host) + strings.Join(extra, "") + "\r\n"
+}
+
+// cookieLine is the cookie the tunnel's link set, as the browser sends it.
+func cookieLine(host string) string {
+	_, port, _ := net.SplitHostPort(host)
+	return "Cookie: ndcli-tunnel-" + port + "=" + testCookie + "\r\n"
 }
 
 const okReply = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
@@ -166,7 +174,7 @@ func TestTunnelForwardsTheWebAdminsRequestsUnchanged(t *testing.T) {
 	br := bufio.NewReader(conn)
 
 	post := "POST /api/core/firmware/status HTTP/1.1\r\nHost: " + g.host() +
-		"\r\nOrigin: http://" + g.host() + "\r\nSec-Fetch-Site: same-origin\r\nCookie: PHPSESSID=x\r\nContent-Length: 11\r\n\r\n{\"a\":\"b c\"}"
+		"\r\nOrigin: http://" + g.host() + "\r\nSec-Fetch-Site: same-origin\r\nCookie: PHPSESSID=x; ndcli-tunnel-" + strconv.Itoa(g.tunnel.Port()) + "=" + testCookie + "\r\nContent-Length: 11\r\n\r\n{\"a\":\"b c\"}"
 	if _, err := io.WriteString(conn, post); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +211,10 @@ func TestTunnelAnswersAPageLoadFromElsewhereWithTheFrontPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
 		t.Fatalf("got %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
-	if !strings.Contains(body, `content="0; url=/"`) || !strings.Contains(body, `<a href="/">`) || strings.Contains(body, "diag_backup") {
+	if resp.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control %q, want no-store", resp.Header.Get("Cache-Control"))
+	}
+	if !strings.Contains(body, `content="0; url=/?"`) || !strings.Contains(body, `<a href="/">`) || strings.Contains(body, "diag_backup") {
 		t.Errorf("body %q, want it to move on to the front page only", body)
 	}
 	if n := len(g.frames(FrameTypeOpen)); n != 0 {
@@ -268,7 +279,7 @@ func TestTunnelFramesAChunkedBodyAsTheDeviceWill(t *testing.T) {
 	br := bufio.NewReader(conn)
 
 	hidden := "GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n"
-	head := "POST /upload HTTP/1.1\r\nHost: " + g.host() + "\r\nTransfer-Encoding: chunked\r\n\r\n"
+	head := "POST /upload HTTP/1.1\r\nHost: " + g.host() + "\r\n" + cookieLine(g.host()) + "Origin: http://" + g.host() + "\r\nTransfer-Encoding: chunked\r\n\r\n"
 	request := head + fmt.Sprintf("%x;ext=1\r\n%s\r\n0\r\nX-Trailer: 1\r\n\r\n", len(hidden), hidden)
 	if _, err := io.WriteString(conn, request+get("evil.example")); err != nil {
 		t.Fatal(err)
@@ -336,4 +347,136 @@ func TestTunnelStreamsALongPollReply(t *testing.T) {
 	if !bytes.Equal([]byte(g.sent()), []byte(request)) {
 		t.Errorf("the device was sent %q", g.sent())
 	}
+}
+
+// curl sends Expect: 100-continue with a larger body and waits for the
+// interim answer: the device's 100 reaches the client, and the body the device
+// after it.
+func TestTunnelCarriesExpectContinue(t *testing.T) {
+	g := startGateTunnel(t)
+	conn := g.dial(t)
+	br := bufio.NewReader(conn)
+
+	head := "POST /api/core/backup/upload HTTP/1.1\r\nHost: " + g.host() + "\r\n" + cookieLine(g.host()) + "Origin: http://" + g.host() +
+		"\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n"
+	if _, err := io.WriteString(conn, head); err != nil {
+		t.Fatal(err)
+	}
+	g.waitSent(t, head)
+	g.reply(1, "HTTP/1.1 100 Continue\r\n\r\n")
+	line, err := br.ReadString('\n')
+	if err != nil || line != "HTTP/1.1 100 Continue\r\n" {
+		t.Fatalf("interim answer %q, %v", line, err)
+	}
+	if blank, err := br.ReadString('\n'); err != nil || blank != "\r\n" {
+		t.Fatalf("after the interim answer %q, %v", blank, err)
+	}
+	if _, err := io.WriteString(conn, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	g.waitSent(t, head+"hello")
+	g.reply(1, okReply)
+	if resp, body := readResponse(t, br); resp.StatusCode != 200 || body != "ok" {
+		t.Fatalf("got %d %q", resp.StatusCode, body)
+	}
+}
+
+// A chunked body's trailer is dropped, and the next request of the
+// connection is read from where the body ended.
+func TestTunnelDropsATrailerAndReadsTheNextRequest(t *testing.T) {
+	g := startGateTunnel(t)
+	conn := g.dial(t)
+	br := bufio.NewReader(conn)
+
+	head := "POST /upload HTTP/1.1\r\nHost: " + g.host() + "\r\n" + cookieLine(g.host()) + "Origin: http://" + g.host() + "\r\nTransfer-Encoding: chunked\r\n\r\n"
+	next := get(g.host(), "Sec-Fetch-Site: same-origin\r\n")
+	if _, err := io.WriteString(conn, head+"3\r\nabc\r\n0\r\nX-Checksum: 1\r\nX-Other: 2\r\n\r\n"+next); err != nil {
+		t.Fatal(err)
+	}
+	g.waitSent(t, head+"3\r\nabc\r\n0\r\n\r\n"+next)
+	for range 2 {
+		g.reply(1, okReply)
+		if resp, _ := readResponse(t, br); resp.StatusCode != 200 {
+			t.Fatalf("got %d", resp.StatusCode)
+		}
+	}
+}
+
+// The tunnel answers the moving page's own move, should it arrive
+// cross-site, with a page that does not move on again.
+func TestTunnelDoesNotMoveOnTwice(t *testing.T) {
+	g := startGateTunnel(t)
+	conn := g.dial(t)
+	go func() {
+		_, _ = io.WriteString(conn, "GET "+rootTarget+" HTTP/1.1\r\nHost: "+g.host()+
+			"\r\nSec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n\r\n")
+	}()
+	resp, body := readResponse(t, bufio.NewReader(conn))
+	if resp.StatusCode != http.StatusOK || strings.Contains(body, "refresh") || !strings.Contains(body, `<a href="/">`) {
+		t.Fatalf("got %d %q, want a page that only links to the front page", resp.StatusCode, body)
+	}
+}
+
+// A refusal sent to a client that has stopped reading, while the device's
+// reply is still on its way, does not hold the connection: the tunnel lets go
+// of it within its write deadlines.
+func TestTunnelLetsGoOfAClientThatStopsReading(t *testing.T) {
+	g := startGateTunnel(t)
+	conn := g.dial(t)
+
+	first := get(g.host(), "Sec-Fetch-Site: same-origin\r\n")
+	if _, err := io.WriteString(conn, first); err != nil {
+		t.Fatal(err)
+	}
+	g.waitSent(t, first)
+	chunk := strings.Repeat("x", maxStreamFrameData)
+	g.reply(1, fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", 512*len(chunk)))
+	for range 512 {
+		g.reply(1, chunk)
+	}
+	if _, err := io.WriteString(conn, get(g.host(), "Sec-Fetch-Site: cross-site\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(4*refusalDrain + 2*time.Second)
+	for {
+		g.tunnel.connsMu.Lock()
+		open := len(g.tunnel.conns)
+		g.tunnel.connsMu.Unlock()
+		if open == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the tunnel still holds the connection after %v", 4*refusalDrain+2*time.Second)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The link is answered by the tunnel, never the device, and leaves the token
+// out of every later request: the browser comes back to "/?" with the cookie.
+func TestTunnelExchangesTheLinkWithoutTheDevice(t *testing.T) {
+	g := startGateTunnel(t)
+	conn := g.dial(t)
+	go func() {
+		_, _ = io.WriteString(conn, "GET /?ndcli="+testToken+" HTTP/1.1\r\nHost: "+g.host()+"\r\nSec-Fetch-Site: none\r\n\r\n")
+	}()
+	resp, body := readResponse(t, bufio.NewReader(conn))
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `url=/?"`) {
+		t.Fatalf("got %d %q, want the moving page", resp.StatusCode, body)
+	}
+	cookies := resp.Cookies()
+	if len(cookies) != 1 || cookies[0].Value != testCookie || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookies %+v", cookies)
+	}
+	if n := len(g.frames(FrameTypeOpen)); n != 0 {
+		t.Errorf("%d streams opened, want none", n)
+	}
+
+	next := g.dial(t)
+	move := "GET /? HTTP/1.1\r\nHost: " + g.host() + "\r\n" + cookieLine(g.host()) + "Sec-Fetch-Site: same-origin\r\n\r\n"
+	if _, err := io.WriteString(next, move); err != nil {
+		t.Fatal(err)
+	}
+	g.waitSent(t, move)
 }

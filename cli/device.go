@@ -100,7 +100,19 @@ The WebAdmin tunnel remains active after the shell exits until you press
 Ctrl-C at the keep-alive prompt (or run with --webadmin-only to skip the
 shell entirely). If stdin or stdout is not a terminal, as in a script or
 under nohup, the shell is skipped; if stdout is not one, the tunnel's URL is
-printed on stderr.`,
+printed on stderr.
+
+The tunnel's URL carries a one-time token: the first browser to open it gets
+a cookie for this session, and the tunnel answers only requests that carry
+it. Open the URL in the browser you will use; a second browser, or the same
+one after its cookies are cleared, needs a new 'ndcli device connect'. A
+script does the same with a cookie jar, which spends the token. The jar
+then holds the session's credential: keep it private (mktemp makes it 0600).
+
+  jar=$(mktemp)
+  curl -sc "$jar" "$URL" >/dev/null
+  curl -sb "$jar" http://127.0.0.1:<port>/
+  rm -f "$jar"`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeDevices,
 	RunE:              runDeviceConnect,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -883,6 +884,8 @@ func TestAnInteractiveDirectSessionServesTheTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	link := make(linkWriter, 1)
+	c.linkOut = link
 	finished := make(chan error, 1)
 	go func() { finished <- c.ConnectContext(t.Context()) }()
 
@@ -893,7 +896,21 @@ func TestAnInteractiveDirectSessionServesTheTunnel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the session did not pair")
 	}
-	resp, err := http.Get("http://" + listener.Addr().String() + "/")
+	// As a script does: the printed link with a cookie jar, then the page.
+	jar, _ := cookiejar.New(nil)
+	browser := &http.Client{Jar: jar}
+	var addr string
+	select {
+	case addr = <-link:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no tunnel link on stderr")
+	}
+	exchange, err := browser.Get(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = exchange.Body.Close()
+	resp, err := browser.Get(strings.Split(addr, "?")[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,4 +1034,17 @@ func TestTheSessionsKeysAreClearedOnceTheCompanionHasThem(t *testing.T) {
 	if stdout, _, _, _, err := h.Exec(t.Context(), "uname -a", time.Minute); err != nil || stdout != "ran: uname -a" {
 		t.Errorf("the session does not work: %q, %v", stdout, err)
 	}
+}
+
+// linkWriter hands on the tunnel link a session prints, as a script reads it.
+type linkWriter chan string
+
+func (w linkWriter) Write(p []byte) (int, error) {
+	if u, ok := strings.CutPrefix(strings.TrimSpace(string(p)), "WebAdmin tunnel: "); ok {
+		select {
+		case w <- u:
+		default:
+		}
+	}
+	return len(p), nil
 }

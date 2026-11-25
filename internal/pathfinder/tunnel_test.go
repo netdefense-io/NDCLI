@@ -16,6 +16,7 @@ import (
 func TestTunnelDeliversTheWholeReplyBeforeClosing(t *testing.T) {
 	mgr := NewStreamManager(newPairedRelay())
 	tunnel := NewTunnel(0, "webadmin", mgr)
+	tunnel.secret = testSecret()
 	if err := tunnel.Start(); err != nil {
 		t.Fatalf("start tunnel: %v", err)
 	}
@@ -26,7 +27,7 @@ func TestTunnelDeliversTheWholeReplyBeforeClosing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
-		request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: localhost:%d\r\n\r\n", tunnel.Port())
+		request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: localhost:%d\r\nCookie: ndcli-tunnel-%d=%s\r\n\r\n", tunnel.Port(), tunnel.Port(), testCookie)
 		if _, err := io.WriteString(conn, request); err != nil {
 			t.Fatalf("write request: %v", err)
 		}

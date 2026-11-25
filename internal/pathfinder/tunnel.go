@@ -22,6 +22,7 @@ type Tunnel struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	actualPort  int
+	secret      *tunnelSecret
 
 	// Track active connections for cleanup
 	connsMu sync.Mutex
@@ -37,6 +38,7 @@ func NewTunnel(localPort int, serviceName string, manager *StreamManager) *Tunne
 		manager:     manager,
 		ctx:         ctx,
 		cancel:      cancel,
+		secret:      newTunnelSecret(),
 		conns:       make(map[net.Conn]struct{}),
 	}
 }
@@ -77,6 +79,15 @@ func (t *Tunnel) Start() error {
 // Port returns the actual port the tunnel is listening on
 func (t *Tunnel) Port() int {
 	return t.actualPort
+}
+
+// URL is the link that opens the WebAdmin through the tunnel. It names the
+// address the tunnel listens on: localhost may resolve to ::1 first, where
+// another local user can listen on the same port and take the link. It carries a
+// token that the first browser to open it exchanges for a cookie; a script
+// does the same with a cookie jar.
+func (t *Tunnel) URL() string {
+	return fmt.Sprintf("http://127.0.0.1:%d/?%s=%s", t.actualPort, tokenParam, t.secret.token)
 }
 
 // Stop gracefully shuts down the tunnel
@@ -175,7 +186,7 @@ func (c *tunnelConn) forwardRequests() {
 		}
 	}()
 
-	gate := newRequestGate(c.tunnel.actualPort)
+	gate := newRequestGate(c.tunnel.actualPort, c.tunnel.secret)
 	for {
 		head, err := readRequestHead(c.br)
 		if err == errHeadTooLarge {

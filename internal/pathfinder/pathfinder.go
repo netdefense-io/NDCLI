@@ -80,6 +80,7 @@ type Client struct {
 	webAdminPort    int
 	webAdminLn      net.Listener
 	webAdminOnly    bool
+	linkOut         io.Writer // where a session without a terminal prints the tunnel link; nil is os.Stderr
 	onProgress      ProgressCallback
 	onPaired        func()
 	direct          *DirectSession
@@ -402,7 +403,7 @@ func (c *Client) ConnectContext(ctx context.Context) error {
 		}
 		if tunnel != nil {
 			defer func() { _ = tunnel.Stop() }()
-			webAdminURL = "http://localhost:" + itoa(tunnel.Port())
+			webAdminURL = tunnel.URL()
 		}
 	}
 
@@ -410,7 +411,11 @@ func (c *Client) ConnectContext(ctx context.Context) error {
 	// active — so the user knows where to connect before interacting with the
 	// shell. The keep-alive wait below repeats only a short reminder.
 	if webAdminURL != "" {
-		c.announceWebAdmin(os.Stderr, webAdminURL)
+		out := c.linkOut
+		if out == nil {
+			out = os.Stderr
+		}
+		c.announceWebAdmin(out, webAdminURL)
 	}
 
 	tryShell := c.shellWanted()
@@ -562,22 +567,6 @@ func (c *Client) reportEnd(relay link) {
 		c.endReported = true
 		fmt.Fprintf(os.Stderr, "\nSession ended: %s\n", reason)
 	}
-}
-
-// itoa converts an integer to a string without importing strconv
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	if i < 0 {
-		return "-" + itoa(-i)
-	}
-	digits := ""
-	for i > 0 {
-		digits = string(rune('0'+i%10)) + digits
-		i /= 10
-	}
-	return digits
 }
 
 // buildWebSocketURL constructs the WebSocket URL from the configured host
