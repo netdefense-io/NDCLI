@@ -44,8 +44,8 @@ type scenario struct {
 	EndAfterMS int    `json:"end_after_ms"`
 	// LastWords is sent on the exec stream right before a peer_closed end.
 	LastWords string `json:"last_words"`
-	// FrameBytes, when set, sends one data frame of that many bytes on
-	// stream 7 once connected.
+	// FrameBytes, when set, answers the first stream the parent opens with
+	// one data frame of that many bytes, after its ACK.
 	FrameBytes int `json:"frame_bytes"`
 	// Deaf stops reading stdin after the configuration, so frames pile up.
 	Deaf bool `json:"deaf"`
@@ -164,9 +164,6 @@ func main() {
 	for _, path := range sc.Paths {
 		emit(event{Event: "path", Path: path})
 	}
-	if sc.FrameBytes > 0 {
-		sendFrame(frameData, 7, make([]byte, sc.FrameBytes))
-	}
 
 	if sc.KeepAliveMS > 0 {
 		go func() {
@@ -185,7 +182,7 @@ func main() {
 			// Take nothing from the pipe, until the parent kills this process.
 			time.Sleep(time.Hour)
 		}
-		device(in, execStream)
+		device(in, execStream, sc.FrameBytes)
 		record("stdin-closed", "during the session")
 	}()
 
@@ -220,7 +217,7 @@ func main() {
 
 // device answers the stream protocol: it acknowledges every stream, runs
 // "commands" on an exec stream and serves one canned reply on a webadmin one.
-func device(in *bufio.Reader, execStream chan<- uint32) {
+func device(in *bufio.Reader, execStream chan<- uint32, frameBytes int) {
 	services := map[uint32]string{}
 	var frames strings.Builder
 	for {
@@ -247,6 +244,10 @@ func device(in *bufio.Reader, execStream chan<- uint32) {
 				}
 			}
 			sendFrame(frameAck, stream, nil)
+			if frameBytes > 0 {
+				sendFrame(frameData, stream, make([]byte, frameBytes))
+				frameBytes = 0
+			}
 		case frameData:
 			switch services[stream] {
 			case "exec":

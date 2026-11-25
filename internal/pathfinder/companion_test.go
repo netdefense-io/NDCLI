@@ -798,7 +798,10 @@ func TestDataWaitsForRoomAndControlFramesDoNot(t *testing.T) {
 func TestAFrameTooLargeToBeOneEndsTheSession(t *testing.T) {
 	quickCompanionWaits(t)
 	installCompanion(t, scenario{"frame_bytes": maxStreamFrameData + 1})
-	ln, _ := openDirectLink(t, directSession())
+	ln, mgr := openDirectLink(t, directSession())
+	if _, err := mgr.OpenStream("webadmin"); err != nil {
+		t.Fatal(err)
+	}
 	waitEnded(t, ln)
 	if got := ln.EndReason(); got != "the session's data could not be read" {
 		t.Errorf("reason = %q", got)
@@ -817,11 +820,19 @@ func TestTheLargestFrameIsDelivered(t *testing.T) {
 	t.Cleanup(func() { _ = ln.Close() })
 	got := make(chan []byte, 1)
 	ln.OnFrame(func(frame []byte) {
+		if frame[0] == FrameTypeAck {
+			return
+		}
 		select {
 		case got <- frame:
 		default:
 		}
 	})
+	// The device answers a stream this end opened, as a real one does: a frame
+	// sent before the handler was set would be dropped.
+	if err := ln.SendFrame(EncodeFrame(&Frame{Type: FrameTypeOpen, StreamID: 7, Data: []byte("webadmin")})); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case frame := <-got:
 		if len(frame) != frameHeaderLen+maxStreamFrameData || frame[0] != FrameTypeData {

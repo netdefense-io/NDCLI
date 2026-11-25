@@ -178,12 +178,24 @@ type tunnelConn struct {
 
 func (c *tunnelConn) finish() { c.closeOnce.Do(func() { close(c.done) }) }
 
+// forwardRequests ends the connection, and only after the copier has handed
+// on what the device sent: a device that answers and closes before the request
+// is all sent (a refused upload) fails the request's write, and its answer
+// must still arrive. Meanwhile what the client still sends is read and
+// discarded, so a client that sends its whole request before it reads lets
+// the copier write, and reads the answer rather than a reset. The read ends
+// at the client's end or at the deadline copyReplies sets once the answer is
+// written.
 func (c *tunnelConn) forwardRequests() {
-	defer c.finish()
 	defer func() {
 		if c.stream != nil {
 			_ = c.stream.Close()
+			if !c.refusing.Load() {
+				_, _ = io.Copy(io.Discard, c.br)
+			}
+			<-c.copierDone
 		}
+		c.finish()
 	}()
 
 	gate := newRequestGate(c.tunnel.actualPort, c.tunnel.secret)
@@ -238,8 +250,10 @@ func (c *tunnelConn) openStream() bool {
 	return true
 }
 
-// copyReplies hands the device's replies to the browser. A stream the tunnel
-// closed to refuse a request leaves the connection to refuse.
+// copyReplies hands the device's replies to the browser and half-closes the
+// connection when the stream ends. The deadline bounds how long
+// forwardRequests goes on reading what the client sends after that. A stream
+// the tunnel closed to refuse a request leaves the connection to refuse.
 func (c *tunnelConn) copyReplies() {
 	defer close(c.copierDone)
 	n, err := io.Copy(c.conn, c.stream)
@@ -250,7 +264,7 @@ func (c *tunnelConn) copyReplies() {
 	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
 		_ = tcpConn.CloseWrite()
 	}
-	c.finish()
+	_ = c.conn.SetReadDeadline(time.Now().Add(refusalDrain))
 }
 
 // refuse answers a request the tunnel does not forward and ends the
